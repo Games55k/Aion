@@ -1,0 +1,593 @@
+package frontend
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"aion/backend/model"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/lobehub/lobe-mygo/pkg/action"
+	"github.com/lobehub/lobe-mygo/pkg/display"
+	"github.com/lobehub/lobe-mygo/pkg/feedback"
+	"github.com/lobehub/lobe-mygo/pkg/field"
+	"github.com/lobehub/lobe-mygo/pkg/lucide"
+	"github.com/lobehub/lobe-mygo/pkg/overlay"
+	"github.com/lobehub/lobe-mygo/pkg/theme"
+)
+
+type boardColumnSpec struct {
+	Status model.Status
+	Title  string
+	Dot    ui.Color
+	Tag    display.TagColor
+}
+
+func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
+	proj := w.ActiveProject()
+	if proj == nil {
+		ui.Column(c).Fill().Center().Padding(32).Children(func() {
+			display.Empty(c, display.EmptyProps{
+				Icon:        lucide.FolderKanban(),
+				Title:       "未选择项目",
+				Description: "请从左侧导航选择一个项目，或创建一个新项目开始管理看板任务。",
+				Action: func() {
+					if action.Button(c, "新建项目", action.ButtonProps{Variant: action.Primary}).Clicked() {
+						w.OpenCreateProjectModal()
+					}
+				},
+			})
+		})
+		return
+	}
+	p := *proj
+
+	ui.Column(c).Fill().Children(func() {
+		// 1. Project Header Bar
+		ui.Row(c).Padding(16, 20, 12, 20).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+				ui.Box(c).Size(38, 38).Radius(tk.BorderRadius).Background(tk.FillTertiary).Center().Shrink(0).Children(func() {
+					ui.Icon(c, ProjectIconSVG(p.Icon)).FontSize(20).TextColor(tk.Primary)
+				})
+				ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, p.Name).FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+						if p.Archived {
+							display.Tag(c, "已归档项目", display.TagProps{
+								Size:    theme.Small,
+								Variant: display.TagFilled,
+								Color:   display.TagOrange,
+							})
+						}
+					})
+					desc := strings.TrimSpace(p.Description)
+					if desc == "" {
+						desc = "暂无项目简介"
+					}
+					ui.Text(c, desc).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+				})
+			})
+
+			// Header Action Buttons
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				if action.Button(c, "编辑项目", action.ButtonProps{
+					Variant: action.Default,
+					Size:    theme.Small,
+				}).Clicked() {
+					w.OpenEditProjectModal(p)
+				}
+				if p.Archived {
+					if action.Button(c, "恢复归档", action.ButtonProps{
+						Variant: action.Default,
+						Size:    theme.Small,
+					}).Clicked() {
+						w.UnarchiveProject(p.ID)
+					}
+				} else {
+					if action.Button(c, "归档项目", action.ButtonProps{
+						Variant: action.Default,
+						Size:    theme.Small,
+					}).Clicked() {
+						w.ArchiveProject(p.ID)
+					}
+				}
+				if action.Button(c, "删除项目", action.ButtonProps{
+					Variant: action.Text,
+					Size:    theme.Small,
+				}).Clicked() {
+					w.SoftDeleteProject(p.ID)
+				}
+				if action.Button(c, "+ 新建任务", action.ButtonProps{
+					Variant: action.Primary,
+					Size:    theme.Middle,
+				}).Clicked() {
+					w.OpenCreateTaskModal(model.Planned)
+				}
+			})
+		})
+
+		// 2. Search & Filter Bar
+		ui.Column(c).Padding(10, 20).Gap(8).AlignSelf(ui.Stretch).Background(tk.BgContainer).
+			BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+				// Search Input
+				ui.Box(c).Width(240).Children(func() {
+					beforeQ := w.searchQuery
+					field.SearchBar(c, &w.searchQuery, field.SearchBarProps{
+						Placeholder: "搜索任务标题、描述或标签...",
+						ShortKey:    "mod+k",
+						Size:        theme.Small,
+					}).Label("搜索任务")
+					if w.searchQuery != beforeQ {
+						w.ReloadBoardTasks()
+					}
+				})
+
+				// Priority Filter Select
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "优先级:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+					ui.Box(c).Width(120).Children(func() {
+						beforeP := w.priorityFilter
+						field.Select(c.Key("priority-filter"), &w.priorityFilter, field.SelectProps{
+							Placeholder: "全部优先级",
+							Size:        theme.Small,
+							Options: []field.SelectOption{
+								{Value: "", Label: "全部优先级"},
+								{Value: string(model.Urgent), Label: "紧急"},
+								{Value: string(model.High), Label: "高"},
+								{Value: string(model.Medium), Label: "中"},
+								{Value: string(model.Low), Label: "低"},
+								{Value: string(model.NoPriority), Label: "无优先级"},
+							},
+						}).Label("按优先级筛选")
+						if w.priorityFilter != beforeP {
+							w.ReloadBoardTasks()
+						}
+					})
+				})
+
+				// Tag Filter Pills
+				if len(w.allBoardTags) > 0 {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Wrap().Grow(1).MinWidth(0).Children(func() {
+						ui.Text(c, "标签:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+						for _, tag := range w.allBoardTags {
+							tag := tag
+							active := slices.Contains(w.tagFilters, tag)
+							pill := ui.ButtonBase(c.Key("filter-tag-" + tag)).Height(22).PaddingX(8).Radius(11).
+								FontSize(12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+							if active {
+								pill.Background(tk.Primary).TextColor(tk.BgLayout).FontWeight(600)
+							} else {
+								pill.Background(tk.FillTertiary).TextColor(tk.TextSecondary)
+							}
+							pill.Label("筛选标签 " + tag)
+							pill.Children(func() {
+								ui.Text(c, "#"+tag).SingleLine()
+							})
+							if pill.Clicked() {
+								w.ToggleTagFilter(tag)
+							}
+						}
+					})
+				} else {
+					ui.Box(c).Grow(1)
+				}
+
+				// Clear Filters & Task Count Summary
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+					if w.HasBoardFilters() {
+						ui.Text(c, fmt.Sprintf("匹配 %d / %d 项", len(w.filteredTasks), len(w.boardTasks))).
+							FontSize(12).TextColor(tk.Primary).SingleLine()
+						if action.Button(c, "清除筛选", action.ButtonProps{
+							Variant: action.Default,
+							Size:    theme.Small,
+						}).Clicked() {
+							w.ClearBoardFilters()
+						}
+					} else {
+						ui.Text(c, fmt.Sprintf("共 %d 项任务", len(w.boardTasks))).
+							FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+					}
+				})
+			})
+		})
+
+		// 3. Three-Column Kanban Area
+		columns := []boardColumnSpec{
+			{Status: model.Planned, Title: "计划", Dot: tk.Blue, Tag: display.TagBlue},
+			{Status: model.InProgress, Title: "进行中", Dot: tk.Orange, Tag: display.TagOrange},
+			{Status: model.Done, Title: "已完成", Dot: tk.Green, Tag: display.TagGreen},
+		}
+
+		ui.Row(c).Grow(1).Basis(0).MinWidth(0).Padding(16, 20).Gap(16).AlignItems(ui.Stretch).
+			AlignSelf(ui.Stretch).Children(func() {
+			for _, col := range columns {
+				w.renderBoardColumn(c.Key(string(col.Status)), tk, col)
+			}
+		})
+	})
+}
+
+func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col boardColumnSpec) {
+	tasks := w.TasksInColumn(col.Status)
+
+	colBox := ui.Column(c).Grow(1).Basis(0).MinWidth(180).AlignSelf(ui.Stretch).
+		Radius(tk.BorderRadiusLG).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+		Label("看板列 " + col.Title)
+
+	// Highlight column when a task card is dragged over it
+	if _, over := ui.DragOver[DragTaskPayload](colBox); over {
+		colBox.Border(2, tk.Primary).Background(tk.PrimaryFillQuaternary)
+	}
+	if payload, dropped := ui.Drop[DragTaskPayload](colBox); dropped {
+		w.MoveTaskToColumn(payload.TaskID, col.Status, -1)
+	}
+
+	colBox.Children(func() {
+		// Column Header
+		ui.Row(c).Padding(12, 14, 10, 14).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+			AlignSelf(ui.Stretch).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(8, 8).Radius(4).Background(col.Dot)
+				ui.Text(c, col.Title).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
+				display.Tag(c, fmt.Sprint(len(tasks)), display.TagProps{
+					Size:    theme.Small,
+					Variant: display.TagFilled,
+					Color:   col.Tag,
+					Round:   true,
+				})
+			})
+
+			if action.ActionIcon(c, lucide.Plus(), action.ActionIconProps{
+				Size:  theme.Small,
+				Title: "在" + col.Title + "中新建任务",
+			}).Clicked() {
+				w.OpenCreateTaskModal(col.Status)
+			}
+		})
+
+		// Column Task Cards List
+		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c).Padding(10).Gap(10).AlignSelf(ui.Stretch).Children(func() {
+				if len(tasks) == 0 {
+					emptyHint := "暂无" + col.Title + "任务"
+					if w.HasBoardFilters() {
+						emptyHint = "无匹配的" + col.Title + "任务"
+					}
+					ui.Column(c).Padding(28, 12).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, emptyHint).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Text(c, "可拖拽任务至此列，或在下方快速添加").FontSize(11).TextColor(tk.TextQuaternary)
+					})
+				} else {
+					for idx, task := range tasks {
+						w.renderTaskCard(c.Key(task.ID), tk, task, idx, len(tasks))
+					}
+				}
+			})
+		})
+
+		// Column Bottom Quick Add Input
+		ui.Row(c).Padding(8, 10).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).
+			BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			quickVal := w.quickTaskTitles[col.Status]
+			inp := field.Input(c.Key("quick-input-"+string(col.Status)), &quickVal, field.InputProps{
+				Placeholder: "+ 快速添加" + col.Title + "任务...",
+				Size:        theme.Small,
+				Variant:     field.InputFilled,
+			}).Label("快速添加" + col.Title + "任务")
+			w.quickTaskTitles[col.Status] = quickVal
+
+			if inp.Submitted() && strings.TrimSpace(quickVal) != "" {
+				_, _ = w.QuickCreateTask(col.Status, quickVal)
+			}
+			if strings.TrimSpace(quickVal) != "" {
+				if action.Button(c.Key("quick-btn-"+string(col.Status)), "添加", action.ButtonProps{
+					Variant: action.Primary,
+					Size:    theme.Small,
+				}).Label("确认添加" + col.Title + "任务").Clicked() {
+					_, _ = w.QuickCreateTask(col.Status, quickVal)
+				}
+			}
+		})
+	})
+}
+
+func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task, indexInCol, colCount int) {
+	selected := w.selectedTaskID == t.ID
+
+	card := ui.Column(c).Padding(12).Gap(8).Radius(tk.BorderRadius).
+		Background(tk.BgContainer).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
+		Label("任务卡片 " + t.Title).
+		Drag(DragTaskPayload{TaskID: t.ID, FromStatus: t.Status})
+
+	if selected {
+		card.Border(2, tk.Primary)
+	} else if card.Hovered() {
+		card.Border(1, tk.PrimaryHover)
+	} else {
+		card.Border(1, tk.BorderSecondary)
+	}
+
+	// Highlight and handle dropping another task card onto this card
+	if dragged, over := ui.DragOver[DragTaskPayload](card); over && dragged.TaskID != t.ID {
+		card.Border(2, tk.Primary).Background(tk.PrimaryFillQuaternary)
+	}
+	if dragged, dropped := ui.Drop[DragTaskPayload](card); dropped && dragged.TaskID != t.ID {
+		_, py, _ := card.PointerPosition()
+		bounds := card.Bounds()
+		placeAfter := py > bounds.Y+bounds.H/2
+		w.MoveOrReorderTaskOnto(dragged.TaskID, t.ID, placeAfter)
+	}
+
+	// Context menu for right-click / keyboard menu key
+	menuChoice := overlay.ContextMenu(c, card, overlay.DropdownMenuProps{
+		Items: []overlay.MenuItem{
+			{Key: "open", Label: "打开任务详情", Icon: lucide.PanelRightOpen()},
+			{Divider: true},
+			{Key: "move:planned", Label: "移至 计划", Icon: lucide.CircleDashed(), Disabled: t.Status == model.Planned},
+			{Key: "move:in_progress", Label: "移至 进行中", Icon: lucide.Timer(), Disabled: t.Status == model.InProgress},
+			{Key: "move:done", Label: "移至 已完成", Icon: lucide.CircleCheck(), Disabled: t.Status == model.Done},
+			{Divider: true},
+			{Key: "step:up", Label: "在列内上移", Icon: lucide.ArrowUp(), Disabled: indexInCol <= 0},
+			{Key: "step:down", Label: "在列内下移", Icon: lucide.ArrowDown(), Disabled: indexInCol >= colCount-1},
+			{Divider: true},
+			{Key: "delete", Label: "移入回收站", Icon: lucide.Trash2(), Danger: true},
+		},
+	})
+	switch menuChoice {
+	case "open":
+		w.SelectTask(t.ID)
+	case "move:planned":
+		w.MoveTaskToColumn(t.ID, model.Planned, -1)
+	case "move:in_progress":
+		w.MoveTaskToColumn(t.ID, model.InProgress, -1)
+	case "move:done":
+		w.MoveTaskToColumn(t.ID, model.Done, -1)
+	case "step:up":
+		w.StepTaskInColumn(t.ID, t.Status, -1)
+	case "step:down":
+		w.StepTaskInColumn(t.ID, t.Status, 1)
+	case "delete":
+		w.SoftDeleteTask(t.ID)
+	}
+
+	actionClicked := false
+	card.Children(func() {
+		// Title Row
+		ui.Row(c).Gap(8).AlignItems(ui.Start).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			titleText := ui.Text(c, t.Title).FontSize(14).FontWeight(600).TextColor(tk.Text).Grow(1)
+			if t.Status == model.Done {
+				titleText.TextColor(tk.TextSecondary)
+			}
+		})
+
+		// Priority & Category Tags Row
+		ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+			pLabel, pColor := priorityBadgeSpec(t.Priority)
+			display.Tag(c, pLabel, display.TagProps{
+				Size:    theme.Small,
+				Variant: display.TagFilled,
+				Color:   pColor,
+			})
+
+			for _, tag := range t.Tags {
+				display.Tag(c.Key("tag-"+tag), "#"+tag, display.TagProps{
+					Size:    theme.Small,
+					Variant: display.TagOutlined,
+				})
+			}
+		})
+
+		// Metadata Summary Row: DueDate, Subtask Progress, Attachment Count
+		hasDue := strings.TrimSpace(t.DueDate) != ""
+		hasSubtasks := len(t.Subtasks) > 0
+		atts := w.taskAttachments[t.ID]
+		hasAttachments := len(atts) > 0
+
+		if hasDue || hasSubtasks || hasAttachments {
+			ui.Row(c).Gap(12).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).
+				Padding(4, 0, 0, 0).Children(func() {
+				if hasDue {
+					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, lucide.Calendar()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Text(c, strings.TrimSpace(t.DueDate)).FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
+					})
+				}
+				if hasSubtasks {
+					doneCount := 0
+					for _, st := range t.Subtasks {
+						if st.Done {
+							doneCount++
+						}
+					}
+					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, lucide.SquareCheckBig()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Text(c, fmt.Sprintf("%d/%d", doneCount, len(t.Subtasks))).
+							FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
+					})
+				}
+				if hasAttachments {
+					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, lucide.Paperclip()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Text(c, fmt.Sprint(len(atts))).
+							FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
+					})
+				}
+			})
+		}
+
+		// Quick Move & Reorder Bar
+		ui.Row(c).Padding(6, 0, 0, 0).Gap(4).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+			AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.FillTertiary).Children(func() {
+			// Move across columns
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				if t.Status != model.Planned {
+					btn := ui.ButtonBase(c.Key("to-planned")).Height(20).PaddingX(6).Radius(4).
+						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
+						Cursor(ui.CursorPointer).Label("移至计划 " + t.Title)
+					btn.Children(func() { ui.Text(c, "→ 计划").SingleLine() })
+					if btn.Clicked() {
+						actionClicked = true
+						w.MoveTaskToColumn(t.ID, model.Planned, -1)
+					}
+				}
+				if t.Status != model.InProgress {
+					btn := ui.ButtonBase(c.Key("to-progress")).Height(20).PaddingX(6).Radius(4).
+						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
+						Cursor(ui.CursorPointer).Label("移至进行中 " + t.Title)
+					btn.Children(func() { ui.Text(c, "→ 进行中").SingleLine() })
+					if btn.Clicked() {
+						actionClicked = true
+						w.MoveTaskToColumn(t.ID, model.InProgress, -1)
+					}
+				}
+				if t.Status != model.Done {
+					btn := ui.ButtonBase(c.Key("to-done")).Height(20).PaddingX(6).Radius(4).
+						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
+						Cursor(ui.CursorPointer).Label("移至已完成 " + t.Title)
+					btn.Children(func() { ui.Text(c, "→ 已完成").SingleLine() })
+					if btn.Clicked() {
+						actionClicked = true
+						w.MoveTaskToColumn(t.ID, model.Done, -1)
+					}
+				}
+			})
+
+			// Reorder up/down within column
+			ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+				if indexInCol > 0 {
+					upBtn := ui.ButtonBase(c.Key("up")).Size(20, 20).Radius(4).Center().
+						Background(tk.FillQuaternary).TextColor(tk.TextTertiary).
+						Cursor(ui.CursorPointer).Label("上移 " + t.Title)
+					upBtn.Children(func() { ui.Icon(c, lucide.ChevronUp()).FontSize(12) })
+					if upBtn.Clicked() {
+						actionClicked = true
+						w.StepTaskInColumn(t.ID, t.Status, -1)
+					}
+				}
+				if indexInCol < colCount-1 {
+					downBtn := ui.ButtonBase(c.Key("down")).Size(20, 20).Radius(4).Center().
+						Background(tk.FillQuaternary).TextColor(tk.TextTertiary).
+						Cursor(ui.CursorPointer).Label("下移 " + t.Title)
+					downBtn.Children(func() { ui.Icon(c, lucide.ChevronDown()).FontSize(12) })
+					if downBtn.Clicked() {
+						actionClicked = true
+						w.StepTaskInColumn(t.ID, t.Status, 1)
+					}
+				}
+			})
+		})
+	})
+
+	if card.Clicked() && !actionClicked {
+		w.SelectTask(t.ID)
+	}
+}
+
+func priorityBadgeSpec(p model.Priority) (string, display.TagColor) {
+	switch p {
+	case model.Urgent:
+		return "紧急", display.TagRed
+	case model.High:
+		return "高", display.TagOrange
+	case model.Medium:
+		return "中", display.TagBlue
+	case model.Low:
+		return "低", display.TagCyan
+	default:
+		return "无优先级", display.TagGray
+	}
+}
+
+func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
+	if feedback.Modal(c, &w.taskModalOpen, feedback.ModalProps{
+		Title:      "新建任务",
+		Width:      520,
+		OkText:     "创建任务",
+		CancelText: "取消",
+	}, func() {
+		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+			if w.taskModalErr != "" {
+				feedback.Alert(c, w.taskModalErr, feedback.AlertProps{
+					Type:    feedback.Error,
+					Variant: feedback.Soft,
+				})
+			}
+
+			// Title
+			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "任务标题 *").FontSize(13).FontWeight(500).TextColor(tk.Text)
+				before := w.taskModalTitle
+				inp := field.Input(c, &w.taskModalTitle, field.InputProps{
+					Placeholder: "输入任务标题（必填）",
+					Invalid:     w.taskModalErr != "" && strings.TrimSpace(w.taskModalTitle) == "",
+				}).Label("新建任务标题输入框")
+				if w.taskModalTitle != before && w.taskModalErr != "" {
+					w.taskModalErr = ""
+				}
+				if inp.Submitted() {
+					w.SubmitTaskModal()
+				}
+			})
+
+			// Status & Priority Row
+			ui.Row(c).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+					ui.Text(c, "所属列 / 状态").FontSize(13).FontWeight(500).TextColor(tk.Text)
+					field.Select(c.Key("modal-task-status"), &w.taskModalStatus, field.SelectProps{
+						Options: []field.SelectOption{
+							{Value: string(model.Planned), Label: "计划"},
+							{Value: string(model.InProgress), Label: "进行中"},
+							{Value: string(model.Done), Label: "已完成"},
+						},
+					}).Label("新建任务状态")
+				})
+
+				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+					ui.Text(c, "优先级").FontSize(13).FontWeight(500).TextColor(tk.Text)
+					field.Select(c.Key("modal-task-priority"), &w.taskModalPriority, field.SelectProps{
+						Options: []field.SelectOption{
+							{Value: string(model.Urgent), Label: "紧急"},
+							{Value: string(model.High), Label: "高"},
+							{Value: string(model.Medium), Label: "中"},
+							{Value: string(model.Low), Label: "低"},
+							{Value: string(model.NoPriority), Label: "无优先级"},
+						},
+					}).Label("新建任务优先级")
+				})
+			})
+
+			// Due Date & Tags Row
+			ui.Row(c).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+					ui.Text(c, "截止日期").FontSize(13).FontWeight(500).TextColor(tk.Text)
+					field.DatePicker(c.Key("modal-task-duedate"), &w.taskModalDueDate, field.DatePickerProps{
+						Placeholder: "选择日期（可选）",
+						AllowClear:  true,
+					}).Label("新建任务截止日期")
+				})
+
+				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+					ui.Text(c, "分类标签（逗号分隔）").FontSize(13).FontWeight(500).TextColor(tk.Text)
+					field.Input(c, &w.taskModalTags, field.InputProps{
+						Placeholder: "例如：前端, UI, MVP",
+					}).Label("新建任务标签输入框")
+				})
+			})
+
+			// Description
+			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "Markdown 描述").FontSize(13).FontWeight(500).TextColor(tk.Text)
+				field.TextArea(c, &w.taskModalDesc, field.TextAreaProps{
+					Placeholder: "支持标题、列表、代码块、引用等 Markdown 语法（可选）",
+					MinRows:     3,
+					MaxRows:     6,
+				}).Label("新建任务描述输入框")
+			})
+		})
+	}) {
+		w.SubmitTaskModal()
+	}
+}

@@ -1,0 +1,8 @@
+.DS_Store
+/bin/
+/build/
+/.mygo/
+/dist/
+/tmp/
+*.test
+coverage.out

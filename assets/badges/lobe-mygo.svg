@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="89" height="20" role="img" aria-label="Lobe MyGo">
+  <title>Lobe MyGo</title>
+  <!-- Official icon: https://mygo.lobehub.com/favicon.svg -->
+  <defs>
+    <linearGradient id="shade" x2="0" y2="100%">
+      <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+      <stop offset="1" stop-opacity=".1"/>
+    </linearGradient>
+    <linearGradient id="icon-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#221B36"/>
+      <stop offset="1" stop-color="#0B0B13"/>
+    </linearGradient>
+  </defs>
+  <rect width="89" height="20" rx="3" fill="#191A18"/>
+  <rect width="89" height="20" rx="3" fill="url(#shade)"/>
+  <svg x="5" y="3" width="14" height="14" viewBox="0 0 64 64">
+    <rect width="64" height="64" rx="14" fill="url(#icon-bg)"/>
+    <rect x="6" y="14" width="6" height="36" rx="3" fill="#58AEE8"/>
+    <rect x="17.5" y="11" width="6" height="42" rx="3" fill="#F06B79"/>
+    <rect x="29" y="13" width="6" height="38" rx="3" fill="#5CC17A"/>
+    <rect x="40.5" y="9" width="6" height="46" rx="3" fill="#C9A63F"/>
+    <rect x="52" y="12" width="6" height="40" rx="3" fill="#8C7CD9"/>
+  </svg>
+  <g text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11" text-rendering="geometricPrecision">
+    <text x="53.5" y="15" fill="#010101" fill-opacity=".3" textLength="61" aria-hidden="true">Lobe MyGo</text>
+    <text x="53.5" y="14" fill="#fff" textLength="61">Lobe MyGo</text>
+  </g>
+</svg>
