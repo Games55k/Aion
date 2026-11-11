@@ -35,6 +35,15 @@ func testStore(t *testing.T) *store.Store {
 	return s
 }
 
+// fakeClock is a deterministic Options.Now source that tests advance explicitly.
+type fakeClock struct{ t time.Time }
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{t: time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)}
+}
+func (c *fakeClock) Now() time.Time          { return c.t }
+func (c *fakeClock) Advance(d time.Duration) { c.t = c.t.Add(d) }
+
 func seed(t *testing.T, s *store.Store, id, contents string) {
 	t.Helper()
 	now := "2026-11-09T08:00:00Z"
@@ -438,7 +447,8 @@ func TestExportRefusesInvalidLiveFilesAndOverwrite(t *testing.T) {
 func TestAutoPolicyRotationPersistenceAndRestore(t *testing.T) {
 	s := testStore(t)
 	seed(t, s, "live", "auto payload")
-	service := New(s)
+	clock := newFakeClock()
+	service := New(s, Options{Now: clock.Now})
 	p, err := service.GetPolicy(testCtx)
 	if err != nil {
 		t.Fatal(err)
@@ -460,14 +470,7 @@ func TestAutoPolicyRotationPersistenceAndRestore(t *testing.T) {
 		}
 		paths = append(paths, path)
 		if i != 3 {
-			st, err := service.loadState()
-			if err != nil {
-				t.Fatal(err)
-			}
-			st.LastSuccess = time.Now().Add(-48 * time.Hour)
-			if err = service.saveState(st); err != nil {
-				t.Fatal(err)
-			}
+			clock.Advance(48 * time.Hour)
 		}
 	}
 	for _, path := range paths[:2] {
@@ -492,7 +495,7 @@ func TestAutoPolicyRotationPersistenceAndRestore(t *testing.T) {
 	if err != nil || !after.LastSuccess.Equal(status.LastSuccess) {
 		t.Fatalf("restore rewound auto state: %+v %v", after, err)
 	}
-	if path, err := New(s).RunDue(testCtx); err != nil || path != "" {
+	if path, err := service.RunDue(testCtx); err != nil || path != "" {
 		t.Fatalf("unexpected duplicate automatic run: %s %v", path, err)
 	}
 	// Store reopen retains both policy and execution state.
@@ -514,7 +517,8 @@ func TestAutoPolicyRotationPersistenceAndRestore(t *testing.T) {
 func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 	s := testStore(t)
 	seed(t, s, "live", "payload")
-	service := New(s)
+	clock := newFakeClock()
+	service := New(s, Options{Now: clock.Now})
 	p, err := service.GetPolicy(testCtx)
 	if err != nil {
 		t.Fatal(err)
@@ -527,14 +531,8 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := service.loadState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.LastSuccess = time.Now().Add(-48 * time.Hour)
-	if err = service.saveState(st); err != nil {
-		t.Fatal(err)
-	}
+	firstRun := clock.Now()
+	clock.Advance(48 * time.Hour)
 	if err = os.WriteFile(filepath.Join(s.AttachmentsDir(), "live-file"), []byte("corrupt"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +543,7 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 		t.Fatal("rotation ran after failed export")
 	}
 	status, err := New(s).Status(testCtx)
-	if err != nil || status.LastError == "" || !status.LastSuccess.Equal(st.LastSuccess) {
+	if err != nil || status.LastError == "" || !status.LastSuccess.Equal(firstRun) {
 		t.Fatalf("failure status: %+v %v", status, err)
 	}
 	// Disabled policy prevents attempts even with a stale last success.
@@ -561,7 +559,8 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 // Automatic backup rotation verifies file hashes so manually replaced files in the backup directory are never deleted.
 func TestRotationPreservesReplacedFile(t *testing.T) {
 	s := testStore(t)
-	service := New(s)
+	clock := newFakeClock()
+	service := New(s, Options{Now: clock.Now})
 	p, err := service.GetPolicy(testCtx)
 	if err != nil {
 		t.Fatal(err)
@@ -577,14 +576,7 @@ func TestRotationPreservesReplacedFile(t *testing.T) {
 	if err = os.WriteFile(first, []byte("manual replacement"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	st, err := service.loadState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.LastSuccess = time.Now().Add(-48 * time.Hour)
-	if err = service.saveState(st); err != nil {
-		t.Fatal(err)
-	}
+	clock.Advance(48 * time.Hour)
 	if _, err = service.RunDue(testCtx); err != nil {
 		t.Fatal(err)
 	}

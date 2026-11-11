@@ -259,7 +259,7 @@ func (s *Service) RunDue(ctx context.Context) (string, error) {
 		if err != nil {
 			return fail(err)
 		}
-		now := time.Now().UTC()
+		now := s.now().UTC()
 		if !p.Enabled || (!st.LastSuccess.IsZero() && now.Before(st.LastSuccess.Add(p.Interval))) {
 			return nil
 		}

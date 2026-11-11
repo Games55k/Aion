@@ -38,10 +38,23 @@ const (
 type Service struct {
 	store           *store.Store
 	replaceDatabase func(context.Context, string) error
+	now             func() time.Time
 }
 
-func New(s *store.Store) *Service {
-	return &Service{store: s, replaceDatabase: s.ReplaceDatabaseLocked}
+// Options customizes a Service. The zero value uses the wall clock.
+type Options struct {
+	// Now supplies the clock for schedules, manifests, and rotation order.
+	Now func() time.Time
+}
+
+func New(s *store.Store, options ...Options) *Service {
+	service := &Service{store: s, replaceDatabase: s.ReplaceDatabaseLocked, now: time.Now}
+	for _, o := range options {
+		if o.Now != nil {
+			service.now = o.Now
+		}
+	}
+	return service
 }
 
 type RestoreResult struct {
@@ -256,7 +269,7 @@ func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kin
 			_ = zw.Close()
 		}
 	}()
-	m := manifest{Version: FormatVersion, SchemaVersion: store.SchemaVersion, CreatedAt: time.Now().UTC(), Kind: kind}
+	m := manifest{Version: FormatVersion, SchemaVersion: store.SchemaVersion, CreatedAt: s.now().UTC(), Kind: kind}
 	var total int64
 	add := func(name, path string, expected *attachment) error {
 		src, err := openRegular(path)

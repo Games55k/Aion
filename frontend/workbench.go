@@ -65,6 +65,8 @@ type Host struct {
 	SetTheme        func(theme string)
 	UpdateInfo      UpdateCapability
 	CheckForUpdates func()
+	// Now supplies the clock for save timestamps and default export names. Defaults to time.Now.
+	Now func() time.Time
 	// Dispatch, when set (e.g. win.Update in a desktop window), runs dialog blocking calls
 	// off the UI build pass and dispatches the state update back on the UI thread.
 	// When nil (e.g. in headless ui.Tester tests), dialog callbacks run synchronously.
@@ -299,6 +301,13 @@ func (w *Workbench) updateActionsReady() (canCheck, canOpenURL bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.host.CheckForUpdates != nil, w.host.OpenURL != nil
+}
+
+func (w *Workbench) now() time.Time {
+	if w.host.Now != nil {
+		return w.host.Now()
+	}
+	return time.Now()
 }
 
 func (w *Workbench) runDialog(pick func() func()) {
@@ -1024,7 +1033,7 @@ func (w *Workbench) SaveSelectedTask() error {
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
-	w.lastSavedAt = time.Now()
+	w.lastSavedAt = w.now()
 	// A content-only edit changes no other row, so patch the loaded board in
 	// place. A status change renumbers two columns and needs a real reload.
 	idx := slices.IndexFunc(w.boardTasks, func(t model.Task) bool { return t.ID == updated.ID })
@@ -2128,7 +2137,7 @@ func (w *Workbench) PickAndExportManualBackup() {
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再导出备份"); err != nil {
 		return
 	}
-	defaultName := "aion-backup-" + time.Now().Local().Format("20060102-150405") + ".zip"
+	defaultName := "aion-backup-" + w.now().Local().Format("20060102-150405") + ".zip"
 	w.runAsyncTask("正在导出完整备份 (.zip)...", func(ctx context.Context) func() {
 		dest, err := pick("导出 Aion 完整备份", defaultName, "zip")
 		if err != nil {

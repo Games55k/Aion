@@ -2134,3 +2134,23 @@ func TestDetailEditsKeepBoardInSyncWithoutReload(t *testing.T) {
 		t.Fatalf("untouched task was rewritten: %v %v", got.UpdatedAt, err)
 	}
 }
+
+// Save timestamps come from Host.Now so tests can pin the clock instead of reading wall time.
+func TestSaveTimestampUsesHostClock(t *testing.T) {
+	fixed := time.Date(2026, 11, 11, 9, 30, 0, 0, time.Local)
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{Now: func() time.Time { return fixed }})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "clock"
+	wb.SubmitProjectModal()
+	if _, err := wb.QuickCreateTask(model.Planned, "task"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatalf("click 任务详情标题: %v", err)
+	}
+	tt.Type("!")
+	if !wb.lastSavedAt.Equal(fixed) {
+		t.Fatalf("lastSavedAt = %v, want %v", wb.lastSavedAt, fixed)
+	}
+}

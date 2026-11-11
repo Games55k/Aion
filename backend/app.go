@@ -21,6 +21,8 @@ type Options struct {
 	DataDir string
 	// DisableScheduler stops background checks without changing the persisted policy.
 	DisableScheduler bool
+	// Now supplies the clock for automatic backup scheduling. Defaults to time.Now.
+	Now func() time.Time
 }
 type App struct {
 	Projects    *projects.Service
@@ -59,7 +61,7 @@ func Open(ctx context.Context, options Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{Projects: projects.New(s), Attachments: attachments.New(s), Backups: backup.New(s), Settings: &Settings{s: s}, Modules: &Registry{}, s: s, errors: make(chan error, 1)}
+	a := &App{Projects: projects.New(s), Attachments: attachments.New(s), Backups: backup.New(s, backup.Options{Now: options.Now}), Settings: &Settings{s: s}, Modules: &Registry{}, s: s, errors: make(chan error, 1)}
 	if err = a.Modules.Register(ModuleDescriptor{ID: "projects", Name: "项目", Version: 1}); err != nil {
 		s.Close()
 		return nil, err
