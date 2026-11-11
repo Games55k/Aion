@@ -9,3 +9,8 @@ import _ "embed"
 //
 //go:embed aion-icon.svg
 var SVG string
+
+// PNG is the rasterized app icon, shared by native dialogs and update windows.
+//
+//go:embed aion-icon.png
+var PNG []byte

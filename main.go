@@ -8,12 +8,17 @@ import (
 	"log"
 	"os"
 
+	"aion/assets/icon"
 	"aion/backend"
 	"aion/frontend"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
+
+const releasesURL = "https://github.com/Games55k/Aion/releases"
 
 func main() {
 	dataDir := flag.String("data-dir", "", "custom local data directory (defaults to ~/Library/Application Support/Aion)")
@@ -58,8 +63,21 @@ func run(dataDir, snapshotPath string) error {
 		applyNativeThemeSource(savedTheme)
 	}
 
+	if dataDir != "" {
+		mygo.App.SetPath(mygo.PathUserData, app.DataDir())
+	}
 	mygo.App.SetName("Aion")
+	mygo.Use(native.New(updater.Options{
+		DisableAutomaticChecks: true,
+		Icon:                   icon.PNG,
+	}))
+
 	mygo.App.WhenReady(func() {
+		mygo.App.SetMenu(buildAppMenu())
+		mygo.App.OnLocaleChanged(func(string) {
+			mygo.App.SetMenu(buildAppMenu())
+		})
+
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:                "Aion",
 			Width:                1320,
@@ -70,6 +88,17 @@ func run(dataDir, snapshotPath string) error {
 			TrafficLightPosition: &mygo.Point{X: 13, Y: 14},
 			Content:              ui.View(wb.View),
 		})
+
+		readUpdateInfo := func() frontend.UpdateCapability {
+			return frontend.UpdateCapability{
+				Version:          mygo.App.Version(),
+				AvailableVersion: updater.AvailableVersion(),
+				LastCheck:        updater.LastCheck(),
+				IsDev:            mygo.IsDev(),
+				CanSelfUpdate:    mygo.Updater.Enabled(),
+				ReleasesURL:      releasesURL,
+			}
+		}
 
 		wb.SetHost(frontend.Host{
 			Dispatch: win.Update,
@@ -118,17 +147,42 @@ func run(dataDir, snapshotPath string) error {
 				mygo.Shell.ShowItemInFolder(path)
 				return nil
 			},
+			OpenURL: func(url string) error {
+				return mygo.Shell.OpenExternal(url)
+			},
 			SetTheme: func(th string) {
 				applyNativeThemeSource(th)
 			},
+			UpdateInfo:      readUpdateInfo(),
+			CheckForUpdates: updater.CheckForUpdates,
+		})
+
+		offUpdaterChange := updater.OnChange(func() {
+			win.Update(func() {
+				wb.SetUpdateCapability(readUpdateInfo())
+			})
 		})
 
 		win.OnClose(func(ev *mygo.CloseEvent) {
 			if !wb.PrepareClose() {
 				ev.PreventDefault()
+				win.Show()
+				win.Focus()
+				win.Update(func() {})
 				return
 			}
 			wb.WaitForTasks()
+		})
+
+		mygo.App.OnQuit(func() {
+			offUpdaterChange()
+			wb.WaitForTasks()
+			if err := wb.FlushPending(); err != nil {
+				log.Printf("aion: failed to flush pending edits on quit: %v", err)
+			}
+			if err := app.Close(); err != nil {
+				log.Printf("aion: failed to close backend cleanly on quit: %v", err)
+			}
 		})
 
 		// Listen for background scheduler errors and surface them in the UI
@@ -164,6 +218,27 @@ func writeSnapshot(path string, view func(*ui.Context)) error {
 		return fmt.Errorf("close snapshot file: %w", err)
 	}
 	return nil
+}
+
+func buildAppMenu() *mygo.Menu {
+	return mygo.NewMenu([]*mygo.MenuItem{
+		{Label: mygo.App.Name(), Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleAbout},
+			updater.MenuItem(),
+			mygo.Separator(),
+			{Role: mygo.RoleServices},
+			mygo.Separator(),
+			{Role: mygo.RoleHide},
+			{Role: mygo.RoleHideOthers},
+			{Role: mygo.RoleUnhide},
+			mygo.Separator(),
+			{Role: mygo.RoleQuit},
+		}},
+		{Role: mygo.RoleFileMenu},
+		{Role: mygo.RoleEditMenu},
+		{Role: mygo.RoleViewMenu},
+		{Role: mygo.RoleWindowMenu},
+	})
 }
 
 func applyNativeThemeSource(th string) {

@@ -41,15 +41,30 @@ const (
 	NavSettings         NavPage = "settings"
 )
 
-// Host provides desktop OS integrations (file dialogs, Finder, default app, theme sync)
+const defaultReleasesURL = "https://github.com/Games55k/Aion/releases"
+
+// UpdateCapability describes the application's version and self-update availability.
+type UpdateCapability struct {
+	Version          string
+	AvailableVersion string
+	LastCheck        time.Time
+	IsDev            bool
+	CanSelfUpdate    bool
+	ReleasesURL      string
+}
+
+// Host provides desktop OS integrations (file dialogs, Finder, default app, theme sync, updates)
 // so that the UI works natively in a desktop window and deterministically in headless tests.
 type Host struct {
-	PickOpenFiles func(title string, multiple bool, extensions ...string) ([]string, error)
-	PickDirectory func(title, defaultPath string) (string, error)
-	PickSaveFile  func(title, defaultName string, extensions ...string) (string, error)
-	OpenPath      func(path string) error
-	RevealPath    func(path string) error
-	SetTheme      func(theme string)
+	PickOpenFiles   func(title string, multiple bool, extensions ...string) ([]string, error)
+	PickDirectory   func(title, defaultPath string) (string, error)
+	PickSaveFile    func(title, defaultName string, extensions ...string) (string, error)
+	OpenPath        func(path string) error
+	RevealPath      func(path string) error
+	OpenURL         func(url string) error
+	SetTheme        func(theme string)
+	UpdateInfo      UpdateCapability
+	CheckForUpdates func()
 	// Dispatch, when set (e.g. win.Update in a desktop window), runs dialog blocking calls
 	// off the UI build pass and dispatches the state update back on the UI thread.
 	// When nil (e.g. in headless ui.Tester tests), dialog callbacks run synchronously.
@@ -192,6 +207,7 @@ type Workbench struct {
 	lastRestoreResult    *backup.RestoreResult
 	confirmRestoreOpen   bool
 	pendingRestoreZip    string
+	updateInfo           UpdateCapability
 }
 
 // New creates and initializes a Workbench backed by app.
@@ -215,6 +231,7 @@ func New(app *backend.App, host Host) *Workbench {
 		bitmapFailed:      make(map[string]bool),
 		saveState:         "saved",
 		themeSetting:      ThemeSystem,
+		updateInfo:        host.UpdateInfo,
 	}
 	w.ReloadAll()
 	if len(w.activeProjects) > 0 {
@@ -225,7 +242,63 @@ func New(app *backend.App, host Host) *Workbench {
 
 // SetHost updates the OS integration callbacks.
 func (w *Workbench) SetHost(host Host) {
+	w.mu.Lock()
 	w.host = host
+	w.updateInfo = host.UpdateInfo
+	w.mu.Unlock()
+}
+
+// UpdateCapability returns a snapshot of the current app version and update availability without acquiring Store locks.
+func (w *Workbench) UpdateCapability() UpdateCapability {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.updateInfo
+}
+
+// SetUpdateCapability updates the cached app version and update availability without acquiring Store locks.
+func (w *Workbench) SetUpdateCapability(info UpdateCapability) {
+	w.mu.Lock()
+	w.updateInfo = info
+	w.mu.Unlock()
+}
+
+// ReleasesURL returns the GitHub Releases URL configured for Aion.
+func (w *Workbench) ReleasesURL() string {
+	info := w.UpdateCapability()
+	if u := strings.TrimSpace(info.ReleasesURL); u != "" {
+		return u
+	}
+	return defaultReleasesURL
+}
+
+// CheckForUpdates delegates an update check to the configured Host without acquiring Store locks.
+func (w *Workbench) CheckForUpdates() {
+	w.mu.Lock()
+	check := w.host.CheckForUpdates
+	w.mu.Unlock()
+	if check == nil {
+		return
+	}
+	check()
+}
+
+// OpenReleasesPage opens the GitHub Releases page via Host.OpenURL.
+func (w *Workbench) OpenReleasesPage() {
+	w.mu.Lock()
+	openURL := w.host.OpenURL
+	w.mu.Unlock()
+	if openURL == nil {
+		return
+	}
+	if err := openURL(w.ReleasesURL()); err != nil {
+		w.enqueueErrorToast("打开发布页失败", err)
+	}
+}
+
+func (w *Workbench) updateActionsReady() (canCheck, canOpenURL bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.host.CheckForUpdates != nil, w.host.OpenURL != nil
 }
 
 func (w *Workbench) runDialog(pick func() func()) {

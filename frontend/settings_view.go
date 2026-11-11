@@ -3,6 +3,7 @@ package frontend
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/lobehub/lobe-mygo/pkg/action"
@@ -40,7 +41,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					ui.Icon(c, lucide.Settings()).FontSize(22).TextColor(tk.Primary)
 					ui.Text(c, "全局设置与数据管理").FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
 				})
-				ui.Text(c, "配置界面外观主题、查看本地 SQLite 与受管附件目录，以及管理本地自动备份与完整恢复。").
+				ui.Text(c, "配置界面外观主题、查看本地数据目录、管理自动备份与恢复，以及检查应用更新。").
 					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
 			})
 		})
@@ -333,8 +334,100 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 						}
 					})
 				})
+
+				// 5. App Version & Updates Card
+				w.renderSettingsUpdatesCard(c, tk)
 			})
 		})
+	})
+}
+
+func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
+	info := w.UpdateCapability()
+	canCheck, canOpenURL := w.updateActionsReady()
+	displayVersion := strings.TrimPrefix(strings.TrimSpace(info.Version), "v")
+	versionBadge := "开发版本"
+	versionTagColor := display.TagOrange
+	versionLine := "当前版本: 开发版本（未打包）"
+	if displayVersion != "" {
+		versionBadge = "v" + displayVersion
+		versionTagColor = display.TagBlue
+		versionLine = "当前版本: v" + displayVersion
+		if info.IsDev {
+			versionTagColor = display.TagOrange
+			versionLine += "（开发构建）"
+		}
+	}
+	lastCheckStr := "尚未检查"
+	if !info.LastCheck.IsZero() {
+		lastCheckStr = info.LastCheck.Local().Format("2006-01-02 15:04:05")
+	}
+
+	ui.Column(c.Key("settings-card-updates")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
+		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, lucide.RefreshCw()).FontSize(18).TextColor(tk.Primary)
+			ui.Text(c, "应用版本与更新").FontSize(16).FontWeight(600).TextColor(tk.Text)
+			display.Tag(c, versionBadge, display.TagProps{
+				Size:    theme.Small,
+				Variant: display.TagFilled,
+				Color:   versionTagColor,
+			})
+			if info.AvailableVersion != "" {
+				display.Tag(c, "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), display.TagProps{
+					Size:    theme.Small,
+					Variant: display.TagFilled,
+					Color:   display.TagGreen,
+				})
+			}
+		})
+		ui.Text(c, "手动从 GitHub Releases 获取已签名的 Aion 更新包；默认关闭后台自动检查，仅在主动检查或下载更新时连接 GitHub。").
+			FontSize(13).TextColor(tk.TextSecondary)
+
+		ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
+			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+			AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, versionLine).FontSize(13).FontWeight(500).TextColor(tk.Text).SingleLine()
+				ui.Text(c, "最近一次检查更新: "+lastCheckStr).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+			})
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				if action.Button(c, "前往 Releases 下载", action.ButtonProps{
+					Variant: action.Default,
+					Size:    theme.Small,
+				}).Disabled(!canOpenURL).Clicked() {
+					w.OpenReleasesPage()
+				}
+				if action.Button(c, "检查更新", action.ButtonProps{
+					Variant: action.Primary,
+					Size:    theme.Small,
+				}).Disabled(!canCheck).Clicked() {
+					w.CheckForUpdates()
+				}
+			})
+		})
+
+		switch {
+		case info.IsDev || displayVersion == "":
+			feedback.Alert(c.Key("settings-updates-dev"), "当前为开发构建，不支持应用内自动更新", feedback.AlertProps{
+				Type:        feedback.Info,
+				Variant:     feedback.Soft,
+				Description: "请使用正式打包的 .dmg 安装包运行 Aion，或点击“前往 Releases 下载”手动获取最新安装包。",
+			})
+		case !info.CanSelfUpdate:
+			feedback.Alert(c.Key("settings-updates-readonly"), "当前安装位置不可写，无法应用内自动更新", feedback.AlertProps{
+				Type:        feedback.Warning,
+				Variant:     feedback.Soft,
+				Description: "请将 Aion.app 移动到当前用户有写入权限的“应用程序”目录后重试，或点击“前往 Releases 下载”手动下载。",
+			})
+		case info.AvailableVersion != "":
+			feedback.Alert(c.Key("settings-updates-available"), "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), feedback.AlertProps{
+				Type:        feedback.Success,
+				Variant:     feedback.Soft,
+				Description: "点击“检查更新”打开原生更新窗口，可阅读版本说明、下载并安装更新。",
+			})
+		}
 	})
 }
 

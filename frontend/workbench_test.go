@@ -608,18 +608,30 @@ func TestRecycleBinAndSettingsBackupRestore(t *testing.T) {
 	}
 }
 
-// Export a populated workbench for manual visual inspection only when explicitly requested.
+// Export populated board and settings snapshots for manual visual inspection when requested.
 func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
-	if outPath == "" {
-		t.Skip("set AION_SAVE_SNAPSHOT to export a PNG for visual inspection")
+	settingsOutPath := os.Getenv("AION_SAVE_SETTINGS_SNAPSHOT")
+	if outPath == "" && settingsOutPath == "" {
+		t.Skip("set AION_SAVE_SNAPSHOT or AION_SAVE_SETTINGS_SNAPSHOT to export a PNG for visual inspection")
 	}
 	dataDir := t.TempDir()
 	srcDir := t.TempDir()
 	imgPath := filepath.Join(srcDir, "preview.png")
 	writeSamplePNG(t, imgPath)
 
-	_, wb, _ := openTestWorkbench(t, dataDir, Host{})
+	_, wb, _ := openTestWorkbench(t, dataDir, Host{
+		OpenURL:         func(string) error { return nil },
+		CheckForUpdates: func() {},
+		UpdateInfo: UpdateCapability{
+			Version:          "0.1.0",
+			AvailableVersion: "0.2.0",
+			LastCheck:        time.Date(2026, 11, 11, 15, 30, 0, 0, time.Local),
+			IsDev:            false,
+			CanSelfUpdate:    true,
+			ReleasesURL:      defaultReleasesURL,
+		},
+	})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "Aion 1.0 桌面端发布"
 	wb.projectModalIcon = "rocket"
@@ -642,14 +654,37 @@ func TestVisualSnapshotRender(t *testing.T) {
 	wb.ImportAttachmentsToSelectedTask([]string{imgPath})
 	wb.pendingToasts = nil
 
-	img := ui.Render(wb.View, 1440, 900, 1.0)
-	f, err := os.Create(outPath)
-	if err != nil {
-		t.Fatalf("create snapshot file: %v", err)
+	if outPath != "" {
+		img := ui.Render(wb.View, 1440, 900, 1.0)
+		f, err := os.Create(outPath)
+		if err != nil {
+			t.Fatalf("create snapshot file: %v", err)
+		}
+		if err := png.Encode(f, img); err != nil {
+			_ = f.Close()
+			t.Fatalf("encode png: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close snapshot file: %v", err)
+		}
 	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		t.Fatalf("encode png: %v", err)
+
+	if settingsOutPath != "" {
+		wb.ClearSelectedTask()
+		wb.NavigateTo(NavSettings)
+		wb.pendingToasts = nil
+		img := ui.Render(wb.View, 1440, 1280, 1.0)
+		f, err := os.Create(settingsOutPath)
+		if err != nil {
+			t.Fatalf("create settings snapshot file: %v", err)
+		}
+		if err := png.Encode(f, img); err != nil {
+			_ = f.Close()
+			t.Fatalf("encode settings png: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close settings snapshot file: %v", err)
+		}
 	}
 }
 
@@ -1659,5 +1694,290 @@ func TestCrossViewConsistencyFixes(t *testing.T) {
 	}
 	if wb.trashSearch != "" || !tt.HasText("共 2 项") {
 		t.Fatalf("expected trash filter cleared and 共 2 项 displayed, got search=%q texts=%v", wb.trashSearch, tt.Texts())
+	}
+}
+
+// Settings displays app version and update status from Host and triggers update checks and release links through Host stubs.
+func TestUpdaterSettingsAndHostIntegration(t *testing.T) {
+	checkCalls := 0
+	var openedURLs []string
+	var openErr error
+
+	host := Host{
+		UpdateInfo: UpdateCapability{
+			Version:       "0.1.0",
+			IsDev:         false,
+			CanSelfUpdate: true,
+			ReleasesURL:   "https://github.com/Games55k/Aion/releases",
+		},
+		CheckForUpdates: func() {
+			checkCalls++
+		},
+		OpenURL: func(rawURL string) error {
+			openedURLs = append(openedURLs, rawURL)
+			return openErr
+		},
+	}
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), host)
+
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	tt.Scroll(500, 300, 0, 500)
+	tt.Frame()
+
+	if !tt.HasText("v0.1.0") {
+		t.Fatalf("expected current version v0.1.0 in Settings, got texts %v", tt.Texts())
+	}
+	if err := tt.Click("检查更新"); err != nil {
+		t.Fatalf("click 检查更新: %v", err)
+	}
+	if checkCalls != 1 {
+		t.Fatalf("expected Host.CheckForUpdates called once, got %d", checkCalls)
+	}
+
+	if err := tt.Click("前往 Releases 下载"); err != nil {
+		t.Fatalf("click 前往 Releases 下载: %v", err)
+	}
+	if !slices.Equal(openedURLs, []string{"https://github.com/Games55k/Aion/releases"}) {
+		t.Fatalf("unexpected opened URLs: %v", openedURLs)
+	}
+
+	// Discovered version and last-check timestamp reflect on the next frame.
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.0",
+		AvailableVersion: "0.2.0",
+		LastCheck:        time.Date(2026, 11, 11, 15, 30, 0, 0, time.Local),
+		IsDev:            false,
+		CanSelfUpdate:    true,
+		ReleasesURL:      "https://github.com/Games55k/Aion/releases",
+	})
+	tt.Frame()
+	if !tt.HasText("发现新版本 v0.2.0") || !tt.HasText("2026-11-11 15:30:00") {
+		t.Fatalf("expected available version and last check time in Settings, got texts %v", tt.Texts())
+	}
+
+	// Non-writable install location explains why self-update is unavailable.
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:       "0.1.0",
+		IsDev:         false,
+		CanSelfUpdate: false,
+		ReleasesURL:   "https://github.com/Games55k/Aion/releases",
+	})
+	tt.Frame()
+	if !tt.HasText("当前安装位置不可写，无法应用内自动更新") {
+		t.Fatalf("expected non-writable install notice in Settings, got texts %v", tt.Texts())
+	}
+
+	// Development builds explain why in-app updates are disabled.
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:       "0.1.0",
+		IsDev:         true,
+		CanSelfUpdate: false,
+		ReleasesURL:   "https://github.com/Games55k/Aion/releases",
+	})
+	tt.Frame()
+	if !tt.HasText("当前为开发构建，不支持应用内自动更新") {
+		t.Fatalf("expected development build notice in Settings, got texts %v", tt.Texts())
+	}
+
+	// OpenURL error surfaces a toast instead of dropping silently.
+	openErr = errors.New("browser unavailable")
+	if err := tt.Click("前往 Releases 下载"); err != nil {
+		t.Fatalf("click 前往 Releases 下载 on error: %v", err)
+	}
+	if !tt.HasText("打开发布页失败") || !tt.HasText(openErr.Error()) {
+		t.Fatalf("expected OpenReleasesPage error toast, got texts %v", tt.Texts())
+	}
+}
+
+// Update capability changes and Settings rendering must complete immediately while the Store exclusive lock is held.
+func TestUpdateStateChangeDoesNotWaitForStoreLock(t *testing.T) {
+	checkCalls := 0
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		UpdateInfo: UpdateCapability{
+			Version:       "0.1.0",
+			CanSelfUpdate: true,
+			ReleasesURL:   defaultReleasesURL,
+		},
+		CheckForUpdates: func() { checkCalls++ },
+		OpenURL:         func(string) error { return nil },
+	})
+
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	app.Backups = backup.New(s)
+	app.Attachments = attachments.New(s)
+
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- s.Exclusive(context.Background(), func(_ *sql.DB) error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	wb.navPage = NavSettings
+	tt.Frame()
+	tt.Scroll(500, 300, 0, 500)
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.0",
+		AvailableVersion: "0.2.0",
+		LastCheck:        time.Date(2026, 11, 11, 16, 0, 0, 0, time.Local),
+		CanSelfUpdate:    true,
+		ReleasesURL:      defaultReleasesURL,
+	})
+	tt.Frame()
+	if !tt.HasText("发现新版本 v0.2.0") {
+		t.Fatalf("expected updated version state rendered while Store lock is held")
+	}
+	if err := tt.Click("检查更新"); err != nil {
+		t.Fatalf("click 检查更新 while Store lock is held: %v", err)
+	}
+	if checkCalls != 1 {
+		t.Fatalf("expected CheckForUpdates invoked while Store lock is held, got %d", checkCalls)
+	}
+
+	close(release)
+	if err := <-lockDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// PrepareClose blocks relaunch or quit when unsaved task edits fail validation and permits closing once fixed and saved.
+func TestPrepareCloseBlocksInvalidDraftAndAllowsSaveThenClose(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "退出保存校验"
+	wb.SubmitProjectModal()
+
+	task, err := wb.QuickCreateTask(model.Planned, "初始任务标题")
+	if err != nil {
+		t.Fatalf("QuickCreateTask: %v", err)
+	}
+
+	wb.SelectTask(task.ID)
+	wb.editTitle = "   "
+	wb.editDescription = "修复标题后必须持久化的任务内容"
+	wb.NavigateTo(NavSettings)
+	if wb.navPage != NavProjectBoard {
+		t.Fatalf("expected navigation blocked on invalid draft, got %s", wb.navPage)
+	}
+	wb.detailExpanded = false
+
+	if wb.PrepareClose() {
+		t.Fatalf("expected PrepareClose to block closing/relaunch when unsaved draft fails validation")
+	}
+	if wb.navPage != NavProjectBoard || !wb.detailExpanded {
+		t.Fatalf("expected PrepareClose to reveal task detail panel, got page=%s detailExpanded=%v", wb.navPage, wb.detailExpanded)
+	}
+	tt.Frame()
+	if !tt.HasText("存在未保存的任务修改") {
+		t.Fatalf("expected warning toast when PrepareClose rejects invalid draft")
+	}
+
+	// Fix the invalid title and retry PrepareClose; pending edits must flush cleanly and allow quit/relaunch.
+	wb.editTitle = "修复后的任务标题"
+	if !wb.PrepareClose() {
+		t.Fatalf("expected PrepareClose to succeed once invalid draft is fixed")
+	}
+
+	persisted, err := app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after PrepareClose: %v", err)
+	}
+	if persisted.Title != "修复后的任务标题" || persisted.Description != "修复标题后必须持久化的任务内容" {
+		t.Fatalf("expected pending edits persisted on PrepareClose, got %+v", persisted)
+	}
+}
+
+// PrepareClose rejects closing while an async backup or attachment task is active or awaiting UI dispatch and allows closing once drained.
+func TestPrepareCloseWithActiveBackupOrAttachmentTask(t *testing.T) {
+	backupDir := t.TempDir()
+	backupDest := filepath.Join(backupDir, "close-guard-backup.zip")
+	srcAtt := filepath.Join(t.TempDir(), "close-guard.txt")
+	if err := os.WriteFile(srcAtt, []byte("attachment payload"), 0o600); err != nil {
+		t.Fatalf("write attachment file: %v", err)
+	}
+
+	dispatched := make(chan func(), 16)
+	saveStarted := make(chan struct{})
+	releaseSave := make(chan struct{})
+	openStarted := make(chan struct{})
+	releaseOpen := make(chan struct{})
+
+	host := Host{
+		Dispatch: func(fn func()) {
+			dispatched <- fn
+		},
+		PickSaveFile: func(_, _ string, _ ...string) (string, error) {
+			close(saveStarted)
+			<-releaseSave
+			return backupDest, nil
+		},
+		PickOpenFiles: func(_ string, _ bool, _ ...string) ([]string, error) {
+			close(openStarted)
+			<-releaseOpen
+			return []string{srcAtt}, nil
+		},
+	}
+
+	_, wb, _ := openTestWorkbench(t, t.TempDir(), host)
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "关闭任务保护"
+	wb.SubmitProjectModal()
+	task, err := wb.QuickCreateTask(model.Planned, "附件与备份任务")
+	if err != nil {
+		t.Fatalf("QuickCreateTask: %v", err)
+	}
+	wb.SelectTask(task.ID)
+
+	// 1. Active async backup task blocks PrepareClose until worker finishes and Dispatch callback drains.
+	wb.PickAndExportManualBackup()
+	<-saveStarted
+	if wb.PrepareClose() {
+		t.Fatal("PrepareClose must return false while backup worker is running")
+	}
+	close(releaseSave)
+	wb.WaitForTasks()
+	if wb.PrepareClose() {
+		t.Fatal("PrepareClose must return false before queued backup UI Dispatch callback runs")
+	}
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	if !wb.PrepareClose() {
+		t.Fatal("PrepareClose must return true after backup task and UI callback complete")
+	}
+	if _, err := os.Stat(backupDest); err != nil {
+		t.Fatalf("expected exported backup zip at %s: %v", backupDest, err)
+	}
+
+	// 2. Active async attachment import task also blocks PrepareClose until worker and Dispatch drain.
+	wb.PickAndImportAttachmentsToSelectedTask()
+	<-openStarted
+	if wb.PrepareClose() {
+		t.Fatal("PrepareClose must return false while attachment import worker is running")
+	}
+	close(releaseOpen)
+	wb.WaitForTasks()
+	if wb.PrepareClose() {
+		t.Fatal("PrepareClose must return false before queued attachment UI Dispatch callback runs")
+	}
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	if !wb.PrepareClose() {
+		t.Fatal("PrepareClose must return true after attachment import and UI callback complete")
+	}
+	if len(wb.detailAttachments) != 1 || wb.detailAttachments[0].Name != "close-guard.txt" {
+		t.Fatalf("expected imported attachment recorded after dispatch, got %+v", wb.detailAttachments)
 	}
 }

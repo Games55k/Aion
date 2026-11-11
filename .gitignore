@@ -6,3 +6,12 @@
 /tmp/
 *.test
 coverage.out
+*.key
+*.p12
+*.pfx
+*.cer
+*.p8
+*.mobileprovision
+*.keychain
+*.keychain-db
+mygo.json.bak

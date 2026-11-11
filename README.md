@@ -53,13 +53,13 @@ Aion 使用 `mygo` 直接构建 macOS 原生窗口应用，不打包 Chromium / 
 # 开发模式运行
 go tool mygo dev
 
-# 构建 macOS 原生 .app 与 .dmg 安装包（默认输出到 build/darwin-arm64/，仅打包 .app 可加 -skip-dmg）
+# 构建 macOS 原生 .app 与 .dmg 安装包（默认输出到 build/darwin-arm64/；Universal 构建可用 -platform darwin/universal）
 go tool mygo build
 
 # 为指定数据目录生成无头渲染快照 PNG（1360×860）
 go run . -data-dir /tmp/aion-snap -snapshot /tmp/aion-snapshot.png
 
-# 渲染带示例数据的看板视觉快照 PNG（1440×900，用于视觉回归检查）
+# 渲染带示例数据的看板/设置视觉快照 PNG（用于视觉回归检查）
 AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnapshotRender
 ```
 
@@ -84,7 +84,7 @@ AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnap
 
 Aion 从架构层保证个人数据完全受你控制：
 
-- **零网络依赖**：运行时不发起任何外部请求，无账号体系、无遥测上报、无第三方云同步
+- **离线优先与最小网络访问**：核心功能离线运行，项目和附件保存在本机；无账号体系、无遥测上报、无第三方云同步。默认仅在用户主动检查或下载安装更新时访问 GitHub 下载服务，不上传项目内容
 - **进程内直连**：前端通过 Go 函数调用直接操作本地后端服务，不在本机暴露任何 HTTP 端口
 - **受管附件隔离**：导入附件会复制到应用受管目录并记录 SHA-256 摘要，源文件移动或删除不影响应用内预览与打开
 - **防误删保护**：项目与任务删除默认进入回收站，关联附件会一并保留，直到在回收站中确认“彻底删除”或“清空回收站”后才会物理移除记录并触发附件垃圾回收（GC）；在任务详情中主动移除单个附件则会直接解除关联并清理未引用文件
@@ -101,8 +101,10 @@ Aion 从架构层保证个人数据完全受你控制：
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
 
 ```text
-main.go                              原生窗口宿主入口、系统对话框/Finder/主题桥接
-mygo.json                            MyGo 应用配置与打包元数据
+main.go                              原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
+mygo.json                            MyGo 应用配置、打包元数据与更新源配置
+CHANGELOG.md                         版本更新说明（发版说明与客户端更新窗口共用）
+.github/workflows/release.yml        标签触发的 macOS Universal 构建与草稿 Release 工作流
 frontend/                            原生界面层：工作台状态、侧边栏、项目总览、三列看板、任务详情、回收站、设置与附件预览
 frontend/workbench_test.go           基于 ui.Tester 的端到端无头 UI 交互测试
 frontend/attachment_preview_test.go  图片缩略图解码、方向校正与有界缓存测试
