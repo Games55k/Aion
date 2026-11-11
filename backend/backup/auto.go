@@ -91,6 +91,11 @@ func (s *Service) SetPolicy(ctx context.Context, p Policy) error {
 		if err != nil {
 			return err
 		}
+		// Persist the default directory as "" so it keeps resolving against the
+		// current store root after the database is restored into another one.
+		if normalized.Directory == s.defaultPolicy().Directory {
+			normalized.Directory = ""
+		}
 		b, err := json.Marshal(normalized)
 		if err != nil {
 			return err

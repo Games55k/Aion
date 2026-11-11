@@ -844,3 +844,33 @@ func TestSetPolicyValidationAndUTF8ErrorTruncation(t *testing.T) {
 		t.Fatalf("invalid LastError after truncation: len=%d valid=%v", len(status.LastError), utf8.ValidString(status.LastError))
 	}
 }
+
+// Regression: saving a policy persisted the default backup directory as an absolute path, so a backup restored into another data directory kept sending automatic backups to the store it was exported from.
+func TestDefaultPolicyDirectoryFollowsRestoredStore(t *testing.T) {
+	source := testStore(t)
+	seed(t, source, "live", "payload")
+	service := New(source)
+	p, err := service.GetPolicy(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Keep = 3
+	if err = service.SetPolicy(testCtx, p); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "backup.zip")
+	if err = service.Export(testCtx, archive); err != nil {
+		t.Fatal(err)
+	}
+	target := testStore(t)
+	if _, err = New(target).Restore(testCtx, archive); err != nil {
+		t.Fatal(err)
+	}
+	got, err := New(target).GetPolicy(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(target.Root(), "backups"); got.Directory != want || got.Keep != 3 {
+		t.Fatalf("restored policy = %+v, want directory %s and keep 3", got, want)
+	}
+}
