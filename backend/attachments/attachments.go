@@ -138,14 +138,47 @@ func (s *Service) List(ctx context.Context, taskID string) ([]model.Attachment, 
 	if err != nil {
 		return nil, err
 	}
-	// RFC3339Nano omits trailing fractional zeros, so sort parsed instants in Go.
-	sort.Slice(attachments, func(i, j int) bool {
-		if attachments[i].CreatedAt.Equal(attachments[j].CreatedAt) {
-			return attachments[i].ID < attachments[j].ID
-		}
-		return attachments[i].CreatedAt.Before(attachments[j].CreatedAt)
-	})
+	sortByImportOrder(attachments)
 	return attachments, nil
+}
+
+// ListByProject returns the attachments of every live task in a visible
+// project, keyed by task ID and in import order, using a single query.
+func (s *Service) ListByProject(ctx context.Context, projectID string) (map[string][]model.Attachment, error) {
+	byTask := make(map[string][]model.Attachment)
+	err := s.store.Read(ctx, func(tx *sql.Tx) error {
+		var deleted sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT deleted_at FROM projects WHERE id=?`, projectID).Scan(&deleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if deleted.Valid {
+			return model.ErrParentDeleted
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT a.id,a.task_id,a.name,a.storage_name,a.media_type,a.size,a.sha256,a.created_at FROM attachments a JOIN tasks t ON t.id=a.task_id WHERE t.project_id=? AND t.deleted_at IS NULL`, projectID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanAttachment(rows)
+			if err != nil {
+				return err
+			}
+			byTask[a.TaskID] = append(byTask[a.TaskID], a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, list := range byTask {
+		sortByImportOrder(list)
+	}
+	return byTask, nil
 }
 
 // ManagedPath resolves an existing regular file for a visible attachment.
@@ -314,6 +347,16 @@ func visibleTask(ctx context.Context, tx *sql.Tx, taskID string) error {
 		return model.ErrParentDeleted
 	}
 	return nil
+}
+
+// RFC3339Nano omits trailing fractional zeros, so sort parsed instants in Go.
+func sortByImportOrder(list []model.Attachment) {
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].CreatedAt.Equal(list[j].CreatedAt) {
+			return list[i].ID < list[j].ID
+		}
+		return list[i].CreatedAt.Before(list[j].CreatedAt)
+	})
 }
 
 type scanner interface{ Scan(...any) error }

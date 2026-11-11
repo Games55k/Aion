@@ -346,6 +346,16 @@ func TestProjectScopedSearchAndFilters(t *testing.T) {
 		if !reflect.DeepEqual(gotIDs, wantIDs) {
 			t.Fatalf("filter %+v got %v, want %v", tt.filter, gotIDs, wantIDs)
 		}
+		// The in-memory matcher used by the board must agree with the query.
+		var matched []string
+		for _, v := range tasks {
+			if tt.filter.Matches(v) {
+				matched = append(matched, v.ID)
+			}
+		}
+		if !reflect.DeepEqual(matched, wantIDs) {
+			t.Fatalf("filter %+v Matches %v, want %v", tt.filter, matched, wantIDs)
+		}
 	}
 	board(t, s, p, model.Planned, tasks[0], tasks[1])
 	for _, f := range []projects.TaskFilter{{Status: "bad"}, {Priority: "bad"}, {Tags: []string{" "}}} {
@@ -637,4 +647,24 @@ func TestUpdateTaskStatusChangeReindexesBothColumns(t *testing.T) {
 	}
 	board(t, s, p, model.Done, c)
 	board(t, s, p, model.InProgress, reopened)
+}
+
+// CountTasks reports live tasks per project and status, skipping trashed tasks and projects without tasks.
+func TestCountTasksGroupsLiveTasksByProjectAndStatus(t *testing.T) {
+	s, _ := setup(t)
+	p := project(t, s, "P")
+	empty := project(t, s, "Empty")
+	for _, status := range []model.Status{model.Planned, model.Planned, model.Done} {
+		_, err := s.CreateTask(ctx, p.ID, projects.TaskInput{Title: "task", Status: status})
+		check(t, err)
+	}
+	trashed, err := s.CreateTask(ctx, p.ID, projects.TaskInput{Title: "trashed", Status: model.InProgress})
+	check(t, err)
+	check(t, s.DeleteTask(ctx, trashed.ID))
+	got, err := s.CountTasks(ctx)
+	check(t, err)
+	want := map[string]map[model.Status]int{p.ID: {model.Planned: 2, model.Done: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CountTasks = %v, want %v (project %s has no tasks)", got, want, empty.ID)
+	}
 }

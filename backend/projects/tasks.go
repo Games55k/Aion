@@ -140,6 +140,48 @@ func matchesTextAndTags(t model.Task, wantedTags []string, queryText string) boo
 	return false
 }
 
+// Matches reports whether t satisfies the filter, using the same rules as
+// ListTasks, so callers holding a task list can refilter without a query.
+func (f TaskFilter) Matches(t model.Task) bool {
+	if (f.Status != "" && t.Status != f.Status) || (f.Priority != "" && t.Priority != f.Priority) {
+		return false
+	}
+	wanted := make([]string, 0, len(f.Tags))
+	for _, tag := range f.Tags {
+		wanted = append(wanted, strings.TrimSpace(tag))
+	}
+	return matchesTextAndTags(t, wanted, strings.ToLower(strings.TrimSpace(f.Query)))
+}
+
+// CountTasks returns live task counts per project and status in one query.
+func (s *Service) CountTasks(ctx context.Context) (map[string]map[model.Status]int, error) {
+	counts := make(map[string]map[model.Status]int)
+	err := s.store.Read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT project_id,status,COUNT(*) FROM tasks WHERE deleted_at IS NULL GROUP BY project_id,status`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var projectID string
+			var status model.Status
+			var n int
+			if err := rows.Scan(&projectID, &status, &n); err != nil {
+				return err
+			}
+			if counts[projectID] == nil {
+				counts[projectID] = make(map[model.Status]int, 3)
+			}
+			counts[projectID][status] = n
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
 // UpdateTask replaces all content fields. Changing Status appends the task to
 // the destination column. Use MoveTask to choose an explicit destination index.
 func (s *Service) UpdateTask(ctx context.Context, id string, in TaskInput) (model.Task, error) {

@@ -439,3 +439,43 @@ func TestBothTaskAndProjectDeletedReturnsNotFound(t *testing.T) {
 		t.Fatalf("Remove error = %v", err)
 	}
 }
+
+// ListByProject groups a project's attachments by live task in import order and hides trashed tasks, other projects, and trashed projects.
+func TestListByProjectGroupsLiveTaskAttachments(t *testing.T) {
+	s, service := fixture(t)
+	now := model.Timestamp()
+	exec(t, s, `INSERT INTO tasks(id,project_id,title,description,status,priority,created_at,updated_at) VALUES('t2','p','second','','planned','none',?,?)`, now, now)
+	exec(t, s, `INSERT INTO tasks(id,project_id,title,description,status,priority,created_at,updated_at,deleted_at) VALUES('gone','p','trashed','','planned','none',?,?,?)`, now, now, now)
+	exec(t, s, `INSERT INTO projects(id,name,icon,description,created_at,updated_at) VALUES('other','other','','',?,?)`, now, now)
+	exec(t, s, `INSERT INTO tasks(id,project_id,title,description,status,priority,created_at,updated_at) VALUES('ot','other','elsewhere','','planned','none',?,?)`, now, now)
+	exec(t, s, `INSERT INTO attachments(id,task_id,name,storage_name,media_type,size,sha256,created_at) VALUES('hidden','gone','h','h-file','text/plain',0,'',?)`, now)
+	var want []string
+	for _, name := range []string{"a.txt", "b.txt"} {
+		a, err := service.Import(ctx, "t", source(t, name, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, a.ID)
+	}
+	if _, err := service.Import(ctx, "ot", source(t, "c.txt", "c")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.ListByProject(ctx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, a := range got["t"] {
+		ids = append(ids, a.ID)
+	}
+	if len(got) != 1 || !slices.Equal(ids, want) {
+		t.Fatalf("ListByProject = %v, want only task t with %v", got, want)
+	}
+	if _, err := service.ListByProject(ctx, "missing"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("missing project error = %v", err)
+	}
+	exec(t, s, `UPDATE projects SET deleted_at=? WHERE id='p'`, now)
+	if _, err := service.ListByProject(ctx, "p"); !errors.Is(err, model.ErrParentDeleted) {
+		t.Fatalf("deleted project error = %v", err)
+	}
+}
