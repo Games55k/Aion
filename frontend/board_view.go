@@ -109,10 +109,10 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 						w.ArchiveProject(p.ID)
 					}
 				}
-				if action.Button(c, "删除项目", action.ButtonProps{
+				if action.Button(c, "移入回收站", action.ButtonProps{
 					Variant: action.Text,
 					Size:    theme.Small,
-				}).Clicked() {
+				}).Label("将项目移入回收站").Clicked() {
 					w.SoftDeleteProject(p.ID)
 				}
 				if action.Button(c, "+ 新建任务", action.ButtonProps{

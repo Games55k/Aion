@@ -45,7 +45,8 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 							mod := mod
 							active := w.activeModule == mod.ID
 							btn := ui.ButtonBase(c.Key(string(mod.ID))).Grow(1).Height(28).PaddingX(10).Gap(6).
-								Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
+								Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
+								Label("切换模块 " + mod.Name)
 							if active {
 								btn.Background(tk.BgElevated).TextColor(tk.Text).FontWeight(600)
 							} else {
@@ -135,6 +136,10 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 			case NavArchivedProjects:
 				topActive = "nav:archived_projects"
 			}
+			activeExtra := ""
+			if len(w.activeProjects) > 0 {
+				activeExtra = fmt.Sprint(len(w.activeProjects))
+			}
 			archivedExtra := ""
 			if len(w.archivedProjects) > 0 {
 				archivedExtra = fmt.Sprint(len(w.archivedProjects))
@@ -148,7 +153,7 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 						Key:   "nav:all_projects",
 						Label: "所有项目",
 						Icon:  lucide.LayoutGrid(),
-						Extra: fmt.Sprint(len(w.activeProjects)),
+						Extra: activeExtra,
 					},
 					{
 						Key:   "nav:archived_projects",

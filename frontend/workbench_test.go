@@ -1556,3 +1556,108 @@ func TestBoardColumnIgnoresSameStatusDropWhileCardReorders(t *testing.T) {
 		t.Fatalf("expected card drop onto bottom half of t2 to reorder [%s %s %s], got %+v", t2.ID, t1.ID, t3.ID, planned)
 	}
 }
+
+// Switching tasks, trashing via consistent labels, filtering trash, and triggering restore from Settings maintain consistent state and errors.
+func TestCrossViewConsistencyFixes(t *testing.T) {
+	pickErr := errors.New("dialog unavailable")
+	host := Host{
+		PickOpenFiles: func(_ string, _ bool, _ ...string) ([]string, error) {
+			return nil, pickErr
+		},
+	}
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), host)
+
+	// Empty active project count must not render a standalone zero badge on 所有项目.
+	tt.Frame()
+	if slices.Contains(tt.Texts(), "0") {
+		t.Fatalf("expected empty 所有项目 not to display standalone zero badge, got texts %v", tt.Texts())
+	}
+
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "一致性测试项目"
+	wb.SubmitProjectModal()
+
+	t1, err := wb.QuickCreateTask(model.Planned, "任务甲")
+	if err != nil {
+		t.Fatalf("create t1: %v", err)
+	}
+	t2, err := wb.QuickCreateTask(model.Planned, "任务乙")
+	if err != nil {
+		t.Fatalf("create t2: %v", err)
+	}
+
+	// Saving t1 sets lastSavedAt, which must reset when switching to t2 or closing detail panel.
+	wb.SelectTask(t1.ID)
+	wb.editTitle = "任务甲-已编辑"
+	if err := wb.SaveSelectedTask(); err != nil {
+		t.Fatalf("save t1: %v", err)
+	}
+	if wb.lastSavedAt.IsZero() {
+		t.Fatal("expected lastSavedAt populated after SaveSelectedTask")
+	}
+	wb.SelectTask(t2.ID)
+	if !wb.lastSavedAt.IsZero() {
+		t.Fatalf("expected lastSavedAt cleared when switching to another task, got %v", wb.lastSavedAt)
+	}
+	wb.editTitle = "任务乙-已编辑"
+	if err := wb.SaveSelectedTask(); err != nil {
+		t.Fatalf("save t2: %v", err)
+	}
+	wb.ClearSelectedTask()
+	if !wb.lastSavedAt.IsZero() {
+		t.Fatalf("expected lastSavedAt cleared when closing detail panel, got %v", wb.lastSavedAt)
+	}
+
+	// Settings restore button surfaces picker errors and FlushPending dirty draft warnings consistently.
+	wb.SelectTask(t1.ID)
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	wb.editTitle = "   "
+	_ = wb.SaveSelectedTask()
+	wb.detailExpanded = false
+	if err := tt.Click("从备份包恢复 (.zip)..."); err != nil {
+		t.Fatalf("click restore button while dirty: %v", err)
+	}
+	if !tt.HasText("当前任务存在未保存修改") || !wb.detailExpanded {
+		t.Fatalf("expected FlushPending dirty warning toast and detailExpanded=true")
+	}
+	wb.DiscardSelectedTaskDraft()
+	if err := tt.Click("从备份包恢复 (.zip)..."); err != nil {
+		t.Fatalf("click restore button with picker error: %v", err)
+	}
+	if !tt.HasText("选择备份包失败") || !tt.HasText(pickErr.Error()) {
+		t.Fatalf("expected restore picker error toast to surface")
+	}
+
+	// Soft-deleting task and project uses consistent 移入回收站 buttons, and Trash filter bar clears cleanly.
+	if err := tt.Click("一致性测试项目"); err != nil {
+		t.Fatalf("click project in sidebar: %v", err)
+	}
+	wb.SelectTask(t1.ID)
+	tt.Frame()
+	if err := tt.Click("将任务移入回收站"); err != nil {
+		t.Fatalf("click 将任务移入回收站: %v", err)
+	}
+	if err := tt.Click("将项目移入回收站"); err != nil {
+		t.Fatalf("click 将项目移入回收站: %v", err)
+	}
+	for tt.Click("Close") == nil {
+	}
+	if err := tt.Click("回收站"); err != nil {
+		t.Fatalf("click 回收站: %v", err)
+	}
+	if err := tt.Click("搜索回收站"); err != nil {
+		t.Fatalf("click 搜索回收站: %v", err)
+	}
+	tt.Type("任务甲")
+	if !tt.HasText("匹配 1 / 2 项") {
+		t.Fatalf("expected trash filter summary 匹配 1 / 2 项, got texts %v", tt.Texts())
+	}
+	if err := tt.Click("清除筛选"); err != nil {
+		t.Fatalf("click trash 清除筛选: %v", err)
+	}
+	if wb.trashSearch != "" || !tt.HasText("共 2 项") {
+		t.Fatalf("expected trash filter cleared and 共 2 项 displayed, got search=%q texts=%v", wb.trashSearch, tt.Texts())
+	}
+}

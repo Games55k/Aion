@@ -311,22 +311,18 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							if w.IsBusy() {
 								return
 							}
-							if err := w.FlushPending(); err != nil {
-								desc := w.saveErr
-								if desc == "" {
-									desc = err.Error()
-								}
-								w.EnqueueToast(feedback.ToastProps{
-									Title:       "当前任务存在未保存修改",
-									Description: desc + "，请先修正保存或放弃修改后再恢复备份",
-									Type:        feedback.ToastWarning,
-								})
+							if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再恢复备份"); err != nil {
 								return
 							}
 							if pick := w.host.PickOpenFiles; pick != nil {
 								w.runDialog(func() func() {
 									paths, err := pick("选择要恢复的 Aion 备份包 (.zip)", false, "zip")
-									if err != nil || len(paths) == 0 {
+									if err != nil {
+										return func() {
+											w.enqueueErrorToast("选择备份包失败", err)
+										}
+									}
+									if len(paths) == 0 {
 										return nil
 									}
 									return func() {

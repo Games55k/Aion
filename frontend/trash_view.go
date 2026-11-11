@@ -22,10 +22,33 @@ var trashKindOptions = []field.SelectOption{
 	{Value: projects.TrashTask, Label: "仅看任务"},
 }
 
+func (w *Workbench) filterTrashItems() []model.TrashItem {
+	if len(w.trashItems) == 0 {
+		return nil
+	}
+	query := strings.ToLower(strings.TrimSpace(w.trashSearch))
+	if query == "" && w.trashKindFilter == "" {
+		return w.trashItems
+	}
+	filtered := make([]model.TrashItem, 0, len(w.trashItems))
+	for _, it := range w.trashItems {
+		if w.trashKindFilter != "" && it.Kind != w.trashKindFilter {
+			continue
+		}
+		if query != "" {
+			projName := w.projectNames[it.ProjectID]
+			if !strings.Contains(strings.ToLower(it.Name), query) && !strings.Contains(strings.ToLower(projName), query) {
+				continue
+			}
+		}
+		filtered = append(filtered, it)
+	}
+	return filtered
+}
+
 func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
-	// Map deleted project IDs and filter items only when the recycle bin is non-empty
+	// Map deleted project IDs only when the recycle bin is non-empty
 	var deletedProjects map[string]string
-	var filtered []model.TrashItem
 	if len(w.trashItems) > 0 {
 		deletedProjects = make(map[string]string)
 		for _, it := range w.trashItems {
@@ -33,24 +56,8 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 				deletedProjects[it.ID] = it.Name
 			}
 		}
-
-		// Filter trash items by kind and search query
-		query := strings.ToLower(strings.TrimSpace(w.trashSearch))
-		for _, it := range w.trashItems {
-			if w.trashKindFilter != "" && it.Kind != w.trashKindFilter {
-				continue
-			}
-			if query != "" {
-				projName := w.projectNames[it.ProjectID]
-				matchTitle := strings.Contains(strings.ToLower(it.Name), query)
-				matchProj := strings.Contains(strings.ToLower(projName), query)
-				if !matchTitle && !matchProj {
-					continue
-				}
-			}
-			filtered = append(filtered, it)
-		}
 	}
+	filtered := w.filterTrashItems()
 
 	ui.Column(c).Fill().Children(func() {
 		// Top Header Bar
@@ -81,6 +88,9 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 		// Filter Bar
 		ui.Row(c).Padding(10, 24).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).
 			Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			beforeSearch := w.trashSearch
+			beforeKind := w.trashKindFilter
+
 			ui.Box(c).Width(280).Children(func() {
 				field.SearchBar(c, &w.trashSearch, field.SearchBarProps{
 					Placeholder: "搜索已删除的项目或任务...",
@@ -96,6 +106,31 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 						Options: trashKindOptions,
 					}).Label("回收站类型筛选")
 				})
+			})
+
+			if w.trashSearch != beforeSearch || w.trashKindFilter != beforeKind {
+				filtered = w.filterTrashItems()
+			}
+
+			ui.Box(c).Grow(1)
+
+			hasTrashFilter := strings.TrimSpace(w.trashSearch) != "" || w.trashKindFilter != ""
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				if hasTrashFilter {
+					ui.Text(c, fmt.Sprintf("匹配 %d / %d 项", len(filtered), len(w.trashItems))).
+						FontSize(12).TextColor(tk.Primary).SingleLine()
+					if action.Button(c, "清除筛选", action.ButtonProps{
+						Variant: action.Default,
+						Size:    theme.Small,
+					}).Clicked() {
+						w.trashSearch = ""
+						w.trashKindFilter = ""
+						filtered = w.trashItems
+					}
+				} else {
+					ui.Text(c, fmt.Sprintf("共 %d 项", len(w.trashItems))).
+						FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+				}
 			})
 		})
 

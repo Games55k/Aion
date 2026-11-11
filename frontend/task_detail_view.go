@@ -93,10 +93,10 @@ func (w *Workbench) renderTaskDetailPanel(c *ui.Context, tk *theme.Tokens) {
 			// Delete & Close Buttons
 			panelClosed := false
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if action.Button(c, "删除任务", action.ButtonProps{
+				if action.Button(c, "移入回收站", action.ButtonProps{
 					Variant: action.Text,
 					Size:    theme.Small,
-				}).Clicked() {
+				}).Label("将任务移入回收站").Clicked() {
 					w.SoftDeleteTask(t.ID)
 					panelClosed = w.detailTask == nil
 					return
@@ -552,7 +552,7 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 			if action.Button(c, "添加子任务", action.ButtonProps{
 				Variant: action.Default,
 				Size:    theme.Small,
-			}).Clicked() {
+			}).Disabled(strings.TrimSpace(w.newSubtaskTitle) == "").Clicked() {
 				addSubtask()
 			}
 		})

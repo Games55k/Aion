@@ -801,6 +801,7 @@ func (w *Workbench) SelectTask(taskID string) {
 func (w *Workbench) selectLoadedTask(t model.Task) {
 	w.selectedTaskID = t.ID
 	w.detailExpanded = true
+	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
 	w.syncDetailFromTask(t)
 }
@@ -828,6 +829,7 @@ func (w *Workbench) resetSelectedTaskState() {
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
+	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
 	w.attachmentPaths = make(map[string]string)
 	w.attachmentMissing = make(map[string]bool)
@@ -1356,7 +1358,7 @@ func (w *Workbench) SoftDeleteTask(taskID string) {
 	}
 	ctx := context.Background()
 	if err := w.app.Projects.DeleteTask(ctx, taskID); err != nil {
-		w.enqueueErrorToast("删除任务失败", err)
+		w.enqueueErrorToast("移入回收站失败", err)
 		return
 	}
 	if w.selectedTaskID == taskID {
