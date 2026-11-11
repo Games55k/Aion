@@ -13,6 +13,7 @@ import (
 	"aion/frontend"
 
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
@@ -66,10 +67,12 @@ func run(dataDir, snapshotPath string) error {
 	if dataDir != "" {
 		mygo.App.SetPath(mygo.PathUserData, app.DataDir())
 	}
+	mygo.App.SetLanguages("zh-Hans")
 	mygo.App.SetName("Aion")
 	mygo.Use(native.New(updater.Options{
 		DisableAutomaticChecks: true,
 		Icon:                   icon.PNG,
+		Language:               "zh-Hans",
 	}))
 
 	mygo.App.WhenReady(func() {
