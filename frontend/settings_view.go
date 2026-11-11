@@ -251,7 +251,12 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 									curDir := w.backupDirInput
 									w.runDialog(func() func() {
 										dir, err := pick("选择自动备份存储目录", curDir)
-										if err != nil || dir == "" {
+										if err != nil {
+											return func() {
+												w.enqueueErrorToast("选择备份目录失败", err)
+											}
+										}
+										if dir == "" {
 											return nil
 										}
 										return func() {

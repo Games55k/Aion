@@ -1981,3 +1981,24 @@ func TestPrepareCloseWithActiveBackupOrAttachmentTask(t *testing.T) {
 		t.Fatalf("expected imported attachment recorded after dispatch, got %+v", wb.detailAttachments)
 	}
 }
+
+// Regression: a failing backup directory picker was silently ignored while every other native picker reported its error.
+func TestBackupDirectoryPickerErrorIsReported(t *testing.T) {
+	pickErr := errors.New("directory picker unavailable")
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		PickDirectory: func(string, string) (string, error) { return "", pickErr },
+	})
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	before := wb.backupDirInput
+	if err := tt.Click("选择目录..."); err != nil {
+		t.Fatalf("click 选择目录...: %v", err)
+	}
+	if !tt.HasText("选择备份目录失败") || !tt.HasText(pickErr.Error()) {
+		t.Fatalf("expected directory picker error toast")
+	}
+	if wb.backupDirInput != before {
+		t.Fatalf("backup directory changed after picker error: %q", wb.backupDirInput)
+	}
+}
