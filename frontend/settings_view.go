@@ -212,7 +212,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							ui.Text(c, "自动备份频率").FontSize(13).FontWeight(500).TextColor(tk.Text)
 							beforeInt := w.backupIntervalSelect
 							field.Select(c.Key("backup-interval-select"), &w.backupIntervalSelect, field.SelectProps{
-								Options: backupIntervalOptions,
+								Options: withCurrentOption(backupIntervalOptions, w.backupIntervalSelect, intervalLabel(parseIntervalOption(w.backupIntervalSelect))),
 							}).Label("自动备份频率选择")
 							if w.backupIntervalSelect != beforeInt {
 								w.SaveBackupPolicy()
@@ -223,7 +223,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							ui.Text(c, "自动备份保留份数").FontSize(13).FontWeight(500).TextColor(tk.Text)
 							beforeKeep := w.backupKeepSelect
 							field.Select(c.Key("backup-keep-select"), &w.backupKeepSelect, field.SelectProps{
-								Options: backupKeepOptions,
+								Options: withCurrentOption(backupKeepOptions, w.backupKeepSelect, "保留最近 "+w.backupKeepSelect+" 份"),
 							}).Label("自动备份保留份数选择")
 							if w.backupKeepSelect != beforeKeep {
 								w.SaveBackupPolicy()

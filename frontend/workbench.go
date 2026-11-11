@@ -19,6 +19,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/lobehub/lobe-mygo/pkg/feedback"
+	"github.com/lobehub/lobe-mygo/pkg/field"
 	"github.com/lobehub/lobe-mygo/pkg/layout"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
@@ -1579,13 +1580,22 @@ func (w *Workbench) RemoveAttachmentFromSelectedTask(attachmentID string) {
 				w.enqueueErrorToast("移除附件失败", err)
 			}
 		}
-		_, _ = w.app.Attachments.GC(ctx)
+		_, gcErr := w.app.Attachments.GC(ctx)
 		return func() {
 			delete(w.attachmentPaths, attachmentID)
 			delete(w.attachmentMissing, attachmentID)
 			delete(w.bitmapCache, attachmentID)
 			delete(w.bitmapFailed, attachmentID)
 			w.ReloadBoardTasks()
+			if gcErr != nil {
+				// The row is gone; the file stays until the next successful cleanup.
+				w.EnqueueToast(feedback.ToastProps{
+					Title:       "已移除附件，但清理文件失败",
+					Description: gcErr.Error(),
+					Type:        feedback.ToastWarning,
+				})
+				return
+			}
 			w.EnqueueToast(feedback.ToastProps{
 				Title:       "已移除附件",
 				Description: "任务附件关联已移除并清理未引用文件",
@@ -1962,30 +1972,43 @@ func (w *Workbench) ReloadSettings() {
 	}
 }
 
+// formatIntervalOption returns the select value for d: a preset key when one
+// matches exactly, otherwise the duration itself so saving never rewrites it.
 func formatIntervalOption(d time.Duration) string {
-	switch {
-	case d <= 6*time.Hour:
-		return "6h"
-	case d <= 12*time.Hour:
-		return "12h"
-	case d >= 7*24*time.Hour:
-		return "168h"
-	default:
-		return "24h"
+	for _, opt := range backupIntervalOptions {
+		if parseIntervalOption(opt.Value) == d {
+			return opt.Value
+		}
 	}
+	return d.String()
 }
 
 func parseIntervalOption(val string) time.Duration {
-	switch val {
-	case "6h":
-		return 6 * time.Hour
-	case "12h":
-		return 12 * time.Hour
-	case "168h":
-		return 7 * 24 * time.Hour
-	default:
-		return 24 * time.Hour
+	if d, err := time.ParseDuration(val); err == nil && d > 0 {
+		return d
 	}
+	return 24 * time.Hour
+}
+
+// intervalLabel describes a non-preset interval in the presets' wording.
+func intervalLabel(d time.Duration) string {
+	switch {
+	case d%(24*time.Hour) == 0:
+		return fmt.Sprintf("每 %d 天", d/(24*time.Hour))
+	case d%time.Hour == 0:
+		return fmt.Sprintf("每 %d 小时", d/time.Hour)
+	default:
+		return "每 " + d.String()
+	}
+}
+
+// withCurrentOption appends an entry for current when it is not one of the
+// presets, so a policy set outside the UI is shown and preserved as it is.
+func withCurrentOption(presets []field.SelectOption, current, label string) []field.SelectOption {
+	if current == "" || slices.ContainsFunc(presets, func(o field.SelectOption) bool { return o.Value == current }) {
+		return presets
+	}
+	return append(slices.Clone(presets), field.SelectOption{Value: current, Label: label})
 }
 
 // ApplyThemeSetting persists and applies the given theme preference.

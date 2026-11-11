@@ -2154,3 +2154,69 @@ func TestSaveTimestampUsesHostClock(t *testing.T) {
 		t.Fatalf("lastSavedAt = %v, want %v", wb.lastSavedAt, fixed)
 	}
 }
+
+// Regression: a backup interval or retention outside the Settings presets was shown as a preset and rewritten to it whenever any other policy control was saved.
+func TestSavingPolicyPreservesNonPresetIntervalAndKeep(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	ctx := context.Background()
+	if err := app.Backups.SetPolicy(ctx, backup.Policy{Enabled: true, Interval: 48 * time.Hour, Keep: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	if err := tt.Click("启用自动备份开关"); err != nil {
+		t.Fatalf("click 启用自动备份开关: %v", err)
+	}
+	got, err := app.Backups.GetPolicy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.Interval != 48*time.Hour || got.Keep != 9 {
+		t.Fatalf("policy after toggling the switch = %+v, want disabled with 48h and keep 9", got)
+	}
+	// Choosing a preset still replaces the custom value.
+	wb.backupIntervalSelect = "6h"
+	wb.SaveBackupPolicy()
+	if got, err = app.Backups.GetPolicy(ctx); err != nil || got.Interval != 6*time.Hour || got.Keep != 9 {
+		t.Fatalf("policy after choosing a preset = %+v, %v", got, err)
+	}
+}
+
+// Regression: a failed file cleanup after removing an attachment was discarded and reported as a successful cleanup.
+func TestRemoveAttachmentReportsFailedCleanup(t *testing.T) {
+	dataDir := t.TempDir()
+	app, wb, tt := openTestWorkbench(t, dataDir, Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "cleanup"
+	wb.SubmitProjectModal()
+	task, err := wb.QuickCreateTask(model.Planned, "with file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wb.ImportAttachmentsToSelectedTask([]string{src})
+	tt.Frame()
+
+	// A read-only managed directory lets the row be deleted but not the file.
+	managed := filepath.Join(dataDir, "attachments")
+	if err := os.Chmod(managed, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(managed, 0o700) })
+	if err := tt.Click("移除附件 notes.txt"); err != nil {
+		t.Fatalf("click 移除附件 notes.txt: %v", err)
+	}
+	if !tt.HasText("已移除附件，但清理文件失败") {
+		t.Fatalf("expected a failed-cleanup warning toast")
+	}
+	if atts, err := app.Attachments.List(context.Background(), task.ID); err != nil || len(atts) != 0 {
+		t.Fatalf("attachment row not removed: %v %v", atts, err)
+	}
+	if files, err := os.ReadDir(managed); err != nil || len(files) != 1 {
+		t.Fatalf("expected the uncollected file to remain: %v %v", files, err)
+	}
+}
