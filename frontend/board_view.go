@@ -137,7 +137,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 						Size:        theme.Small,
 					}).Label("搜索任务")
 					if w.searchQuery != beforeQ {
-						w.ReloadBoardTasks()
+						w.applyBoardFilters()
 					}
 				})
 
@@ -152,7 +152,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 							Options:     priorityFilterOptions,
 						}).Label("按优先级筛选")
 						if w.priorityFilter != beforeP {
-							w.ReloadBoardTasks()
+							w.applyBoardFilters()
 						}
 					})
 				})

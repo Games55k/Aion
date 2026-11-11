@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -2000,5 +2001,136 @@ func TestBackupDirectoryPickerErrorIsReported(t *testing.T) {
 	}
 	if wb.backupDirInput != before {
 		t.Fatalf("backup directory changed after picker error: %q", wb.backupDirInput)
+	}
+}
+
+// Typing in the board search bar and toggling filters refilters the loaded board without waiting for the Store lock.
+func TestBoardFiltersDoNotWaitForStoreLock(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "filter lock check"
+	wb.SubmitProjectModal()
+	ctx := context.Background()
+	for _, in := range []projects.TaskInput{
+		{Title: "alpha", Tags: []string{"go"}, Priority: model.High},
+		{Title: "beta", Tags: []string{"go", "ui"}, Priority: model.Low},
+	} {
+		if _, err := app.Projects.CreateTask(ctx, wb.activeProjectID, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wb.ReloadBoardTasks()
+	tt.Frame()
+
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	app.Projects = projects.New(s)
+	app.Attachments = attachments.New(s)
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- s.Exclusive(ctx, func(_ *sql.DB) error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	if err := tt.Click("搜索任务"); err != nil {
+		t.Fatalf("click 搜索任务: %v", err)
+	}
+	tt.Type("BET")
+	if len(wb.filteredTasks) != 1 || wb.filteredTasks[0].Title != "beta" {
+		t.Fatalf("search under lock matched %+v", wb.filteredTasks)
+	}
+	if err := tt.Click("清除筛选"); err != nil {
+		t.Fatalf("click 清除筛选: %v", err)
+	}
+	if err := tt.Click("筛选标签 ui"); err != nil {
+		t.Fatalf("click 筛选标签 ui: %v", err)
+	}
+	if len(wb.filteredTasks) != 1 || wb.filteredTasks[0].Title != "beta" {
+		t.Fatalf("tag filter under lock matched %+v", wb.filteredTasks)
+	}
+	wb.priorityFilter = string(model.High)
+	wb.applyBoardFilters()
+	if len(wb.filteredTasks) != 0 || len(wb.boardTasks) != 2 {
+		t.Fatalf("combined filters under lock: %d visible of %d", len(wb.filteredTasks), len(wb.boardTasks))
+	}
+
+	close(release)
+	if err := <-lockDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Detail-panel edits patch the loaded board in place, so the cards, tag list, filters, and summary must equal what a full reload from SQLite produces.
+func TestDetailEditsKeepBoardInSyncWithoutReload(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "in-place sync"
+	wb.SubmitProjectModal()
+	ctx := context.Background()
+	keep, err := app.Projects.CreateTask(ctx, wb.activeProjectID, projects.TaskInput{Title: "keep", Tags: []string{"shared"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := app.Projects.CreateTask(ctx, wb.activeProjectID, projects.TaskInput{Title: "edit me", Tags: []string{"shared", "solo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadBoardTasks()
+	wb.SelectTask(edited.ID)
+	wb.tagFilters = []string{"solo"}
+	wb.applyBoardFilters()
+	tt.Frame()
+
+	// Typing a title persists every keystroke and updates the card.
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatalf("click 任务详情标题: %v", err)
+	}
+	tt.Type(" now")
+	stored, err := app.Projects.GetTask(ctx, edited.ID)
+	if err != nil || stored.Title != "edit me now" {
+		t.Fatalf("stored title = %q, %v", stored.Title, err)
+	}
+	if !tt.HasText("edit me now") || wb.dirty {
+		t.Fatalf("board card or save state not updated after typing")
+	}
+
+	// Removing the last use of a tag drops it from the tag list and from the active filters.
+	if err := tt.Click("移除标签 solo"); err != nil {
+		t.Fatalf("click 移除标签 solo: %v", err)
+	}
+	if len(wb.tagFilters) != 0 || !slices.Equal(wb.allBoardTags, []string{"shared"}) || len(wb.filteredTasks) != 2 {
+		t.Fatalf("after tag removal: filters=%v tags=%v visible=%d", wb.tagFilters, wb.allBoardTags, len(wb.filteredTasks))
+	}
+
+	// A status change still renumbers columns through a real reload.
+	wb.editStatus = string(model.Done)
+	if err := wb.SaveSelectedTask(); err != nil {
+		t.Fatal(err)
+	}
+	if sum := wb.projectSummaries[wb.activeProjectID]; sum.Done != 1 || sum.Planned != 1 || sum.Total != 2 {
+		t.Fatalf("summary after status change = %+v", sum)
+	}
+
+	inPlace := struct {
+		board, visible []model.Task
+		tags           []string
+		sum            ProjectSummary
+	}{slices.Clone(wb.boardTasks), slices.Clone(wb.filteredTasks), slices.Clone(wb.allBoardTags), wb.projectSummaries[wb.activeProjectID]}
+	wb.ReloadBoardTasks()
+	if !reflect.DeepEqual(inPlace.board, wb.boardTasks) || !reflect.DeepEqual(inPlace.visible, wb.filteredTasks) ||
+		!slices.Equal(inPlace.tags, wb.allBoardTags) || inPlace.sum != wb.projectSummaries[wb.activeProjectID] {
+		t.Fatalf("in-place board state diverged from a full reload")
+	}
+	if got, err := app.Projects.GetTask(ctx, keep.ID); err != nil || !got.UpdatedAt.Equal(keep.UpdatedAt) {
+		t.Fatalf("untouched task was rewritten: %v %v", got.UpdatedAt, err)
 	}
 }

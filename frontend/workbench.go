@@ -585,6 +585,12 @@ func (w *Workbench) ReloadProjects() {
 		return
 	}
 
+	counts, err := w.app.Projects.CountTasks(ctx)
+	if err != nil {
+		w.enqueueErrorToast("加载项目失败", err)
+		return
+	}
+
 	var active, archived []model.Project
 	summaries := make(map[string]ProjectSummary, len(all))
 	for _, p := range all {
@@ -593,22 +599,10 @@ func (w *Workbench) ReloadProjects() {
 		} else {
 			archived = append(archived, p)
 		}
-		tasks, err := w.app.Projects.ListTasks(ctx, p.ID, projects.TaskFilter{})
-		if err == nil {
-			var s ProjectSummary
-			s.Total = len(tasks)
-			for _, t := range tasks {
-				switch t.Status {
-				case model.Planned:
-					s.Planned++
-				case model.InProgress:
-					s.InProgress++
-				case model.Done:
-					s.Done++
-				}
-			}
-			summaries[p.ID] = s
-		}
+		c := counts[p.ID]
+		sum := ProjectSummary{Planned: c[model.Planned], InProgress: c[model.InProgress], Done: c[model.Done]}
+		sum.Total = sum.Planned + sum.InProgress + sum.Done
+		summaries[p.ID] = sum
 	}
 	w.activeProjects = active
 	w.archivedProjects = archived
@@ -719,63 +713,20 @@ func (w *Workbench) ReloadBoardTasks() {
 	}
 	w.boardTasks = unfiltered
 
-	// Update summary & attachment map for this project
-	var s ProjectSummary
-	s.Total = len(unfiltered)
-	tagSet := make(map[string]bool)
-	attMap := make(map[string][]model.Attachment, len(unfiltered))
-	for _, t := range unfiltered {
-		switch t.Status {
-		case model.Planned:
-			s.Planned++
-		case model.InProgress:
-			s.InProgress++
-		case model.Done:
-			s.Done++
-		}
-		for _, tag := range t.Tags {
-			tagSet[tag] = true
-		}
-		if atts, err := w.app.Attachments.List(ctx, t.ID); err == nil {
-			attMap[t.ID] = atts
-		}
-	}
-	w.projectSummaries[w.activeProjectID] = s
-	w.taskAttachments = attMap
-
-	tags := make([]string, 0, len(tagSet))
-	for tag := range tagSet {
-		tags = append(tags, tag)
-	}
-	slices.Sort(tags)
-	w.allBoardTags = tags
-
-	// Prune any selected tag filters that no longer exist on the board
-	if len(w.tagFilters) > 0 {
-		kept := w.tagFilters[:0]
-		for _, tf := range w.tagFilters {
-			if tagSet[tf] {
-				kept = append(kept, tf)
-			}
-		}
-		w.tagFilters = kept
-	}
-
-	if !w.HasBoardFilters() {
-		w.filteredTasks = slices.Clone(unfiltered)
+	// One query for the whole board. Every task gets an entry so the detail
+	// panel never has to fall back to a per-task lookup.
+	attMap := w.taskAttachments
+	if byTask, err := w.app.Attachments.ListByProject(ctx, w.activeProjectID); err != nil {
+		// Keep the attachments already shown rather than blanking them.
+		w.enqueueErrorToast("加载附件失败", err)
 	} else {
-		filter := projects.TaskFilter{
-			Query:    strings.TrimSpace(w.searchQuery),
-			Tags:     w.tagFilters,
-			Priority: model.Priority(w.priorityFilter),
+		attMap = make(map[string][]model.Attachment, len(unfiltered))
+		for _, t := range unfiltered {
+			attMap[t.ID] = byTask[t.ID]
 		}
-		filtered, err := w.app.Projects.ListTasks(ctx, w.activeProjectID, filter)
-		if err != nil {
-			w.filteredTasks = slices.Clone(unfiltered)
-		} else {
-			w.filteredTasks = filtered
-		}
+		w.taskAttachments = attMap
 	}
+	w.rebuildBoardDerived()
 
 	// Keep selected task in sync if still present
 	if w.selectedTaskID != "" {
@@ -799,6 +750,59 @@ func (w *Workbench) ReloadBoardTasks() {
 	}
 }
 
+// rebuildBoardDerived recomputes everything derived from boardTasks (project
+// summary, tag list, pruned tag filters, visible tasks) without touching SQLite.
+func (w *Workbench) rebuildBoardDerived() {
+	var s ProjectSummary
+	s.Total = len(w.boardTasks)
+	tagSet := make(map[string]bool)
+	for _, t := range w.boardTasks {
+		switch t.Status {
+		case model.Planned:
+			s.Planned++
+		case model.InProgress:
+			s.InProgress++
+		case model.Done:
+			s.Done++
+		}
+		for _, tag := range t.Tags {
+			tagSet[tag] = true
+		}
+	}
+	w.projectSummaries[w.activeProjectID] = s
+
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+	slices.Sort(tags)
+	w.allBoardTags = tags
+
+	// Prune any selected tag filters that no longer exist on the board
+	w.tagFilters = slices.DeleteFunc(w.tagFilters, func(tf string) bool { return !tagSet[tf] })
+	w.applyBoardFilters()
+}
+
+// applyBoardFilters recomputes the visible tasks from the loaded board in memory.
+func (w *Workbench) applyBoardFilters() {
+	if !w.HasBoardFilters() {
+		w.filteredTasks = slices.Clone(w.boardTasks)
+		return
+	}
+	filter := projects.TaskFilter{
+		Query:    w.searchQuery,
+		Tags:     w.tagFilters,
+		Priority: model.Priority(w.priorityFilter),
+	}
+	filtered := make([]model.Task, 0, len(w.boardTasks))
+	for _, t := range w.boardTasks {
+		if filter.Matches(t) {
+			filtered = append(filtered, t)
+		}
+	}
+	w.filteredTasks = filtered
+}
+
 // HasBoardFilters reports whether any search, priority, or tag filter is active on the board.
 func (w *Workbench) HasBoardFilters() bool {
 	return strings.TrimSpace(w.searchQuery) != "" || w.priorityFilter != "" || len(w.tagFilters) > 0
@@ -812,7 +816,7 @@ func (w *Workbench) ClearBoardFilters() {
 	w.searchQuery = ""
 	w.priorityFilter = ""
 	w.tagFilters = nil
-	w.ReloadBoardTasks()
+	w.rebuildBoardDerived()
 }
 
 // ToggleTagFilter toggles a tag in the multi-tag AND filter list.
@@ -825,7 +829,7 @@ func (w *Workbench) ToggleTagFilter(tag string) {
 	} else {
 		w.tagFilters = append(w.tagFilters, tag)
 	}
-	w.ReloadBoardTasks()
+	w.rebuildBoardDerived()
 }
 
 // TasksInColumn returns the visible tasks for the given status column.
@@ -1021,7 +1025,15 @@ func (w *Workbench) SaveSelectedTask() error {
 	w.saveState = "saved"
 	w.saveErr = ""
 	w.lastSavedAt = time.Now()
-	w.ReloadBoardTasks()
+	// A content-only edit changes no other row, so patch the loaded board in
+	// place. A status change renumbers two columns and needs a real reload.
+	idx := slices.IndexFunc(w.boardTasks, func(t model.Task) bool { return t.ID == updated.ID })
+	if idx < 0 || w.boardTasks[idx].Status != updated.Status {
+		w.ReloadBoardTasks()
+		return nil
+	}
+	w.boardTasks[idx] = updated
+	w.rebuildBoardDerived()
 	return nil
 }
 
