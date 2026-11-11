@@ -5,27 +5,17 @@ Read https://mygo.lobehub.com/skills.md and follow it to build native UI with Lo
 
 ## Tests
 
-Only write a test for behaviour that can actually break. If the code under test could change without the test noticing, or the test would fail on a harmless rewording, don't write it.
+Test behaviour that can regress. Cover input effects, backend invariants, rendering under long-held `Store` locks, image cache bounds, and bugs you fix. Skip assertions on labels, form defaults or row order, and framework behaviour.
 
-**Write tests for:**
+- Use `openTestWorkbench` in `frontend/workbench_test.go` for UI tests. Locate controls by accessibility label, simulate input with `ui.Tester`, and assert on workbench, database, or filesystem state.
+- Stub system capabilities through `frontend.Host`. Keep tests isolated from native dialogs, external apps, and the real Aion data directory.
+- Use channels, a custom `Host.Dispatch` queue, and deterministic clocks (`Now` options) as needed. Avoid wall-clock assertions and fixed sleeps. `WaitForTasks` waits only for background workers. Drain queued UI callbacks separately.
+- Inspect visual changes with `AION_SAVE_SNAPSHOT` and `TestVisualSnapshotRender`.
+- Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
+- Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
 
-- What input does: clicks, keys, typing, drags and scrolling, and the state or effect they lead to (creating or editing projects and tasks, dragging cards across or within board columns, filtering and sorting, toggling subtasks, importing or exporting attachments, restoring or purging from Trash, and running backup or restore).
-- Logic that doesn't need a view: SQLite transactions and lock ordering (`store`), project/task positioning and Trash cascades (`projects`), managed attachment paths, copy/export safety and unreferenced file GC (`attachments`), backup archive verification, atomic database replacement and rotation (`backup`), and bounded image cache eviction.
-- A regression you just fixed. Say in the test's comment what went wrong.
-- Non-blocking rendering and cache bounds, so views don't block on long-held `Store` locks or retain deleted full-size bitmaps.
+## Commit Messages
 
-**Don't write tests that:**
+Follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). Write the subject in English using `<type>(<scope>): <description>`. The scope is optional.
 
-- Check that a list of labels shows on screen. That repeats the view code and breaks whenever the wording changes.
-- Check default settings or the order of rows in a form.
-- Test MyGo or Lobe MyGo itself, for example that `AnimateTo`, a spring, or a built-in component renders its own props.
-- Depend on the wall clock or fixed `time.Sleep`. `ui.NewTester` starts its clock at the current time, and async coordination should use channels or deterministic clocks (`Now` options) rather than real-time sleeps.
-
-**How:**
-
-- Build views with `openTestWorkbench` (in `frontend/workbench_test.go`), which opens an isolated `backend.App` in `t.TempDir()` with `DisableScheduler: true` and sets up `ui.Tester`. Find elements by their accessibility label, then `Click`, `Type`, `Press`/`Move`/`Release` or `Key`, and check the workbench, database, or filesystem state afterwards.
-- Swap out system capabilities through `frontend.Host` (`PickOpenFile`, `PickSaveFile`, `PickDirectory`, `OpenPath`, `CopyText`, `ApplyTheme`, `Dispatch`). Never open native dialogs, launch external apps, or touch `~/Library/Application Support/Aion` in tests.
-- Control background goroutines and UI callbacks with a custom `Host.Dispatch` queue and channels when testing async ordering (`WaitForTasks` waits for background workers, not queued UI callbacks).
-- Look at visuals instead of asserting on them. `TestVisualSnapshotRender` saves a PNG when `AION_SAVE_SNAPSHOT` is set and skips when it isn't.
-- Start each test with a one-sentence comment saying the behaviour it checks, in the style of the code.
-- Run `go test ./...` before committing, and run a new UI test with `-count=5`. Fix or delete a flaky test; don't retry it.
+Use `feat` for new features, `fix` for bug fixes, and a suitable type such as `docs`, `refactor`, `test`, or `chore` for other changes. Mark breaking changes with `!` before the colon or a `BREAKING CHANGE:` footer.
