@@ -59,8 +59,11 @@ go tool mygo build
 # 为指定数据目录生成无头渲染快照 PNG（1360×860）
 go run . -data-dir /tmp/aion-snap -snapshot /tmp/aion-snapshot.png
 
-# 渲染带示例数据的看板/设置视觉快照 PNG（用于视觉回归检查）
+# 渲染带示例数据的看板视觉快照 PNG（1440×900，用于视觉回归检查）
 AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnapshotRender
+
+# 渲染设置页视觉快照 PNG（1440×1280，可与上一条同时设置）
+AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestVisualSnapshotRender
 ```
 
 ## 数据与备份
@@ -71,7 +74,7 @@ AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnap
 ~/Library/Application Support/Aion/
 ├── aion.sqlite     # SQLite 主数据库（项目、任务、子任务、标签、回收站、设置）
 ├── attachments/    # 受管本地附件存储
-└── backups/        # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip）
+└── backups/        # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip，保留最近 5 份）
 ```
 
 在左侧导航底部的**设置**（全局设置与数据管理）中可以管理数据生命周期：

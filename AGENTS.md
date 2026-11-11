@@ -9,8 +9,8 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 
 - Use `openTestWorkbench` in `frontend/workbench_test.go` for UI tests. Locate controls by accessibility label, simulate input with `ui.Tester`, and assert on workbench, database, or filesystem state.
 - Stub system capabilities through `frontend.Host`. Keep tests isolated from native dialogs, external apps, and the real Aion data directory.
-- Use channels, a custom `Host.Dispatch` queue, and deterministic clocks (`Now` options) as needed. Avoid wall-clock assertions and fixed sleeps. `WaitForTasks` waits only for background workers. Drain queued UI callbacks separately.
-- Inspect visual changes with `AION_SAVE_SNAPSHOT` and `TestVisualSnapshotRender`.
+- Use channels, a custom `Host.Dispatch` queue, and deterministic clocks (`Now` in `backup.Options`, `backend.Options`, and `frontend.Host`) as needed. Avoid wall-clock assertions and fixed sleeps. `WaitForTasks` waits only for background workers. Drain queued UI callbacks separately.
+- Inspect visual changes with `TestVisualSnapshotRender`: `AION_SAVE_SNAPSHOT` renders the board, `AION_SAVE_SETTINGS_SNAPSHOT` renders Settings.
 - Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
 - Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
 
