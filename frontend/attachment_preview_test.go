@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"aion/backend/model"
 
@@ -88,6 +89,28 @@ func TestAttachmentBitmapCacheBoundsAndEviction(t *testing.T) {
 	_, wb, _ := openTestWorkbench(t, t.TempDir(), Host{})
 	if wb.cacheBitmap("oversize", ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 3200, 3200)))) || len(wb.bitmapCache) != 0 {
 		t.Fatal("a single oversized bitmap bypassed the byte limit")
+	}
+}
+
+// Replacing an already-cached preview or evicting with desynced LRU order preserves cache bounds without panicking.
+func TestAttachmentBitmapCacheReplaceAndDesyncGuard(t *testing.T) {
+	_, wb, _ := openTestWorkbench(t, t.TempDir(), Host{})
+	for i := 0; i < maxBitmapCacheEntries; i++ {
+		if !wb.cacheBitmap(fmt.Sprint(i), ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 16, 16)))) {
+			t.Fatal("bounded preview rejected")
+		}
+	}
+	replacement := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 24, 24)))
+	if !wb.cacheBitmap("0", replacement) {
+		t.Fatal("replacing existing entry failed")
+	}
+	if len(wb.bitmapCache) != maxBitmapCacheEntries || wb.bitmapCache["1"] == nil || wb.bitmapCache["0"] != replacement {
+		t.Fatalf("replacing an existing key evicted unrelated entries: len=%d", len(wb.bitmapCache))
+	}
+
+	wb.bitmapOrder = nil
+	if !wb.cacheBitmap("fresh", ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 16, 16)))) || len(wb.bitmapCache) != 1 {
+		t.Fatalf("cache did not recover safely from empty LRU order: len=%d", len(wb.bitmapCache))
 	}
 }
 
@@ -206,15 +229,40 @@ func TestAttachmentPreviewLoadsWhenScrolledIntoView(t *testing.T) {
 	if _, err := wb.QuickCreateTask(model.Planned, "photo"); err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 16; i++ {
+		wb.editSubtasks = append(wb.editSubtasks, model.Subtask{
+			ID:    fmt.Sprintf("sub-%d", i),
+			Title: fmt.Sprintf("前置子任务 %d", i),
+		})
+	}
+	if err := wb.SaveSelectedTask(); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "photo.png")
 	writeSamplePNG(t, path)
 	wb.ImportAttachmentsToSelectedTask([]string{path})
+	wb.pendingToasts = nil
 	att := wb.detailAttachments[0]
 	dispatched := make(chan func(), 1)
 	wb.host.Dispatch = func(fn func()) { dispatched <- fn }
 	tt.Frame()
-	tt.Scroll(1200, 300, 0, 600)
+	tt.Advance(time.Second)
+	beforeRect, found := tt.Find("图片预览 " + att.Name)
+	if !found || beforeRect.Y < 1000 {
+		t.Fatalf("expected thumbnail below viewport + InViewMargin before scroll, got found=%v rect=%+v", found, beforeRect)
+	}
+	if len(dispatched) != 0 {
+		t.Fatal("offscreen thumbnail requested a preview before scrolling into view")
+	}
+	if tt.FramePending() {
+		t.Fatal("offscreen thumbnail must not keep requesting animation frames")
+	}
+	tt.Scroll(1200, 300, 0, 800)
 	tt.Frame()
+	afterRect, found := tt.Find("图片预览 " + att.Name)
+	if !found || afterRect.Y >= 900 {
+		t.Fatalf("expected thumbnail inside viewport after scroll, got found=%v rect=%+v", found, afterRect)
+	}
 	wb.WaitForTasks()
 	select {
 	case apply := <-dispatched:
@@ -266,5 +314,35 @@ func TestAttachmentPreviewPreservesJPEGOrientation(t *testing.T) {
 				t.Fatalf("incorrect camera rotation or reflection: red=%d blue=%d", red, blue)
 			}
 		})
+	}
+}
+
+// Regression: JPEG padding 0xff fill bytes and standalone markers previously misaligned EXIF orientation parsing.
+func TestAttachmentPreviewHandlesJPEGFillAndStandaloneMarkers(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, source, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte{'E', 'x', 'i', 'f', 0, 0, 'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 1, 18, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0}
+
+	// Verify standalone TEM (0x01), RST0 (0xd0), and padded 0xff bytes directly in previewOrientation.
+	withTEM := []byte{0xff, 0xd8, 0xff, 0xff, 0x01, 0xff, 0xd0, 0xff, 0xff, 0xe1, 0, byte(len(exif) + 2)}
+	withTEM = append(withTEM, exif...)
+	withTEM = append(withTEM, encoded.Bytes()[2:]...)
+	if got := previewOrientation(bytes.NewReader(withTEM)); got != 6 {
+		t.Fatalf("expected orientation 6 after TEM/RST0/padded markers, got %d", got)
+	}
+
+	// Verify full JPEG decode + orientation with markers supported by Go's JPEG decoder (0xff fill + RST0).
+	decodable := []byte{0xff, 0xd8, 0xff, 0xd0, 0xff, 0xff, 0xff, 0xe1, 0, byte(len(exif) + 2)}
+	decodable = append(decodable, exif...)
+	decodable = append(decodable, encoded.Bytes()[2:]...)
+	preview, err := decodeAttachmentPreview(bytes.NewReader(decodable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Bounds() != image.Rect(0, 0, 20, 40) {
+		t.Fatalf("expected rotated 20x40 bounds, got %v", preview.Bounds())
 	}
 }

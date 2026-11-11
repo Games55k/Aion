@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode"
 
 	"aion/backend/model"
 	"aion/backend/store"
@@ -69,17 +70,32 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: backup: %s", model.ErrInvalid, fmt.Sprintf(format, args...))
 }
 
+func wrapZipErr(err error) error {
+	if errors.Is(err, zip.ErrFormat) || errors.Is(err, zip.ErrChecksum) || errors.Is(err, zip.ErrAlgorithm) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return errors.Join(invalid("corrupt ZIP entry"), err)
+	}
+	return err
+}
+
 func safeComponent(s string) bool {
-	return s != "" && s != "." && s != ".." && len(s) <= 255 &&
-		!strings.ContainsAny(s, "/\\:\x00") && !strings.ContainsAny(s, "\r\n")
+	return strings.TrimSpace(s) != "" && s != "." && s != ".." && len(s) <= 255 &&
+		!strings.ContainsAny(s, "/\\:") && strings.IndexFunc(s, unicode.IsControl) < 0
 }
 func validEntry(s string) bool {
 	return s == "manifest.json" || s == "database.sqlite" ||
 		(strings.HasPrefix(s, "attachments/") && safeComponent(strings.TrimPrefix(s, "attachments/")))
 }
 func validHash(s string) bool {
-	b, err := hex.DecodeString(s)
-	return err == nil && len(b) == sha256.Size && s == strings.ToLower(s)
+	if len(s) != sha256.Size*2 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func regular(path string) (os.FileInfo, error) {
@@ -99,15 +115,14 @@ func openRegular(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), path)
 	opened, err := f.Stat()
-	if err != nil || !os.SameFile(st, opened) {
-		f.Close()
-		return nil, invalid("file changed while opening")
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(st, opened) {
+		_ = f.Close()
+		return nil, errors.Join(invalid("file changed while opening"), err)
 	}
 	return f, nil
 }
@@ -177,52 +192,70 @@ func schema(ctx context.Context, db *sql.DB) ([]schemaObject, error) {
 }
 
 func (s *Service) Export(ctx context.Context, destination string) error {
-	return s.store.Exclusive(ctx, func(db *sql.DB) error { return s.exportLocked(ctx, db, destination, "manual", false) })
+	return s.store.Exclusive(ctx, func(db *sql.DB) error {
+		_, err := s.exportLocked(ctx, db, destination, "manual", false)
+		return err
+	})
 }
 
 // ExportOverwrite exports a validated full backup archive to destination using a temporary staging
 // file in the destination directory and atomically replaces an existing user regular file only after
 // archive creation and verification succeed. Protected store paths, symlinks, and directories are rejected.
 func (s *Service) ExportOverwrite(ctx context.Context, destination string) error {
-	return s.store.Exclusive(ctx, func(db *sql.DB) error { return s.exportLocked(ctx, db, destination, "manual", true) })
+	return s.store.Exclusive(ctx, func(db *sql.DB) error {
+		_, err := s.exportLocked(ctx, db, destination, "manual", true)
+		return err
+	})
 }
 
 // exportLocked never reenters the store mutex. The snapshot and every referenced
 // attachment (including trash) are read while all business writes are excluded.
-func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kind string, allowOverwrite bool) error {
+func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kind string, allowOverwrite bool) (string, error) {
 	resolvedDest, err := s.store.ValidateExportTarget(destination, allowOverwrite)
 	if err != nil {
-		return err
+		return "", err
 	}
 	parent := filepath.Dir(resolvedDest)
 	managed, err := filepath.EvalSymlinks(s.store.AttachmentsDir())
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmpdir, err := os.MkdirTemp(s.store.Root(), ".backup-export-*")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer os.RemoveAll(tmpdir)
 	snapshot := filepath.Join(tmpdir, "database.sqlite")
 	if _, err = db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
-		return err
+		return "", err
 	}
 	if err = os.Chmod(snapshot, 0600); err != nil {
-		return err
+		return "", err
 	}
 	refs, err := readAttachments(ctx, db)
 	if err != nil {
-		return err
+		return "", err
 	}
 	f, err := os.CreateTemp(parent, ".aion-backup-*.tmp")
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	zw := zip.NewWriter(f)
-	defer zw.Close()
+	tempPath := f.Name()
+	fileClosed := false
+	defer func() {
+		if !fileClosed {
+			_ = f.Close()
+		}
+		_ = os.Remove(tempPath)
+	}()
+	archiveSum := sha256.New()
+	zw := zip.NewWriter(io.MultiWriter(f, archiveSum))
+	zipClosed := false
+	defer func() {
+		if !zipClosed {
+			_ = zw.Close()
+		}
+	}()
 	m := manifest{Version: FormatVersion, SchemaVersion: store.SchemaVersion, CreatedAt: time.Now().UTC(), Kind: kind}
 	var total int64
 	add := func(name, path string, expected *attachment) error {
@@ -238,7 +271,7 @@ func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kin
 		if st.Size() > MaxFileBytes || st.Size() > MaxTotalBytes-maxManifestBytes-total {
 			return invalid("backup exceeds size limit")
 		}
-		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
+		w, err := zw.Create(name)
 		if err != nil {
 			return err
 		}
@@ -254,47 +287,52 @@ func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kin
 		return nil
 	}
 	if err = add("database.sqlite", snapshot, nil); err != nil {
-		return err
+		return "", err
 	}
 	for _, a := range refs {
 		if err = add("attachments/"+a.name, filepath.Join(managed, a.name), &a); err != nil {
-			return err
+			return "", err
 		}
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if int64(len(b)) > maxManifestBytes {
-		return invalid("manifest too large")
+		return "", invalid("manifest too large")
 	}
 	w, err := zw.Create("manifest.json")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err = w.Write(b); err != nil {
-		return err
+		return "", err
 	}
+	zipClosed = true
 	if err = zw.Close(); err != nil {
-		return err
+		return "", err
 	}
 	st, err := f.Stat()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if st.Size() > MaxArchiveBytes {
-		return invalid("archive too large")
+		return "", invalid("archive too large")
 	}
 	if err = f.Sync(); err != nil {
-		return err
+		return "", err
 	}
+	fileClosed = true
 	if err = f.Close(); err != nil {
-		return err
+		return "", err
 	}
 	if err = ctx.Err(); err != nil {
-		return err
+		return "", err
 	}
-	return s.store.PublishExportFile(f.Name(), resolvedDest, allowOverwrite)
+	if err = s.store.PublishExportFile(tempPath, resolvedDest, allowOverwrite); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(archiveSum.Sum(nil)), nil
 }
 
 // checkDirectory bounds the central directory before archive/zip allocates its
@@ -420,12 +458,12 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 	}
 	r, err := me.Open()
 	if err != nil {
-		return "", err
+		return "", wrapZipErr(err)
 	}
 	b, err := io.ReadAll(io.LimitReader(contextReader{ctx, r}, maxManifestBytes+1))
 	cerr := r.Close()
 	if err = errors.Join(err, cerr); err != nil {
-		return "", err
+		return "", wrapZipErr(err)
 	}
 	if int64(len(b)) > maxManifestBytes {
 		return "", invalid("manifest too large")
@@ -465,7 +503,7 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 		records[rec.Path] = rec
 		r, err := e.Open()
 		if err != nil {
-			return "", err
+			return "", wrapZipErr(err)
 		}
 		out, err := os.OpenFile(filepath.Join(dir, filepath.FromSlash(rec.Path)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
@@ -473,8 +511,11 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 			return "", err
 		}
 		n, h, copyErr := copyHash(ctx, out, r, rec.Size)
-		err = errors.Join(copyErr, r.Close(), out.Close())
-		if err != nil {
+		if zipErr := wrapZipErr(errors.Join(copyErr, r.Close())); zipErr != nil {
+			_ = out.Close()
+			return "", zipErr
+		}
+		if err = out.Close(); err != nil {
 			return "", err
 		}
 		if n != rec.Size || h != rec.SHA256 {
@@ -570,11 +611,18 @@ func (s *Service) Restore(ctx context.Context, source string) (RestoreResult, er
 	}()
 	err = s.store.Exclusive(ctx, func(db *sql.DB) error {
 		backupDir := filepath.Join(s.store.Root(), "backups")
+		if st, err := os.Lstat(backupDir); err == nil {
+			if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+				return invalid("unsafe backups directory")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		if err := os.MkdirAll(backupDir, 0700); err != nil {
 			return err
 		}
 		safety := filepath.Join(backupDir, "safety-"+model.NewID()+".zip")
-		if err := s.exportLocked(ctx, db, safety, "safety", false); err != nil {
+		if _, err := s.exportLocked(ctx, db, safety, "safety", false); err != nil {
 			return fmt.Errorf("safety backup: %w", err)
 		}
 		result.SafetyBackupPath = safety

@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"aion/backend/model"
 )
 
 // Store enforces a single-directory lock, rolls back failed write transactions, and persists committed rows across reopens.
@@ -126,5 +129,87 @@ func TestFutureSchemaIsRejectedWithoutRewriting(t *testing.T) {
 	var version int
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 99 {
 		t.Fatal(version, err)
+	}
+}
+
+// Regression: Store methods return an error instead of panicking with a nil pointer dereference if s.db is nil after a failed reopen.
+func TestStoreGuardsNilDatabaseHandle(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s.db = nil
+	ctx := context.Background()
+	if err := s.Read(ctx, func(_ *sql.Tx) error { return nil }); err == nil {
+		t.Fatal("Read with nil db succeeded")
+	}
+	if err := s.Write(ctx, func(_ *sql.Tx) error { return nil }); err == nil {
+		t.Fatal("Write with nil db succeeded")
+	}
+	if err := s.Exclusive(ctx, func(_ *sql.DB) error { return nil }); err == nil {
+		t.Fatal("Exclusive with nil db succeeded")
+	}
+}
+
+// Open rejects a symlinked lock file instead of following it outside the data directory.
+func TestOpenRejectsSymlinkLockFile(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside-lock")
+	if err := os.WriteFile(outside, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".aion.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Open(root); err == nil {
+		s.Close()
+		t.Fatal("Open followed symlink lock file")
+	}
+}
+
+// Regression: ValidateBackupDir and ValidateExportTarget reject SQLite sidecar paths, trailing separators, and unsafe roots without creating directories under protected paths.
+func TestValidatePathsRejectSidecarsAndTrailingSeparators(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	rejectedBackupDirs := []string{
+		root,
+		filepath.Join(root, "attachments"),
+		filepath.Join(root, "attachments", "nested"),
+		filepath.Join(root, ".hidden"),
+		filepath.Join(root, "aion.sqlite"),
+		filepath.Join(root, "aion.sqlite-journal"),
+		filepath.Join(root, "aion.sqlite-wal"),
+		filepath.Join(root, "aion.sqlite-shm"),
+	}
+	for _, dir := range rejectedBackupDirs {
+		if _, err := s.ValidateBackupDir(dir); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("ValidateBackupDir(%q) = %v, want ErrInvalid", dir, err)
+		}
+	}
+	if _, err := s.ValidateBackupDir(filepath.Join(root, "backups")); err != nil {
+		t.Fatalf("ValidateBackupDir(backups) failed: %v", err)
+	}
+
+	outDir := t.TempDir()
+	for _, dest := range []string{outDir + "/", outDir + "\\"} {
+		if _, err := s.ValidateExportTarget(dest, false); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("ValidateExportTarget(%q) = %v, want ErrInvalid", dest, err)
+		}
+	}
+	sidecarExport := filepath.Join(root, "aion.sqlite-journal", "out.zip")
+	if _, err := s.ValidateExportTarget(sidecarExport, true); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("ValidateExportTarget(%q) = %v, want ErrInvalid", sidecarExport, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "aion.sqlite-journal")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ValidateExportTarget created sidecar directory: %v", err)
 	}
 }

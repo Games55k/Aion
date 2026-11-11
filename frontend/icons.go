@@ -14,6 +14,11 @@ import (
 var (
 	aionSymbolOnce   sync.Once
 	aionSymbolParsed *ui.SVG
+
+	projectIconsOnce  sync.Once
+	projectIconLookup map[string]*ui.SVG
+	defaultIconSVG    *ui.SVG
+	projectsModSVG    *ui.SVG
 )
 
 // AionSymbolSVG returns the Aion symbol SVG.
@@ -22,6 +27,17 @@ func AionSymbolSVG() *ui.SVG {
 		aionSymbolParsed = ui.MustParseSVG([]byte(brand.SVG))
 	})
 	return aionSymbolParsed
+}
+
+func ensureIconCache() {
+	projectIconsOnce.Do(func() {
+		projectIconLookup = make(map[string]*ui.SVG, len(ProjectIconOptions))
+		for _, opt := range ProjectIconOptions {
+			projectIconLookup[opt.Key] = opt.SVG()
+		}
+		defaultIconSVG = lucide.Folder()
+		projectsModSVG = lucide.FolderKanban()
+	})
 }
 
 // ProjectIconOption defines a selectable project icon preset.
@@ -47,21 +63,24 @@ var ProjectIconOptions = []ProjectIconOption{
 
 // ProjectIconSVG resolves a stored project icon key to an SVG icon.
 func ProjectIconSVG(icon string) *ui.SVG {
-	key := strings.TrimSpace(strings.ToLower(icon))
-	for _, opt := range ProjectIconOptions {
-		if opt.Key == key {
-			return opt.SVG()
-		}
+	ensureIconCache()
+	key := strings.TrimSpace(icon)
+	if svg, ok := projectIconLookup[key]; ok {
+		return svg
 	}
-	return lucide.Folder()
+	if svg, ok := projectIconLookup[strings.ToLower(key)]; ok {
+		return svg
+	}
+	return defaultIconSVG
 }
 
 // ModuleIconSVG resolves a registered module descriptor to an SVG icon.
 func ModuleIconSVG(mod backend.ModuleDescriptor) *ui.SVG {
+	ensureIconCache()
 	switch mod.ID {
 	case "projects":
-		return lucide.FolderKanban()
+		return projectsModSVG
 	default:
-		return lucide.Folder()
+		return defaultIconSVG
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"aion/backend/attachments"
@@ -318,5 +319,123 @@ func TestExportFailuresPreserveExistingFilesAndCleanPartialCopies(t *testing.T) 
 	}
 	if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing managed file = %v", err)
+	}
+}
+
+// Regression: List previously relied on SQL text sorting of RFC3339Nano timestamps, which inverted sub-second import order when trailing fractional zeros were omitted.
+func TestListPreservesImportOrderWithinSameSecond(t *testing.T) {
+	s, service := fixture(t)
+	var imported []model.Attachment
+	for i := 0; i < 6; i++ {
+		a, err := service.Import(ctx, "t", source(t, "f.txt", "data"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		imported = append(imported, a)
+	}
+	// Assign timestamps in reverse insertion order so physical row order differs from chronological order.
+	// Note that ".1Z" sorts lexicographically before "Z" and ".100000001Z" sorts before ".1Z".
+	timestamps := []string{
+		"2026-11-11T12:00:00.25Z",
+		"2026-11-11T12:00:00.100000001Z",
+		"2026-11-11T12:00:00.1Z",
+		"2026-11-11T12:00:00.09Z",
+		"2026-11-11T12:00:00Z",
+		"2026-11-11T12:00:00Z",
+	}
+	for i, ts := range timestamps {
+		exec(t, s, `UPDATE attachments SET created_at=? WHERE id=?`, ts, imported[i].ID)
+	}
+	wantTie := []string{imported[4].ID, imported[5].ID}
+	slices.Sort(wantTie)
+	want := []string{
+		wantTie[0],
+		wantTie[1],
+		imported[3].ID,
+		imported[2].ID,
+		imported[1].ID,
+		imported[0].ID,
+	}
+	gotList, err := service.List(ctx, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range gotList {
+		got = append(got, a.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("List order = %v, want %v", got, want)
+	}
+}
+
+// ExportOverwrite atomically replaces an existing regular file while preserving existing targets on corruption, size bloat, or protected paths.
+func TestExportOverwriteReplacesRegularFileAndPreservesOnFailure(t *testing.T) {
+	s, service := fixture(t)
+	a, err := service.Import(ctx, "t", source(t, "payload.txt", "updated payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := source(t, "existing.txt", "old payload")
+	if err := service.ExportOverwrite(ctx, a.ID, dest); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, dest); got != "updated payload" {
+		t.Fatalf("overwritten content = %q", got)
+	}
+	outside := source(t, "outside.txt", "keep link target")
+	link := filepath.Join(t.TempDir(), "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ExportOverwrite(ctx, a.ID, link); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("symlink overwrite error = %v", err)
+	}
+	if got := read(t, outside); got != "keep link target" {
+		t.Fatalf("symlink target changed: %q", got)
+	}
+	if err := service.ExportOverwrite(ctx, a.ID, s.DBPath()); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("db overwrite error = %v", err)
+	}
+	managed, err := service.ManagedPath(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oversized corruption beyond a.Size must be bounded and leave the existing target intact.
+	if err := os.WriteFile(managed, []byte("this managed file is much larger than original size"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ExportOverwrite(ctx, a.ID, dest); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("corrupt overwrite error = %v", err)
+	}
+	if got := read(t, dest); got != "updated payload" {
+		t.Fatalf("failed overwrite modified target: %q", got)
+	}
+}
+
+// Soft-deleted tasks inside soft-deleted projects return ErrNotFound consistently with the projects service.
+func TestBothTaskAndProjectDeletedReturnsNotFound(t *testing.T) {
+	s, service := fixture(t)
+	a, err := service.Import(ctx, "t", source(t, "data.txt", "retained"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := model.Timestamp()
+	exec(t, s, `UPDATE tasks SET deleted_at=?`, now)
+	exec(t, s, `UPDATE projects SET deleted_at=?`, now)
+	if _, err := service.Import(ctx, "t", source(t, "other.txt", "x")); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("Import error = %v", err)
+	}
+	if _, err := service.List(ctx, "t"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("List error = %v", err)
+	}
+	if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("ManagedPath error = %v", err)
+	}
+	if err := service.Export(ctx, a.ID, filepath.Join(t.TempDir(), "out")); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("Export error = %v", err)
+	}
+	if err := service.Remove(ctx, a.ID); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("Remove error = %v", err)
 	}
 }

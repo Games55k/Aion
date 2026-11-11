@@ -25,17 +25,24 @@ func (s *Service) CreateTask(ctx context.Context, projectID string, in TaskInput
 			return err
 		}
 		now := time.Now().UTC()
+		nowStr := now.Format(time.RFC3339Nano)
 		t = model.Task{ID: model.NewID(), ProjectID: projectID, Title: in.Title, Description: in.Description,
 			Status: in.Status, Priority: in.Priority, Tags: in.Tags, Subtasks: in.Subtasks, DueDate: in.DueDate,
 			Position: len(ids), CreatedAt: now, UpdatedAt: now}
 		if t.Status == model.Done {
 			t.CompletedAt = &now
 		}
-		tags, _ := json.Marshal(t.Tags)
-		subtasks, _ := json.Marshal(t.Subtasks)
+		tags, err := json.Marshal(t.Tags)
+		if err != nil {
+			return err
+		}
+		subtasks, err := json.Marshal(t.Subtasks)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO tasks (`+taskColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`,
 			t.ID, projectID, t.Title, t.Description, t.Status, t.Priority, string(tags), string(subtasks), t.DueDate,
-			t.Position, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), optionalTime(t.CompletedAt))
+			t.Position, nowStr, nowStr, optionalTime(t.CompletedAt))
 		return err
 	})
 	if err != nil {
@@ -61,18 +68,33 @@ func (s *Service) ListTasks(ctx context.Context, projectID string, filter TaskFi
 	if (filter.Status != "" && !filter.Status.Valid()) || (filter.Priority != "" && !filter.Priority.Valid()) {
 		return nil, invalid("invalid filter status or priority")
 	}
+	wantedTags := make([]string, 0, len(filter.Tags))
 	for _, tag := range filter.Tags {
-		if strings.TrimSpace(tag) == "" {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
 			return nil, invalid("filter tag cannot be blank")
 		}
+		wantedTags = append(wantedTags, trimmed)
 	}
+	queryText := strings.ToLower(strings.TrimSpace(filter.Query))
+
 	result := make([]model.Task, 0)
 	err := s.store.Read(ctx, func(tx *sql.Tx) error {
 		if _, err := visibleProject(ctx, tx, projectID); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE project_id=? AND deleted_at IS NULL
-			ORDER BY CASE status WHEN 'planned' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,position,created_at,id`, projectID)
+		query := `SELECT ` + taskColumns + ` FROM tasks WHERE project_id=? AND deleted_at IS NULL`
+		args := []any{projectID}
+		if filter.Status != "" {
+			query += ` AND status=?`
+			args = append(args, filter.Status)
+		}
+		if filter.Priority != "" {
+			query += ` AND priority=?`
+			args = append(args, filter.Priority)
+		}
+		query += ` ORDER BY CASE status WHEN 'planned' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,position,created_at,id`
+		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -82,7 +104,7 @@ func (s *Service) ListTasks(ctx context.Context, projectID string, filter TaskFi
 			if err != nil {
 				return err
 			}
-			if matches(t, filter) {
+			if matchesTextAndTags(t, wantedTags, queryText) {
 				result = append(result, t)
 			}
 		}
@@ -94,14 +116,11 @@ func (s *Service) ListTasks(ctx context.Context, projectID string, filter TaskFi
 	return result, nil
 }
 
-func matches(t model.Task, f TaskFilter) bool {
-	if (f.Status != "" && t.Status != f.Status) || (f.Priority != "" && t.Priority != f.Priority) {
-		return false
-	}
-	for _, wanted := range f.Tags {
+func matchesTextAndTags(t model.Task, wantedTags []string, queryText string) bool {
+	for _, wanted := range wantedTags {
 		found := false
 		for _, tag := range t.Tags {
-			if tag == strings.TrimSpace(wanted) {
+			if tag == wanted {
 				found = true
 				break
 			}
@@ -110,12 +129,11 @@ func matches(t model.Task, f TaskFilter) bool {
 			return false
 		}
 	}
-	q := strings.ToLower(strings.TrimSpace(f.Query))
-	if q == "" || strings.Contains(strings.ToLower(t.Title), q) || strings.Contains(strings.ToLower(t.Description), q) {
+	if queryText == "" || strings.Contains(strings.ToLower(t.Title), queryText) || strings.Contains(strings.ToLower(t.Description), queryText) {
 		return true
 	}
 	for _, tag := range t.Tags {
-		if strings.Contains(strings.ToLower(tag), q) {
+		if strings.Contains(strings.ToLower(tag), queryText) {
 			return true
 		}
 	}
@@ -137,23 +155,32 @@ func (s *Service) UpdateTask(ctx context.Context, id string, in TaskInput) (mode
 			return err
 		}
 		now := time.Now().UTC()
-		if in.Status != t.Status {
-			ids, err := columnIDs(ctx, tx, t.ProjectID, in.Status)
-			if err != nil {
-				return err
-			}
-			t, err = moveTask(ctx, tx, t, in.Status, len(ids), now)
+		statusChanged := in.Status != t.Status
+		var mv columnMove
+		if statusChanged {
+			t, mv, err = prepareColumnMove(ctx, tx, t, in.Status, 0, true, now)
 			if err != nil {
 				return err
 			}
 		}
 		t.Title, t.Description, t.Priority = in.Title, in.Description, in.Priority
 		t.Tags, t.Subtasks, t.DueDate, t.UpdatedAt = in.Tags, in.Subtasks, in.DueDate, now
-		tags, _ := json.Marshal(t.Tags)
-		subtasks, _ := json.Marshal(t.Subtasks)
-		_, err = tx.ExecContext(ctx, `UPDATE tasks SET title=?,description=?,priority=?,tags=?,subtasks=?,due_date=?,updated_at=? WHERE id=?`,
-			t.Title, t.Description, t.Priority, string(tags), string(subtasks), t.DueDate, now.Format(time.RFC3339Nano), id)
-		return err
+		tags, err := json.Marshal(t.Tags)
+		if err != nil {
+			return err
+		}
+		subtasks, err := json.Marshal(t.Subtasks)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET title=?,description=?,status=?,priority=?,tags=?,subtasks=?,due_date=?,position=?,completed_at=?,updated_at=? WHERE id=?`,
+			t.Title, t.Description, t.Status, t.Priority, string(tags), string(subtasks), t.DueDate, t.Position, optionalTime(t.CompletedAt), now.Format(time.RFC3339Nano), id); err != nil {
+			return err
+		}
+		if statusChanged {
+			return writeMovedColumns(ctx, tx, t.Status, mv, now)
+		}
+		return nil
 	})
 	if err != nil {
 		return model.Task{}, err
@@ -179,8 +206,9 @@ func columnIDs(ctx context.Context, tx *sql.Tx, projectID string, status model.S
 }
 
 func writeColumn(ctx context.Context, tx *sql.Tx, ids []string, now time.Time) error {
+	nowStr := now.Format(time.RFC3339Nano)
 	for i, id := range ids {
-		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET position=?,updated_at=? WHERE id=? AND position<>?`, i, now.Format(time.RFC3339Nano), id, i); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET position=?,updated_at=? WHERE id=? AND position<>?`, i, nowStr, id, i); err != nil {
 			return err
 		}
 	}
@@ -204,6 +232,54 @@ func insertAt(ids []string, index int, id string) []string {
 	return ids
 }
 
+type columnMove struct {
+	oldStatus model.Status
+	source    []string
+	dest      []string
+}
+
+func prepareColumnMove(ctx context.Context, tx *sql.Tx, t model.Task, status model.Status, index int, appendEnd bool, now time.Time) (model.Task, columnMove, error) {
+	mv := columnMove{oldStatus: t.Status}
+	var err error
+	mv.source, err = columnIDs(ctx, tx, t.ProjectID, mv.oldStatus)
+	if err != nil {
+		return t, mv, err
+	}
+	mv.source = without(mv.source, t.ID)
+	mv.dest = mv.source
+	if mv.oldStatus != status {
+		mv.dest, err = columnIDs(ctx, tx, t.ProjectID, status)
+		if err != nil {
+			return t, mv, err
+		}
+	}
+	if appendEnd {
+		index = len(mv.dest)
+	}
+	if index < 0 || index > len(mv.dest) {
+		return t, mv, invalid("destination index must be between 0 and %d", len(mv.dest))
+	}
+	mv.dest = insertAt(mv.dest, index, t.ID)
+	if mv.oldStatus != status {
+		if status == model.Done {
+			t.CompletedAt = &now
+		} else {
+			t.CompletedAt = nil
+		}
+	}
+	t.Status, t.Position, t.UpdatedAt = status, index, now
+	return t, mv, nil
+}
+
+func writeMovedColumns(ctx context.Context, tx *sql.Tx, status model.Status, mv columnMove, now time.Time) error {
+	if mv.oldStatus != status {
+		if err := writeColumn(ctx, tx, mv.source, now); err != nil {
+			return err
+		}
+	}
+	return writeColumn(ctx, tx, mv.dest, now)
+}
+
 // MoveTask inserts at a zero-based index in the destination column AFTER
 // removing the task from its old column. 0..destination length is valid.
 // The relative order of every other task is preserved, even when moving from
@@ -219,51 +295,22 @@ func (s *Service) MoveTask(ctx context.Context, id string, status model.Status, 
 		if err != nil {
 			return err
 		}
-		t, err = moveTask(ctx, tx, t, status, index, time.Now().UTC())
-		return err
+		now := time.Now().UTC()
+		var mv columnMove
+		t, mv, err = prepareColumnMove(ctx, tx, t, status, index, false, now)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET status=?,position=?,completed_at=?,updated_at=? WHERE id=?`,
+			t.Status, t.Position, optionalTime(t.CompletedAt), now.Format(time.RFC3339Nano), t.ID); err != nil {
+			return err
+		}
+		return writeMovedColumns(ctx, tx, t.Status, mv, now)
 	})
 	if err != nil {
 		return model.Task{}, err
 	}
 	return t, nil
-}
-
-func moveTask(ctx context.Context, tx *sql.Tx, t model.Task, status model.Status, index int, now time.Time) (model.Task, error) {
-	oldStatus := t.Status
-	source, err := columnIDs(ctx, tx, t.ProjectID, oldStatus)
-	if err != nil {
-		return t, err
-	}
-	source = without(source, t.ID)
-	dest := source
-	if oldStatus != status {
-		dest, err = columnIDs(ctx, tx, t.ProjectID, status)
-		if err != nil {
-			return t, err
-		}
-	}
-	if index < 0 || index > len(dest) {
-		return t, invalid("destination index must be between 0 and %d", len(dest))
-	}
-	dest = insertAt(dest, index, t.ID)
-	if oldStatus != status {
-		if status == model.Done {
-			t.CompletedAt = &now
-		} else {
-			t.CompletedAt = nil
-		}
-	}
-	t.Status, t.Position, t.UpdatedAt = status, index, now
-	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET status=?,position=?,completed_at=?,updated_at=? WHERE id=?`,
-		status, index, optionalTime(t.CompletedAt), now.Format(time.RFC3339Nano), t.ID); err != nil {
-		return t, err
-	}
-	if oldStatus != status {
-		if err = writeColumn(ctx, tx, source, now); err != nil {
-			return t, err
-		}
-	}
-	return t, writeColumn(ctx, tx, dest, now)
 }
 
 // ReorderTasks permutes the slots occupied by the supplied IDs, in the supplied
@@ -312,7 +359,8 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 			return err
 		}
 		now := time.Now().UTC()
-		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET deleted_at=?,updated_at=? WHERE id=?`, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), id); err != nil {
+		nowStr := now.Format(time.RFC3339Nano)
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET deleted_at=?,updated_at=? WHERE id=?`, nowStr, nowStr, id); err != nil {
 			return err
 		}
 		ids, err := columnIDs(ctx, tx, t.ProjectID, t.Status)

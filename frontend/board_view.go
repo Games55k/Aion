@@ -24,6 +24,22 @@ type boardColumnSpec struct {
 	Tag    display.TagColor
 }
 
+var (
+	taskStatusOptions = []field.SelectOption{
+		{Value: string(model.Planned), Label: "计划"},
+		{Value: string(model.InProgress), Label: "进行中"},
+		{Value: string(model.Done), Label: "已完成"},
+	}
+	taskPriorityOptions = []field.SelectOption{
+		{Value: string(model.Urgent), Label: "紧急"},
+		{Value: string(model.High), Label: "高"},
+		{Value: string(model.Medium), Label: "中"},
+		{Value: string(model.Low), Label: "低"},
+		{Value: string(model.NoPriority), Label: "无优先级"},
+	}
+	priorityFilterOptions = append([]field.SelectOption{{Value: "", Label: "全部优先级"}}, taskPriorityOptions...)
+)
+
 func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 	proj := w.ActiveProject()
 	if proj == nil {
@@ -133,14 +149,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 						field.Select(c.Key("priority-filter"), &w.priorityFilter, field.SelectProps{
 							Placeholder: "全部优先级",
 							Size:        theme.Small,
-							Options: []field.SelectOption{
-								{Value: "", Label: "全部优先级"},
-								{Value: string(model.Urgent), Label: "紧急"},
-								{Value: string(model.High), Label: "高"},
-								{Value: string(model.Medium), Label: "中"},
-								{Value: string(model.Low), Label: "低"},
-								{Value: string(model.NoPriority), Label: "无优先级"},
-							},
+							Options:     priorityFilterOptions,
 						}).Label("按优先级筛选")
 						if w.priorityFilter != beforeP {
 							w.ReloadBoardTasks()
@@ -280,7 +289,9 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 			w.quickTaskTitles[col.Status] = quickVal
 
 			if inp.Submitted() && strings.TrimSpace(quickVal) != "" {
-				_, _ = w.QuickCreateTask(col.Status, quickVal)
+				if _, err := w.QuickCreateTask(col.Status, quickVal); err == nil {
+					quickVal = w.quickTaskTitles[col.Status]
+				}
 			}
 			if strings.TrimSpace(quickVal) != "" {
 				if action.Button(c.Key("quick-btn-"+string(col.Status)), "添加", action.ButtonProps{
@@ -317,7 +328,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	if dragged, dropped := ui.Drop[DragTaskPayload](card); dropped && dragged.TaskID != t.ID {
 		_, py, _ := card.PointerPosition()
 		bounds := card.Bounds()
-		placeAfter := py > bounds.Y+bounds.H/2
+		placeAfter := py > bounds.H/2
 		w.MoveOrReorderTaskOnto(dragged.TaskID, t.ID, placeAfter)
 	}
 
@@ -510,14 +521,14 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 	}, func() {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			if w.taskModalErr != "" {
-				feedback.Alert(c, w.taskModalErr, feedback.AlertProps{
+				feedback.Alert(c.Key("task-modal-err"), w.taskModalErr, feedback.AlertProps{
 					Type:    feedback.Error,
 					Variant: feedback.Soft,
 				})
 			}
 
 			// Title
-			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c.Key("task-modal-title-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "任务标题 *").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				before := w.taskModalTitle
 				inp := field.Input(c, &w.taskModalTitle, field.InputProps{
@@ -533,34 +544,24 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			// Status & Priority Row
-			ui.Row(c).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c.Key("task-modal-meta-row")).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "所属列 / 状态").FontSize(13).FontWeight(500).TextColor(tk.Text)
 					field.Select(c.Key("modal-task-status"), &w.taskModalStatus, field.SelectProps{
-						Options: []field.SelectOption{
-							{Value: string(model.Planned), Label: "计划"},
-							{Value: string(model.InProgress), Label: "进行中"},
-							{Value: string(model.Done), Label: "已完成"},
-						},
+						Options: taskStatusOptions,
 					}).Label("新建任务状态")
 				})
 
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "优先级").FontSize(13).FontWeight(500).TextColor(tk.Text)
 					field.Select(c.Key("modal-task-priority"), &w.taskModalPriority, field.SelectProps{
-						Options: []field.SelectOption{
-							{Value: string(model.Urgent), Label: "紧急"},
-							{Value: string(model.High), Label: "高"},
-							{Value: string(model.Medium), Label: "中"},
-							{Value: string(model.Low), Label: "低"},
-							{Value: string(model.NoPriority), Label: "无优先级"},
-						},
+						Options: taskPriorityOptions,
 					}).Label("新建任务优先级")
 				})
 			})
 
 			// Due Date & Tags Row
-			ui.Row(c).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c.Key("task-modal-due-tags-row")).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "截止日期").FontSize(13).FontWeight(500).TextColor(tk.Text)
 					field.DatePicker(c.Key("modal-task-duedate"), &w.taskModalDueDate, field.DatePickerProps{
@@ -578,7 +579,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			// Description
-			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c.Key("task-modal-desc-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "Markdown 描述").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				field.TextArea(c, &w.taskModalDesc, field.TextAreaProps{
 					Placeholder: "支持标题、列表、代码块、引用等 Markdown 语法（可选）",

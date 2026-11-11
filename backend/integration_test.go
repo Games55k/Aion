@@ -153,3 +153,31 @@ func TestPurgeCoordinatesMetadataAndFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Module registration rejects blank names and trims surrounding whitespace while Settings round-trips typed preferences.
+func TestModuleRegistrationAndSettingsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	a, err := backend.Open(ctx, backend.Options{DataDir: t.TempDir(), DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	if err := a.Modules.Register(backend.ModuleDescriptor{ID: "notes", Name: "   ", Version: 1}); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("blank module name = %v, want ErrInvalid", err)
+	}
+	if err := a.Modules.Register(backend.ModuleDescriptor{ID: "notes", Name: " 笔记 ", Version: 1}); err != nil {
+		t.Fatalf("register trimmed module failed: %v", err)
+	}
+	mods := a.Modules.List()
+	if len(mods) != 2 || mods[1].Name != "笔记" {
+		t.Fatalf("unexpected modules: %+v", mods)
+	}
+	if err := a.Settings.Set(ctx, "notes.sidebar_width", 280); err != nil {
+		t.Fatal(err)
+	}
+	var width int
+	if err := a.Settings.Get(ctx, "notes.sidebar_width", &width); err != nil || width != 280 {
+		t.Fatalf("Settings.Get width = %d, err = %v", width, err)
+	}
+}

@@ -4,18 +4,22 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"aion/backend"
 	"aion/backend/attachments"
 	"aion/backend/backup"
 	"aion/backend/model"
+	"aion/backend/projects"
 	"aion/backend/store"
 
 	"github.com/egoist/mygo/ui"
@@ -61,7 +65,7 @@ func writeSamplePNG(t *testing.T, path string) {
 // Project actions persist edits, isolate boards, and support archive/restore through the UI.
 func TestProjectLifecycle(t *testing.T) {
 	dataDir := t.TempDir()
-	_, wb, tt := openTestWorkbench(t, dataDir, Host{})
+	app, wb, tt := openTestWorkbench(t, dataDir, Host{})
 
 	// Create first project via UI modal
 	if err := tt.Click("+ 新建项目"); err != nil {
@@ -94,13 +98,19 @@ func TestProjectLifecycle(t *testing.T) {
 		t.Fatalf("click 编辑项目: %v", err)
 	}
 	wb.projectModalName = "Aion 核心研发"
-	wb.projectModalIcon = "rocket"
 	tt.Frame()
+	if err := tt.Click("图标 发布"); err != nil {
+		t.Fatalf("click 图标 发布: %v", err)
+	}
 	if err := tt.Click("保存修改"); err != nil {
 		t.Fatalf("click 保存修改: %v", err)
 	}
 	if wb.ActiveProject() == nil || wb.ActiveProject().Name != "Aion 核心研发" || wb.ActiveProject().Icon != "rocket" {
 		t.Fatalf("project not updated: %+v", wb.ActiveProject())
+	}
+	persisted, err := app.Projects.GetProject(context.Background(), wb.activeProjectID)
+	if err != nil || persisted.Name != "Aion 核心研发" || persisted.Icon != "rocket" {
+		t.Fatalf("project update not persisted in DB: %+v err=%v", persisted, err)
 	}
 
 	// Create second project and verify switching projects isolates board data
@@ -225,10 +235,24 @@ func TestKanbanBoardDragMoveFilterAndPersistence(t *testing.T) {
 		t.Fatalf("expected drag-and-drop to move task 3 to Done column, got %d in Done", len(wb1.TasksInColumn(model.Done)))
 	}
 
-	// Test search, priority filter, and multi-tag filter
-	wb1.searchQuery = "SQLite"
-	wb1.ReloadBoardTasks()
+	// Add shared and distinct tags on task 2 to verify multi-tag AND intersection
+	wb1.SelectTask(t2.ID)
 	tt1.Frame()
+	if err := tt1.Click("添加标签输入框"); err != nil {
+		t.Fatalf("click 添加标签输入框: %v", err)
+	}
+	tt1.Type("后端")
+	if err := tt1.Click("添加标签"); err != nil {
+		t.Fatalf("click 添加标签: %v", err)
+	}
+	wb1.ClearSelectedTask()
+	tt1.Frame()
+
+	// Test search via UI input
+	if err := tt1.Click("搜索任务"); err != nil {
+		t.Fatalf("click 搜索任务: %v", err)
+	}
+	tt1.Type("SQLite")
 	if len(wb1.filteredTasks) != 1 || wb1.filteredTasks[0].Title != "设计数据库 Schema" {
 		t.Fatalf("expected search for SQLite to match 1 task, got %d", len(wb1.filteredTasks))
 	}
@@ -240,17 +264,40 @@ func TestKanbanBoardDragMoveFilterAndPersistence(t *testing.T) {
 		t.Fatalf("expected 3 tasks after clearing filters, got %d", len(wb1.filteredTasks))
 	}
 
-	// Filter by tag pill
+	// Test priority filter via UI select
+	if err := tt1.Click("按优先级筛选"); err != nil {
+		t.Fatalf("click 按优先级筛选: %v", err)
+	}
+	tt1.Key(0, ui.KeyDown)
+	tt1.Key(0, ui.KeyEnter)
+	if len(wb1.filteredTasks) != 1 || wb1.filteredTasks[0].Priority != model.Urgent {
+		t.Fatalf("expected urgent priority filter to match 1 task, got %+v", wb1.filteredTasks)
+	}
+	if err := tt1.Click("清除筛选"); err != nil {
+		t.Fatalf("click 清除筛选 after priority: %v", err)
+	}
+
+	// Filter by multi-tag AND pills
 	if err := tt1.Click("筛选标签 后端"); err != nil {
 		t.Fatalf("click 筛选标签 后端: %v", err)
 	}
-	if len(wb1.filteredTasks) != 1 {
-		t.Fatalf("expected 1 task for tag 后端, got %d", len(wb1.filteredTasks))
+	if len(wb1.filteredTasks) != 2 {
+		t.Fatalf("expected 2 tasks for tag 后端, got %d", len(wb1.filteredTasks))
 	}
-	wb1.ClearBoardFilters()
+	if err := tt1.Click("筛选标签 SQLite"); err != nil {
+		t.Fatalf("click 筛选标签 SQLite: %v", err)
+	}
+	if len(wb1.filteredTasks) != 1 || wb1.filteredTasks[0].Title != "设计数据库 Schema" {
+		t.Fatalf("expected 1 task for AND tags [后端, SQLite], got %+v", wb1.filteredTasks)
+	}
+	if err := tt1.Click("清除筛选"); err != nil {
+		t.Fatalf("click 清除筛选 after tags: %v", err)
+	}
 
 	// Close first app instance and reopen to verify SQLite persistence
-	_ = wb1.FlushPending()
+	if err := wb1.FlushPending(); err != nil {
+		t.Fatalf("FlushPending: %v", err)
+	}
 	if err := app1.Close(); err != nil {
 		t.Fatalf("close app1: %v", err)
 	}
@@ -386,7 +433,11 @@ func TestTaskDetailMarkdownSubtasksAndAttachments(t *testing.T) {
 	}
 
 	// Scroll the task detail panel down so attachment action buttons are in view
-	tt.Scroll(1200, 200, 0, 320)
+	if panelRect, ok := tt.Find("任务详情面板"); ok {
+		tt.Scroll(panelRect.X+panelRect.W/2, panelRect.Y+panelRect.H/2, 0, 320)
+	} else {
+		tt.Scroll(1200, 200, 0, 320)
+	}
 
 	// Open, Reveal in Finder, and Export attachment via UI buttons
 	if err := tt.Click("打开附件 notes.txt"); err != nil {
@@ -406,15 +457,10 @@ func TestTaskDetailMarkdownSubtasksAndAttachments(t *testing.T) {
 		t.Fatalf("unexpected exported attachment content: %q (err=%v)", string(exportedBytes), err)
 	}
 
-	// Remove attachment and verify cleanup
-	var docAttID string
-	for _, att := range wb.detailAttachments {
-		if att.Name == "notes.txt" {
-			docAttID = att.ID
-		}
+	// Remove attachment via UI and verify cleanup
+	if err := tt.Click("移除附件 notes.txt"); err != nil {
+		t.Fatalf("click 移除附件 notes.txt: %v", err)
 	}
-	wb.RemoveAttachmentFromSelectedTask(docAttID)
-	tt.Frame()
 	if len(wb.detailAttachments) != 1 {
 		t.Fatalf("expected 1 attachment remaining after removal, got %d (task=%s)", len(wb.detailAttachments), task.ID)
 	}
@@ -458,18 +504,33 @@ func TestRecycleBinAndSettingsBackupRestore(t *testing.T) {
 	wb.ClearSelectedTask()
 	tt.Frame()
 
-	// 1. Export a full manual backup in Settings
+	// 1. Export a full manual backup in Settings and verify error surfacing on invalid backup dir
 	wb.NavigateTo(NavSettings)
 	tt.Frame()
 
-	// Switch theme to Dark
-	wb.ApplyThemeSetting(ThemeDark)
-	tt.Frame()
+	// Switch theme to Dark via UI Segmented control
+	if err := tt.Click("深色"); err != nil {
+		t.Fatalf("click 深色: %v", err)
+	}
 	if got, _ := app.Settings.Theme(context.Background()); got != ThemeDark {
 		t.Fatalf("expected persisted dark theme, got %s", got)
 	}
 	if !slices.Contains(appliedThemes, ThemeDark) {
 		t.Fatalf("expected Host.SetTheme to be invoked with dark")
+	}
+
+	// Reject store root as automatic backup directory and surface an error toast
+	wb.backupDirInput = dataDir
+	tt.Frame()
+	if err := tt.Click("保存策略"); err != nil {
+		t.Fatalf("click 保存策略: %v", err)
+	}
+	if !tt.HasText("保存自动备份策略失败") {
+		t.Fatalf("expected error toast when saving protected backup directory")
+	}
+	wb.ReloadSettings()
+	if err := tt.Click("Close"); err != nil {
+		t.Fatalf("dismiss toast: %v", err)
 	}
 
 	// Trigger manual backup export via UI button
@@ -729,6 +790,12 @@ func TestReviewAsyncBackgroundTaskAndCancel(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
+	releaseOnce := false
+	t.Cleanup(func() {
+		if !releaseOnce {
+			close(release)
+		}
+	})
 
 	ok := wb.runAsyncTask("正在执行耗时备份...", func(ctx context.Context) func() {
 		close(started)
@@ -763,6 +830,7 @@ func TestReviewAsyncBackgroundTaskAndCancel(t *testing.T) {
 	if wb.IsBusy() {
 		t.Fatalf("expected workbench to clear busy state after task cancellation and UI dispatch")
 	}
+	releaseOnce = true
 	close(release)
 }
 
@@ -908,8 +976,16 @@ func TestRestoreBlocksPreRestoreDraftAndBusyEdits(t *testing.T) {
 	}
 	wb.editTitle = "user edits while restore is busy"
 	saveErr := wb.SaveSelectedTask()
+	wb.RunDueBackupNow()
+	exportErr := wb.ExportManualBackup(filepath.Join(t.TempDir(), "blocked.zip"))
 	wb.NavigateTo(NavAllProjects)
 	(<-dispatched)()
+	if exportErr == nil {
+		t.Fatal("expected ExportManualBackup to be blocked while restore is awaiting UI completion")
+	}
+	if wb.selectedTaskID != "" || wb.dirty || wb.editDescription != "" {
+		t.Fatalf("expected restore completion to clear pre-restore draft state, got selected=%q dirty=%v desc=%q", wb.selectedTaskID, wb.dirty, wb.editDescription)
+	}
 	restored, err := app.Projects.GetTask(context.Background(), task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1002,5 +1078,419 @@ func TestSidebarProjectHoverActions(t *testing.T) {
 	}
 	if !wb.projectModalOpen || wb.projectModalEditID != wb.activeProjectID {
 		t.Fatalf("expected project modal open for %s, got open=%v editID=%s", wb.activeProjectID, wb.projectModalOpen, wb.projectModalEditID)
+	}
+}
+
+// Regression: toasts enqueued by a frame's click handler previously stayed queued past ToastHost instead of rendering immediately.
+func TestSameFrameToastRendersImmediately(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	if err := tt.Click("复制路径"); err != nil {
+		t.Fatalf("click 复制路径: %v", err)
+	}
+	if len(wb.pendingToasts) != 0 {
+		t.Fatalf("expected pendingToasts to drain before ToastHost in same frame, got %d remaining", len(wb.pendingToasts))
+	}
+	if !tt.HasText("已复制数据目录路径") {
+		t.Fatalf("expected copy toast to render in the same frame")
+	}
+}
+
+// Regression: RestoreOrphanTaskWithParent previously ignored task-restore failures and reported success after restoring only the parent project.
+func TestRestoreOrphanTaskWithParentSurfacesTaskError(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "孤儿恢复项目"
+	wb.SubmitProjectModal()
+	projID := wb.activeProjectID
+
+	wb.SoftDeleteProject(projID)
+	wb.NavigateTo(NavTrash)
+	tt.Frame()
+
+	// Point orphan modal at a deleted parent project with a missing task ID so parent restore succeeds and task restore fails.
+	wb.trashOrphanTask = &model.TrashItem{
+		ID:        "missing-task-id",
+		Kind:      projects.TrashTask,
+		Name:      "不存在的任务",
+		ProjectID: projID,
+	}
+	wb.trashParentErrModalOpen = true
+	tt.Frame()
+
+	if err := tt.Click("一并恢复项目与任务"); err != nil {
+		t.Fatalf("click 一并恢复项目与任务: %v", err)
+	}
+	if wb.trashParentErrModalOpen || wb.trashOrphanTask != nil {
+		t.Fatalf("expected orphan modal to close after parent project restored")
+	}
+	if _, err := app.Projects.GetProject(context.Background(), projID); err != nil {
+		t.Fatalf("expected parent project to be restored, got err=%v", err)
+	}
+	if !tt.HasText("恢复任务失败（所属项目已恢复）") {
+		t.Fatalf("expected error toast when restoring task failed")
+	}
+	if tt.HasText("已恢复项目与任务") {
+		t.Fatalf("must not show success toast when task restore failed")
+	}
+}
+
+// Regression: ConfirmPermanentDelete and ConfirmClearTrash previously cleared confirmation modal state even when rejected because another task was busy.
+func TestConfirmPermanentDeleteRetainsModalWhenBusy(t *testing.T) {
+	dispatched := make(chan func(), 16)
+	app, wb, _ := openTestWorkbench(t, t.TempDir(), Host{
+		Dispatch: func(fn func()) {
+			dispatched <- fn
+		},
+	})
+
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "忙碌删除保护"
+	wb.SubmitProjectModal()
+	projID := wb.activeProjectID
+	wb.SoftDeleteProject(projID)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	releaseOnce := false
+	t.Cleanup(func() {
+		if !releaseOnce {
+			close(release)
+		}
+	})
+	if !wb.runAsyncTask("阻塞后台任务", func(context.Context) func() {
+		close(started)
+		<-release
+		return nil
+	}) {
+		t.Fatal("failed to start blocking async task")
+	}
+	<-started
+
+	item := wb.trashItems[0]
+	wb.confirmPermDeleteItem = &item
+	wb.confirmPermDeleteOpen = true
+	wb.ConfirmPermanentDelete()
+	if !wb.confirmPermDeleteOpen || wb.confirmPermDeleteItem == nil || wb.confirmPermDeleteItem.ID != item.ID {
+		t.Fatalf("expected permanent delete modal state to remain intact while busy")
+	}
+
+	wb.confirmClearTrashOpen = true
+	wb.ConfirmClearTrash()
+	if !wb.confirmClearTrashOpen {
+		t.Fatalf("expected clear trash modal state to remain intact while busy")
+	}
+
+	releaseOnce = true
+	close(release)
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+
+	// Once idle, ConfirmPermanentDelete executes and prunes projectNames.
+	wb.ConfirmPermanentDelete()
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	if wb.confirmPermDeleteOpen || wb.confirmPermDeleteItem != nil {
+		t.Fatalf("expected permanent delete modal state cleared after execution")
+	}
+	if _, exists := wb.projectNames[projID]; exists {
+		t.Fatalf("expected permanently deleted project ID %s to be pruned from projectNames", projID)
+	}
+	if items, err := app.Projects.ListTrash(context.Background()); err != nil || len(items) != 0 {
+		t.Fatalf("expected trash empty after permanent delete, got items=%+v err=%v", items, err)
+	}
+}
+
+// Regression: applyRestoredState previously leaked pre-restore projectNames, filters, modals, timestamps, and stale board tasks when active projects were empty.
+func TestApplyRestoredStateResetsPreRestoreWorkbenchState(t *testing.T) {
+	app, wb, _ := openTestWorkbench(t, t.TempDir(), Host{})
+
+	// Create an archived-only backup (0 active projects) so restore tests empty-active-project cleanup.
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "归档快照项目"
+	wb.SubmitProjectModal()
+	archivedProjID := wb.activeProjectID
+	if _, err := wb.QuickCreateTask(model.Planned, "归档项目任务"); err != nil {
+		t.Fatal(err)
+	}
+	wb.ClearSelectedTask()
+	wb.ArchiveProject(archivedProjID)
+
+	zipPath := filepath.Join(t.TempDir(), "archived-only.zip")
+	if err := wb.ExportManualBackup(zipPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pollute workbench state with another project, filters, modals, timestamps, and async errors before restore.
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "恢复前临时项目"
+	wb.SubmitProjectModal()
+	tempProjID := wb.activeProjectID
+	wb.searchQuery = "stale-query"
+	wb.priorityFilter = string(model.High)
+	wb.tagFilters = []string{"stale-tag"}
+	wb.quickTaskTitles[model.Planned] = "draft quick task"
+	wb.trashSearch = "stale-trash"
+	wb.trashKindFilter = projects.TrashTask
+	wb.projectModalOpen = true
+	wb.taskModalOpen = true
+	wb.trashParentErrModalOpen = true
+	wb.confirmClearTrashOpen = true
+	wb.lastSavedAt = time.Now()
+	wb.RecordAsyncError(errors.New("pre-restore async error"))
+
+	// Make old active project match archivedProjID to test switching to 0 active projects cleanly.
+	wb.SelectProject(archivedProjID)
+	wb.RequestRestoreBackup(zipPath)
+	wb.TriggerRestoreBackup()
+
+	if wb.activeProjectID != "" {
+		t.Fatalf("expected empty activeProjectID when restored backup has 0 active projects, got %q", wb.activeProjectID)
+	}
+	if len(wb.boardTasks) != 0 || len(wb.filteredTasks) != 0 || len(wb.allBoardTags) != 0 || len(wb.taskAttachments) != 0 {
+		t.Fatalf("expected board task caches cleared on empty-active restore, got board=%d filtered=%d", len(wb.boardTasks), len(wb.filteredTasks))
+	}
+	if _, leaked := wb.projectNames[tempProjID]; leaked {
+		t.Fatalf("pre-restore project name %s leaked into restored projectNames", tempProjID)
+	}
+	if wb.projectNames[archivedProjID] != "归档快照项目" {
+		t.Fatalf("expected restored archived project in projectNames, got %+v", wb.projectNames)
+	}
+	if wb.searchQuery != "" || wb.priorityFilter != "" || len(wb.tagFilters) != 0 || len(wb.quickTaskTitles) != 0 {
+		t.Fatalf("expected board filters and quick inputs reset after restore")
+	}
+	if wb.trashSearch != "" || wb.trashKindFilter != "" || wb.pendingRestoreZip != "" {
+		t.Fatalf("expected trash filters and pendingRestoreZip reset after restore")
+	}
+	if wb.projectModalOpen || wb.taskModalOpen || wb.trashParentErrModalOpen || wb.confirmClearTrashOpen || wb.confirmRestoreOpen {
+		t.Fatalf("expected all modals closed after restore")
+	}
+	if !wb.lastSavedAt.IsZero() || wb.LastAsyncError() != "" {
+		t.Fatalf("expected lastSavedAt and lastAsyncErr cleared after restore, got savedAt=%v err=%q", wb.lastSavedAt, wb.LastAsyncError())
+	}
+	if _, err := app.Projects.GetProject(context.Background(), tempProjID); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("expected pre-restore project to be absent in restored DB, got err=%v", err)
+	}
+}
+
+// Regression: Settings previously kept showing a stale async backup error banner after RunDueBackupNow succeeded.
+func TestRunDueBackupNowClearsLastAsyncError(t *testing.T) {
+	dispatched := make(chan func(), 8)
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		Dispatch: func(fn func()) {
+			dispatched <- fn
+		},
+	})
+
+	wb.NavigateTo(NavSettings)
+	wb.RecordAsyncError(errors.New("simulated scheduled backup failure"))
+	tt.Frame()
+	if !tt.HasText("最近一次自动备份失败") {
+		t.Fatalf("expected Settings to display async backup failure banner")
+	}
+
+	if err := tt.Click("立即检查到期备份"); err != nil {
+		t.Fatalf("click 立即检查到期备份: %v", err)
+	}
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	tt.Frame()
+
+	if wb.LastAsyncError() != "" {
+		t.Fatalf("expected lastAsyncErr cleared after successful RunDueBackupNow, got %q", wb.LastAsyncError())
+	}
+	if tt.HasText("最近一次自动备份失败") {
+		t.Fatalf("expected failure banner to disappear after RunDueBackupNow succeeded")
+	}
+}
+
+// Regression: MoveOrReorderTaskOnto and StepTaskInColumn previously failed silently on invalid drafts, and FlushPending errors without saveErr produced empty messages.
+func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "排序草稿保护"
+	wb.SubmitProjectModal()
+
+	t1, err := wb.QuickCreateTask(model.Planned, "任务一")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := wb.QuickCreateTask(model.Planned, "任务二")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wb.SelectTask(t2.ID)
+	wb.editTitle = "   "
+	wb.detailExpanded = false
+	wb.pendingToasts = nil
+
+	wb.StepTaskInColumn(t2.ID, model.Planned, -1)
+	if !wb.detailExpanded {
+		t.Fatalf("expected StepTaskInColumn flush failure to expand detail panel")
+	}
+	planned := wb.TasksInColumn(model.Planned)
+	if planned[0].ID != t1.ID || planned[1].ID != t2.ID {
+		t.Fatalf("expected StepTaskInColumn not to reorder while draft is invalid")
+	}
+	tt.Frame()
+	if !tt.HasText("任务标题不能为空") {
+		t.Fatalf("expected warning toast with validation reason on StepTaskInColumn failure")
+	}
+
+	wb.detailExpanded = false
+	wb.MoveOrReorderTaskOnto(t2.ID, t1.ID, false)
+	if !wb.detailExpanded {
+		t.Fatalf("expected MoveOrReorderTaskOnto flush failure to expand detail panel")
+	}
+	planned = wb.TasksInColumn(model.Planned)
+	if planned[0].ID != t1.ID || planned[1].ID != t2.ID {
+		t.Fatalf("expected MoveOrReorderTaskOnto not to reorder while draft is invalid")
+	}
+
+	// Verify FlushPending ErrConflict without saveErr surfaces a non-empty conflict message.
+	wb.editTitle = "有效标题"
+	wb.saveErr = ""
+	wb.bumpDataEpoch()
+	wb.MoveOrReorderTaskOnto(t2.ID, t1.ID, false)
+	tt.Frame()
+	if !tt.HasText("backup restore in progress") {
+		t.Fatalf("expected FlushPending ErrConflict fallback description instead of empty saveErr")
+	}
+}
+
+// Regression: failing to persist a theme setting previously left themeSegmentIdx out of sync with themeSetting.
+func TestApplyThemeSettingErrorRevertsSegmentedControl(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.NavigateTo(NavSettings)
+	tt.Frame()
+
+	if err := app.Close(); err != nil {
+		t.Fatalf("close backend: %v", err)
+	}
+
+	if err := tt.Click("浅色"); err != nil {
+		t.Fatalf("click 浅色: %v", err)
+	}
+	if wb.themeSetting != ThemeSystem {
+		t.Fatalf("expected themeSetting to remain %q on error, got %q", ThemeSystem, wb.themeSetting)
+	}
+	if wb.themeSegmentIdx != 0 {
+		t.Fatalf("expected themeSegmentIdx to revert to 0 on error, got %d", wb.themeSegmentIdx)
+	}
+	if !tt.HasText("保存主题设置失败") {
+		t.Fatalf("expected error toast when saving theme fails")
+	}
+}
+
+// Real async attachment import, picker errors, and manual backup export run via Host.Dispatch while rejecting concurrent busy triggers.
+func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
+	srcDir := t.TempDir()
+	docPath := filepath.Join(srcDir, "spec.txt")
+	if err := os.WriteFile(docPath, []byte("async spec content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exportZip := filepath.Join(t.TempDir(), "async-export.zip")
+
+	dispatched := make(chan func(), 16)
+	pickerGate := make(chan struct{})
+	pickerErr := errors.New("picker unavailable")
+	returnPickerErr := false
+
+	host := Host{
+		Dispatch: func(fn func()) {
+			dispatched <- fn
+		},
+		PickOpenFiles: func(_ string, _ bool, _ ...string) ([]string, error) {
+			<-pickerGate
+			if returnPickerErr {
+				return nil, pickerErr
+			}
+			return []string{docPath}, nil
+		},
+		PickSaveFile: func(_ string, _ string, _ ...string) (string, error) {
+			return exportZip, nil
+		},
+	}
+
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), host)
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "异步分发项目"
+	wb.SubmitProjectModal()
+	if _, err := wb.QuickCreateTask(model.Planned, "异步附件任务"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start real async attachment pick & import.
+	wb.PickAndImportAttachmentsToSelectedTask()
+	if !wb.IsBusy() {
+		t.Fatal("expected workbench busy during async file picker/import")
+	}
+
+	// Concurrent async export must be rejected while busy without blocking UI.
+	wb.PickAndExportManualBackup()
+	if len(wb.pendingToasts) == 0 || wb.pendingToasts[len(wb.pendingToasts)-1].Title != "后台任务进行中" {
+		t.Fatalf("expected busy rejection toast, got %+v", wb.pendingToasts)
+	}
+	wb.pendingToasts = nil
+
+	close(pickerGate)
+	wb.WaitForTasks()
+	if len(wb.detailAttachments) != 0 {
+		t.Fatal("background worker updated UI attachments before Dispatch callback ran")
+	}
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	if wb.IsBusy() {
+		t.Fatal("expected busy cleared after dispatched import apply")
+	}
+	if len(wb.detailAttachments) != 1 || wb.detailAttachments[0].Name != "spec.txt" {
+		t.Fatalf("expected 1 imported attachment after dispatch, got %+v", wb.detailAttachments)
+	}
+
+	// Picker error must surface a toast instead of silently returning nil.
+	returnPickerErr = true
+	wb.PickAndImportAttachmentsToSelectedTask()
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	tt.Frame()
+	if !tt.HasText("选择附件失败") || !tt.HasText(pickerErr.Error()) {
+		t.Fatalf("expected picker error toast to surface")
+	}
+
+	// Async manual backup export writes archive off UI thread and updates state on Dispatch.
+	wb.PickAndExportManualBackup()
+	wb.WaitForTasks()
+	if wb.lastExportedZipPath != "" {
+		t.Fatal("lastExportedZipPath updated before Dispatch callback ran")
+	}
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
+	if wb.lastExportedZipPath != exportZip {
+		t.Fatalf("expected lastExportedZipPath=%q, got %q", exportZip, wb.lastExportedZipPath)
+	}
+	if _, err := os.Stat(exportZip); err != nil {
+		t.Fatalf("expected exported zip on disk: %v", err)
+	}
+	// Verify AttachmentManagedPath missing cache returns empty string without error when file is absent.
+	missingAtt := model.Attachment{ID: "missing-att", StorageName: "does-not-exist"}
+	if got := wb.AttachmentManagedPath(missingAtt); got != "" || !wb.attachmentMissing["missing-att"] {
+		t.Fatalf("expected missing attachment path cached as missing, got %q missing=%v", got, wb.attachmentMissing["missing-att"])
+	}
+	if !strings.HasSuffix(wb.attachmentPaths[wb.detailAttachments[0].ID], wb.detailAttachments[0].StorageName) {
+		t.Fatalf("expected imported attachment path cached")
 	}
 }

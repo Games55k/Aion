@@ -227,6 +227,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 						feedback.Progress(c, pct, feedback.ProgressProps{
 							Size:     theme.Small,
 							ShowInfo: true,
+							Format:   formatProgressPercent,
 						})
 					})
 				}
@@ -253,14 +254,14 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 	}, func() {
 		ui.Column(c).Gap(14).AlignSelf(ui.Stretch).Children(func() {
 			if w.projectModalErr != "" {
-				feedback.Alert(c, w.projectModalErr, feedback.AlertProps{
+				feedback.Alert(c.Key("project-modal-err"), w.projectModalErr, feedback.AlertProps{
 					Type:    feedback.Error,
 					Variant: feedback.Soft,
 				})
 			}
 
 			// Project Name
-			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c.Key("project-modal-name-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "项目名称 *").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				nameBefore := w.projectModalName
 				inp := field.Input(c, &w.projectModalName, field.InputProps{
@@ -276,7 +277,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			// Project Icon Picker
-			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c.Key("project-modal-icon-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "项目图标").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				ui.Row(c).Gap(6).Wrap().AlignSelf(ui.Stretch).Children(func() {
 					for _, opt := range ProjectIconOptions {
@@ -302,7 +303,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			// Project Description
-			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c.Key("project-modal-desc-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "项目简介").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				field.TextArea(c, &w.projectModalDesc, field.TextAreaProps{
 					Placeholder: "补充项目目标、交付物或备注说明（可选）",
@@ -314,4 +315,8 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 	}) {
 		w.SubmitProjectModal()
 	}
+}
+
+func formatProgressPercent(pct float32) string {
+	return fmt.Sprintf("%.0f%%", pct)
 }

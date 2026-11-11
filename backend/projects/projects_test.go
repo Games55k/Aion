@@ -295,7 +295,7 @@ func TestMoveAndSubsetReorderPreserveOtherTasks(t *testing.T) {
 	board(t, s, p, model.Planned, a, b, e, c)
 }
 
-// Listing tasks filters by project, case-insensitive query, tags, priority, and status while escaping SQL wildcards.
+// Listing tasks filters by project, case-insensitive query, tags, priority, and status while matching literal special characters.
 func TestProjectScopedSearchAndFilters(t *testing.T) {
 	s, _ := setup(t)
 	p := project(t, s, "P")
@@ -330,7 +330,8 @@ func TestProjectScopedSearchAndFilters(t *testing.T) {
 		{projects.TaskFilter{Tags: []string{"go"}}, nil},
 		{projects.TaskFilter{Priority: model.High}, []int{0, 2}},
 		{projects.TaskFilter{Status: model.Done}, []int{2}},
-		{projects.TaskFilter{Query: "école", Tags: []string{"Go"}, Priority: model.Low, Status: model.Planned}, []int{1}},
+		{projects.TaskFilter{Status: model.Done, Priority: model.High, Tags: []string{" École ", "后台"}}, []int{2}},
+		{projects.TaskFilter{Query: "école", Tags: []string{" Go "}, Priority: model.Low, Status: model.Planned}, []int{1}},
 	}
 	for _, tt := range cases {
 		got, err := s.ListTasks(ctx, p.ID, tt.filter)
@@ -553,13 +554,13 @@ func TestConcurrentServicesKeepAllTasksAndDensePositions(t *testing.T) {
 	const n = 16
 	var wg sync.WaitGroup
 	created := make(chan model.Task, n)
-	errors := make(chan error, n)
+	errs := make(chan error, 2*n)
 	for range n {
 		wg.Go(func() {
 			// Multiple services must serialize through the same Store lock.
 			v, err := projects.New(st).CreateTask(ctx, p.ID, projects.TaskInput{Title: "concurrent"})
 			if err != nil {
-				errors <- err
+				errs <- err
 				return
 			}
 			created <- v
@@ -573,13 +574,13 @@ func TestConcurrentServicesKeepAllTasksAndDensePositions(t *testing.T) {
 		wg.Go(func() {
 			_, err := projects.New(st).MoveTask(ctx, v.ID, model.Done, 0)
 			if err != nil {
-				errors <- err
+				errs <- err
 			}
 		})
 	}
 	wg.Wait()
-	close(errors)
-	for err := range errors {
+	close(errs)
+	for err := range errs {
 		t.Error(err)
 	}
 	if len(all) != n {
@@ -598,4 +599,42 @@ func TestConcurrentServicesKeepAllTasksAndDensePositions(t *testing.T) {
 		seen[v.ID] = true
 	}
 	board(t, s, p, model.Planned)
+}
+
+// UpdateTask changing Status updates content fields, appends to the destination column, and keeps dense positions in both columns.
+func TestUpdateTaskStatusChangeReindexesBothColumns(t *testing.T) {
+	s, _ := setup(t)
+	p := project(t, s, "P")
+	a := task(t, s, p, "A")
+	b := task(t, s, p, "B")
+	c, err := s.CreateTask(ctx, p.ID, projects.TaskInput{Title: "C", Status: model.Done})
+	check(t, err)
+
+	updated, err := s.UpdateTask(ctx, a.ID, projects.TaskInput{
+		Title:       "A-done",
+		Description: "moved via update",
+		Status:      model.Done,
+		Priority:    model.Urgent,
+		Tags:        []string{"release"},
+		DueDate:     "2026-12-31",
+	})
+	check(t, err)
+	if updated.Title != "A-done" || updated.Description != "moved via update" || updated.Priority != model.Urgent ||
+		updated.Status != model.Done || updated.Position != 1 || updated.CompletedAt == nil || updated.DueDate != "2026-12-31" {
+		t.Fatalf("unexpected updated task: %+v", updated)
+	}
+	board(t, s, p, model.Planned, b)
+	board(t, s, p, model.Done, c, updated)
+
+	reopened, err := s.UpdateTask(ctx, updated.ID, projects.TaskInput{
+		Title:    "A-reopened",
+		Status:   model.InProgress,
+		Priority: model.Medium,
+	})
+	check(t, err)
+	if reopened.CompletedAt != nil || reopened.Status != model.InProgress || reopened.Position != 0 {
+		t.Fatalf("unexpected reopened task: %+v", reopened)
+	}
+	board(t, s, p, model.Done, c)
+	board(t, s, p, model.InProgress, reopened)
 }

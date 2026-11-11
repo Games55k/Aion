@@ -21,8 +21,7 @@ func (s *Service) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
 	result := make([]model.TrashItem, 0)
 	err := s.store.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT id,'project',name,'',deleted_at FROM projects WHERE deleted_at IS NOT NULL
-			UNION ALL SELECT id,'task',title,project_id,deleted_at FROM tasks WHERE deleted_at IS NOT NULL
-			ORDER BY 5 DESC,2,1`)
+			UNION ALL SELECT id,'task',title,project_id,deleted_at FROM tasks WHERE deleted_at IS NOT NULL`)
 		if err != nil {
 			return err
 		}

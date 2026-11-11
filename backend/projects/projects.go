@@ -16,10 +16,11 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (model.Pro
 		return model.Project{}, invalid("project name is required")
 	}
 	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339Nano)
 	p := model.Project{ID: model.NewID(), Name: in.Name, Icon: in.Icon, Description: in.Description, CreatedAt: now, UpdatedAt: now}
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?,?,?,?,?,?,?,NULL)`,
-			p.ID, p.Name, p.Icon, p.Description, false, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+			p.ID, p.Name, p.Icon, p.Description, false, nowStr, nowStr)
 		return err
 	})
 	if err != nil {
@@ -53,7 +54,7 @@ func (s *Service) ListProjects(ctx context.Context, filter ProjectFilter) ([]mod
 			query += ` AND archived=?`
 			args = append(args, *filter.Archived)
 		}
-		rows, err := tx.QueryContext(ctx, query+` ORDER BY created_at,id`, args...)
+		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}

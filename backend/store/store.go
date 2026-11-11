@@ -49,7 +49,13 @@ func Open(root string) (*Store, error) {
 	if err = os.MkdirAll(filepath.Join(root, "attachments"), 0700); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(filepath.Join(root, ".aion.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lockPath := filepath.Join(root, ".aion.lock")
+	if st, err := os.Lstat(lockPath); err == nil && !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("unsafe lock file: %s", lockPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +76,7 @@ func Open(root string) (*Store, error) {
 }
 
 func openDB(path string) (*sql.DB, error) {
-	if st, e := os.Lstat(path); e == nil && (!st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0) {
+	if st, e := os.Lstat(path); e == nil && !st.Mode().IsRegular() {
 		return nil, errors.New("unsafe database path")
 	}
 	u := url.URL{Scheme: "file", Path: path}
@@ -164,6 +170,9 @@ func (s *Store) Exclusive(ctx context.Context, fn func(*sql.DB) error) error {
 	if s.closed {
 		return errors.New("store is closed")
 	}
+	if s.db == nil {
+		return errors.New("store database is unavailable")
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -221,7 +230,7 @@ func (s *Store) ReplaceDatabaseLocked(ctx context.Context, stagedPath string) er
 	if err == nil {
 		err = probe.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity)
 	}
-	probe.Close()
+	err = errors.Join(err, probe.Close())
 	if err != nil {
 		return err
 	}
@@ -253,7 +262,12 @@ func (s *Store) ReplaceDatabaseLocked(ctx context.Context, stagedPath string) er
 
 func validExportFileName(name string) bool {
 	return strings.TrimSpace(name) != "" && name != "." && name != ".." &&
-		!strings.ContainsAny(name, "/\\:\x00") && strings.IndexFunc(name, unicode.IsControl) < 0
+		!strings.ContainsAny(name, "/\\:") && strings.IndexFunc(name, unicode.IsControl) < 0
+}
+
+func isProtectedRootEntry(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasPrefix(lower, "aion.sqlite") || strings.HasPrefix(name, ".") || lower == "attachments" || lower == "backups"
 }
 
 func isWithinManagedDir(dirPath string, managedStat, rootStat os.FileInfo) bool {
@@ -266,7 +280,7 @@ func isWithinManagedDir(dirPath string, managedStat, rootStat os.FileInfo) bool 
 			}
 			if rootStat != nil && os.SameFile(st, rootStat) && prevChild != "" {
 				lowerChild := strings.ToLower(prevChild)
-				if lowerChild == "attachments" || strings.HasPrefix(lowerChild, ".") {
+				if lowerChild == "attachments" || strings.HasPrefix(lowerChild, ".") || strings.HasPrefix(lowerChild, "aion.sqlite") {
 					return true
 				}
 			}
@@ -292,12 +306,19 @@ func (s *Store) ValidateBackupDir(dirPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if st, err := os.Lstat(absDir); err == nil && (!st.IsDir() || st.Mode()&os.ModeSymlink != 0) {
+	if st, err := os.Lstat(absDir); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	} else if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: backup directory must be a real directory", model.ErrInvalid)
 	}
 	managedStat, err := os.Lstat(s.AttachmentsDir())
 	if err != nil {
 		return "", err
+	}
+	if !managedStat.IsDir() || managedStat.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%w: unsafe attachment directory", model.ErrInvalid)
 	}
 	rootStat, err := os.Stat(s.root)
 	if err != nil {
@@ -322,6 +343,9 @@ func (s *Store) ValidateExportTarget(destinationPath string, allowOverwrite bool
 	if destinationPath == "" {
 		return "", fmt.Errorf("%w: destination is required", model.ErrInvalid)
 	}
+	if strings.HasSuffix(destinationPath, "/") || strings.HasSuffix(destinationPath, "\\") {
+		return "", fmt.Errorf("%w: invalid destination file name", model.ErrInvalid)
+	}
 	base := filepath.Base(destinationPath)
 	if !validExportFileName(base) {
 		return "", fmt.Errorf("%w: invalid destination file name", model.ErrInvalid)
@@ -333,7 +357,8 @@ func (s *Store) ValidateExportTarget(destinationPath string, allowOverwrite bool
 	managedStat, e := os.Lstat(s.AttachmentsDir())
 	if e != nil {
 		return "", e
-	} else if !managedStat.IsDir() || managedStat.Mode()&os.ModeSymlink != 0 {
+	}
+	if !managedStat.IsDir() || managedStat.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: unsafe attachment directory", model.ErrInvalid)
 	}
 	rootStat, err := os.Stat(s.root)
@@ -400,22 +425,16 @@ func (s *Store) ValidateExportTarget(destinationPath string, allowOverwrite bool
 		}
 	}
 
-	if os.SameFile(parentStat, rootStat) {
-		lowerBase := strings.ToLower(base)
-		if strings.HasPrefix(lowerBase, "aion.sqlite") || strings.HasPrefix(base, ".") || lowerBase == "attachments" || lowerBase == "backups" {
-			return "", fmt.Errorf("%w: destination overlaps protected store path: %s", model.ErrInvalid, base)
-		}
+	if os.SameFile(parentStat, rootStat) && isProtectedRootEntry(base) {
+		return "", fmt.Errorf("%w: destination overlaps protected store path: %s", model.ErrInvalid, base)
 	}
 
 	if relRoot, err := filepath.Rel(rootReal, resolvedDest); err == nil {
 		if relRoot == "." {
 			return "", fmt.Errorf("%w: destination overlaps store root", model.ErrInvalid)
 		}
-		if filepath.Dir(relRoot) == "." {
-			lowerBase := strings.ToLower(base)
-			if strings.HasPrefix(lowerBase, "aion.sqlite") || strings.HasPrefix(base, ".") || lowerBase == "attachments" || lowerBase == "backups" {
-				return "", fmt.Errorf("%w: destination overlaps protected store path: %s", model.ErrInvalid, base)
-			}
+		if filepath.Dir(relRoot) == "." && isProtectedRootEntry(base) {
+			return "", fmt.Errorf("%w: destination overlaps protected store path: %s", model.ErrInvalid, base)
 		}
 	}
 

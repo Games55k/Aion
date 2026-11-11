@@ -14,18 +14,18 @@ import (
 func validateValues(ctx context.Context, db *sql.DB) error {
 	rows, err := db.QueryContext(ctx, `SELECT created_at,updated_at,deleted_at,NULL FROM projects
 		UNION ALL SELECT created_at,updated_at,deleted_at,completed_at FROM tasks
-		UNION ALL SELECT created_at,created_at,NULL,NULL FROM attachments`)
+		UNION ALL SELECT created_at,NULL,NULL,NULL FROM attachments`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var created, updated string
-		var deleted, completed sql.NullString
+		var created string
+		var updated, deleted, completed sql.NullString
 		if err = rows.Scan(&created, &updated, &deleted, &completed); err != nil {
 			rows.Close()
 			return err
 		}
-		for _, value := range []sql.NullString{{String: created, Valid: true}, {String: updated, Valid: true}, deleted, completed} {
+		for _, value := range []sql.NullString{{String: created, Valid: true}, updated, deleted, completed} {
 			if !value.Valid {
 				continue
 			}

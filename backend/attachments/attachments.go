@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -76,7 +77,7 @@ func (s *Service) Import(ctx context.Context, taskID, sourcePath string) (model.
 			}
 		}()
 		header := make([]byte, 512)
-		n, readErr := io.ReadFull(source, header)
+		n, readErr := io.ReadFull(contextReader{ctx, source}, header)
 		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
 			return errors.Join(readErr, target.Close())
 		}
@@ -120,7 +121,7 @@ func (s *Service) List(ctx context.Context, taskID string) ([]model.Attachment, 
 		if err := visibleTask(ctx, tx, taskID); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT id,task_id,name,storage_name,media_type,size,sha256,created_at FROM attachments WHERE task_id=? ORDER BY created_at,id`, taskID)
+		rows, err := tx.QueryContext(ctx, `SELECT id,task_id,name,storage_name,media_type,size,sha256,created_at FROM attachments WHERE task_id=?`, taskID)
 		if err != nil {
 			return err
 		}
@@ -137,6 +138,13 @@ func (s *Service) List(ctx context.Context, taskID string) ([]model.Attachment, 
 	if err != nil {
 		return nil, err
 	}
+	// RFC3339Nano omits trailing fractional zeros, so sort parsed instants in Go.
+	sort.Slice(attachments, func(i, j int) bool {
+		if attachments[i].CreatedAt.Equal(attachments[j].CreatedAt) {
+			return attachments[i].ID < attachments[j].ID
+		}
+		return attachments[i].CreatedAt.Before(attachments[j].CreatedAt)
+	})
 	return attachments, nil
 }
 
@@ -176,9 +184,6 @@ func (s *Service) ExportOverwrite(ctx context.Context, attachmentID, destination
 }
 
 func (s *Service) export(ctx context.Context, attachmentID, destinationPath string, allowOverwrite bool) error {
-	if !safeName(filepath.Base(destinationPath)) {
-		return model.ErrInvalid
-	}
 	return s.store.Read(ctx, func(tx *sql.Tx) error {
 		a, err := visibleAttachment(ctx, tx, attachmentID)
 		if err != nil {
@@ -201,14 +206,11 @@ func (s *Service) export(ctx context.Context, attachmentID, destinationPath stri
 		defer func() {
 			_ = os.Remove(stagePath)
 		}()
-		if err := target.Chmod(0600); err != nil {
-			_ = target.Close()
-			return err
-		}
 		hash := sha256.New()
-		size, copyErr := io.Copy(io.MultiWriter(target, hash), contextReader{ctx, source})
+		limit := min(max(a.Size, 0), MaxFileBytes) + 1
+		size, copyErr := io.Copy(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, source}, limit))
 		if copyErr == nil && (size != a.Size || hex.EncodeToString(hash.Sum(nil)) != a.SHA256) {
-			copyErr = fmt.Errorf("attachment content mismatch: %w", model.ErrInvalid)
+			copyErr = fmt.Errorf("%w: attachment content mismatch", model.ErrInvalid)
 		}
 		if copyErr == nil {
 			copyErr = target.Sync()
@@ -305,11 +307,11 @@ func visibleTask(ctx context.Context, tx *sql.Tx, taskID string) error {
 	if err != nil {
 		return err
 	}
-	if projectDeleted.Valid {
-		return model.ErrParentDeleted
-	}
 	if taskDeleted.Valid {
 		return model.ErrNotFound
+	}
+	if projectDeleted.Valid {
+		return model.ErrParentDeleted
 	}
 	return nil
 }

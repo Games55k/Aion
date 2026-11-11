@@ -197,13 +197,10 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 					if sum.Total > 0 {
 						extra = fmt.Sprintf("%d/%d", sum.Done, sum.Total)
 					}
-					isProjActive := w.navPage == NavProjectBoard && w.activeProjectID == p.ID
-					projItems = append(projItems, display.ListItem{
-						Key:   "proj:" + p.ID,
-						Label: p.Name,
-						Icon:  ProjectIconSVG(p.Icon),
-						Extra: extra,
-						Actions: func() {
+					var actions func()
+					if nav.Expanded {
+						isProjActive := w.navPage == NavProjectBoard && w.activeProjectID == p.ID
+						actions = func() {
 							bg := tk.FillTertiary.Over(tk.BgContainer)
 							if isProjActive {
 								bg = tk.FillSecondary.Over(tk.BgContainer)
@@ -222,7 +219,14 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 									w.ArchiveProject(p.ID)
 								}
 							})
-						},
+						}
+					}
+					projItems = append(projItems, display.ListItem{
+						Key:     "proj:" + p.ID,
+						Label:   p.Name,
+						Icon:    ProjectIconSVG(p.Icon),
+						Extra:   extra,
+						Actions: actions,
 					})
 				}
 				activeProjKey := ""

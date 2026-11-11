@@ -20,16 +20,20 @@ func (s *Settings) Get(ctx context.Context, key string, out any) error {
 	if !validKey(key) {
 		return model.ErrInvalid
 	}
-	return s.s.Read(ctx, func(tx *sql.Tx) error {
-		var value string
+	var value string
+	err := s.s.Read(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=?", key).Scan(&value); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return model.ErrNotFound
 			}
 			return err
 		}
-		return json.Unmarshal([]byte(value), out)
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(value), out)
 }
 func (s *Settings) Set(ctx context.Context, key string, value any) error {
 	if !validKey(key) {

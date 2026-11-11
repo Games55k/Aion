@@ -2,9 +2,11 @@ package backup
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,7 +17,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"aion/backend/model"
 	"aion/backend/store"
 )
 
@@ -213,7 +217,11 @@ func editManifest(t *testing.T, items []zipItem, fn func(*manifest)) {
 				t.Fatal(err)
 			}
 			fn(&m)
-			items[i].data, _ = json.Marshal(m)
+			data, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items[i].data = data
 			return
 		}
 	}
@@ -381,11 +389,17 @@ func TestExportRefusesInvalidLiveFilesAndOverwrite(t *testing.T) {
 	if err := service.Export(testCtx, destination); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := os.ReadFile(destination)
+	before, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := service.Export(testCtx, destination); err == nil {
 		t.Fatal("overwrote existing archive")
 	}
-	after, _ := os.ReadFile(destination)
+	after, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(before) != string(after) {
 		t.Fatal("destination changed")
 	}
@@ -501,7 +515,10 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 	s := testStore(t)
 	seed(t, s, "live", "payload")
 	service := New(s)
-	p, _ := service.GetPolicy(testCtx)
+	p, err := service.GetPolicy(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p.Keep = 1
 	if err := service.SetPolicy(testCtx, p); err != nil {
 		t.Fatal(err)
@@ -510,7 +527,10 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, _ := service.loadState()
+	st, err := service.loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
 	st.LastSuccess = time.Now().Add(-48 * time.Hour)
 	if err = service.saveState(st); err != nil {
 		t.Fatal(err)
@@ -542,7 +562,10 @@ func TestAutoFailurePreservesFilesAndRecordsError(t *testing.T) {
 func TestRotationPreservesReplacedFile(t *testing.T) {
 	s := testStore(t)
 	service := New(s)
-	p, _ := service.GetPolicy(testCtx)
+	p, err := service.GetPolicy(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p.Keep = 1
 	if err := service.SetPolicy(testCtx, p); err != nil {
 		t.Fatal(err)
@@ -554,7 +577,10 @@ func TestRotationPreservesReplacedFile(t *testing.T) {
 	if err = os.WriteFile(first, []byte("manual replacement"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := service.loadState()
+	st, err := service.loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
 	st.LastSuccess = time.Now().Add(-48 * time.Hour)
 	if err = service.saveState(st); err != nil {
 		t.Fatal(err)
@@ -594,5 +620,227 @@ func TestConcurrentRunDueCreatesOnce(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("created %d archives", count)
+	}
+}
+
+// ExportOverwrite replaces an existing archive on success and leaves it untouched if backup export fails or targets protected paths.
+func TestExportOverwriteReplacesArchiveAndPreservesOnFailure(t *testing.T) {
+	s := testStore(t)
+	seed(t, s, "live", "overwrite payload")
+	service := New(s)
+	dest := filepath.Join(t.TempDir(), "backup.zip")
+	if err := os.WriteFile(dest, []byte("previous file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ExportOverwrite(testCtx, dest); err != nil {
+		t.Fatal(err)
+	}
+	target := testStore(t)
+	if _, err := New(target).Restore(testCtx, dest); err != nil {
+		t.Fatal(err)
+	}
+	assertSeed(t, target, "live", "overwrite payload")
+
+	outside := filepath.Join(t.TempDir(), "outside.zip")
+	if err := os.WriteFile(outside, []byte("keep link target"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link.zip")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ExportOverwrite(testCtx, link); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("symlink overwrite error = %v", err)
+	}
+	if b, err := os.ReadFile(outside); err != nil || string(b) != "keep link target" {
+		t.Fatalf("symlink target changed: %q %v", b, err)
+	}
+	if err := service.ExportOverwrite(testCtx, s.DBPath()); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("db overwrite error = %v", err)
+	}
+	// Corrupt live attachment and verify existing archive at dest is preserved.
+	prevBytes, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.AttachmentsDir(), "live-file"), []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ExportOverwrite(testCtx, dest); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("expected error on corrupt attachment, got %v", err)
+	}
+	afterBytes, err := os.ReadFile(dest)
+	if err != nil || !bytes.Equal(prevBytes, afterBytes) {
+		t.Fatalf("failed ExportOverwrite altered existing archive: %v", err)
+	}
+}
+
+// Restore rejects adversarial ZIP central directories, lying deflate streams, whitespace or control attachment names, and symlinked backup directories.
+func TestRejectAdversarialZIPAndUnsafeComponents(t *testing.T) {
+	source, _ := exportFixture(t)
+	rawSource, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eocdIdx := bytes.LastIndex(rawSource, []byte{0x50, 0x4b, 0x05, 0x06})
+	if eocdIdx < 0 {
+		t.Fatal("missing EOCD in fixture")
+	}
+
+	patchAndRestore := func(t *testing.T, data []byte) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "bad.zip")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		target := testStore(t)
+		seed(t, target, "live", "survives")
+		if _, err := New(target).Restore(testCtx, path); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("expected ErrInvalid, got %v", err)
+		}
+		assertSeed(t, target, "live", "survives")
+	}
+
+	t.Run("eocd-count-mismatch", func(t *testing.T) {
+		b := bytes.Clone(rawSource)
+		binary.LittleEndian.PutUint16(b[eocdIdx+8:], 2)
+		binary.LittleEndian.PutUint16(b[eocdIdx+10:], 2)
+		patchAndRestore(t, b)
+	})
+
+	t.Run("multidisk-eocd", func(t *testing.T) {
+		b := bytes.Clone(rawSource)
+		binary.LittleEndian.PutUint16(b[eocdIdx+4:], 1)
+		patchAndRestore(t, b)
+	})
+
+	t.Run("zip64-sentinel", func(t *testing.T) {
+		b := bytes.Clone(rawSource)
+		binary.LittleEndian.PutUint32(b[eocdIdx+16:], 0xffffffff)
+		patchAndRestore(t, b)
+	})
+
+	t.Run("bad-local-offset", func(t *testing.T) {
+		b := bytes.Clone(rawSource)
+		cdOffset := binary.LittleEndian.Uint32(b[eocdIdx+16:])
+		binary.LittleEndian.PutUint32(b[cdOffset+42:], cdOffset)
+		patchAndRestore(t, b)
+	})
+
+	t.Run("deflate-bomb-mismatch", func(t *testing.T) {
+		items := zipItems(t, source)
+		items[1].data = bytes.Repeat([]byte("A"), 128)
+		editManifest(t, items, func(m *manifest) {
+			for i := range m.Files {
+				if m.Files[i].Path == "attachments/source-file" {
+					m.Files[i].Size = 4
+				}
+			}
+		})
+		path := writeItems(t, items)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eocd := bytes.LastIndex(b, []byte{0x50, 0x4b, 0x05, 0x06})
+		cdOff := int(binary.LittleEndian.Uint32(b[eocd+16:]))
+		for cursor := cdOff; cursor < eocd; {
+			nameLen := int(binary.LittleEndian.Uint16(b[cursor+28:]))
+			extraLen := int(binary.LittleEndian.Uint16(b[cursor+30:]))
+			commentLen := int(binary.LittleEndian.Uint16(b[cursor+32:]))
+			if string(b[cursor+46:cursor+46+nameLen]) == "attachments/source-file" {
+				binary.LittleEndian.PutUint32(b[cursor+24:], 4)
+				break
+			}
+			cursor += 46 + nameLen + extraLen + commentLen
+		}
+		patchAndRestore(t, b)
+	})
+
+	for _, tc := range []struct {
+		name        string
+		storageName string
+	}{
+		{"whitespace-storage-name", "   "},
+		{"control-char-storage-name", "bad\tname"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := zipItems(t, source)
+			updateDB(t, items, "UPDATE attachments SET storage_name='"+tc.storageName+"'")
+			items[1].name = "attachments/" + tc.storageName
+			editManifest(t, items, func(m *manifest) {
+				for i := range m.Files {
+					if strings.HasPrefix(m.Files[i].Path, "attachments/") {
+						m.Files[i].Path = items[1].name
+					}
+				}
+			})
+			target := testStore(t)
+			if _, err := New(target).Restore(testCtx, writeItems(t, items)); !errors.Is(err, model.ErrInvalid) {
+				t.Fatalf("accepted unsafe storage_name %q: %v", tc.storageName, err)
+			}
+		})
+	}
+
+	t.Run("symlink-backups-dir", func(t *testing.T) {
+		target := testStore(t)
+		seed(t, target, "live", "survives")
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(target.Root(), "backups")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := New(target).Restore(testCtx, source); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("expected ErrInvalid for symlinked backups dir, got %v", err)
+		}
+		assertSeed(t, target, "live", "survives")
+		entries, err := os.ReadDir(outside)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("wrote safety backup through symlink: %v %v", entries, err)
+		}
+	})
+}
+
+// SetPolicy validates backup intervals, retention bounds, and directory safety while RunDue truncates long multi-byte UTF-8 error messages without splitting runes.
+func TestSetPolicyValidationAndUTF8ErrorTruncation(t *testing.T) {
+	s := testStore(t)
+	service := New(s)
+	validDir := t.TempDir()
+	for _, invalidPolicy := range []Policy{
+		{Enabled: true, Interval: 10 * time.Second, Keep: 3, Directory: validDir},
+		{Enabled: true, Interval: 24 * time.Hour, Keep: 0, Directory: validDir},
+		{Enabled: true, Interval: 24 * time.Hour, Keep: 366, Directory: validDir},
+		{Enabled: true, Interval: 24 * time.Hour, Keep: 3, Directory: s.AttachmentsDir()},
+		{Enabled: true, Interval: 24 * time.Hour, Keep: 3, Directory: s.Root()},
+	} {
+		if err := service.SetPolicy(testCtx, invalidPolicy); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("accepted invalid policy %+v: %v", invalidPolicy, err)
+		}
+	}
+
+	// Verify exact UTF-8 truncation boundary with 3-byte runes straddling 4096 bytes.
+	edge := strings.Repeat("a", maxLastErrorBytes-1) + "中" + "tail"
+	gotTrunc := truncateUTF8(edge, maxLastErrorBytes)
+	if len(gotTrunc) != maxLastErrorBytes-1 || !utf8.ValidString(gotTrunc) {
+		t.Fatalf("truncateUTF8 split rune: len=%d valid=%v", len(gotTrunc), utf8.ValidString(gotTrunc))
+	}
+
+	// Trigger a >4096-byte multi-byte UTF-8 failure path through RunDue and verify persisted status truncates cleanly.
+	longField := strings.Repeat("备份", 1000)
+	badPolicyJSON := `{"` + longField + `":true}`
+	if err := s.Write(testCtx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", policyKey, badPolicyJSON)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RunDue(testCtx); err == nil {
+		t.Fatal("expected RunDue to fail for invalid policy JSON")
+	}
+	status, err := service.Status(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.LastError) > maxLastErrorBytes || len(status.LastError) < maxLastErrorBytes-8 || !utf8.ValidString(status.LastError) {
+		t.Fatalf("invalid LastError after truncation: len=%d valid=%v", len(status.LastError), utf8.ValidString(status.LastError))
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"image/png"
 	"log"
 	"os"
@@ -19,12 +20,19 @@ func main() {
 	snapshotPath := flag.String("snapshot", "", "render a headless PNG snapshot of the UI to this path and exit")
 	flag.Parse()
 
+	if err := run(*dataDir, *snapshotPath); err != nil {
+		log.Fatalf("aion: %v", err)
+	}
+}
+
+func run(dataDir, snapshotPath string) error {
 	ctx := context.Background()
 	app, err := backend.Open(ctx, backend.Options{
-		DataDir: *dataDir,
+		DataDir:          dataDir,
+		DisableScheduler: snapshotPath != "",
 	})
 	if err != nil {
-		log.Fatalf("aion: failed to open backend: %v", err)
+		return fmt.Errorf("failed to open backend: %w", err)
 	}
 	defer func() {
 		if err := app.Close(); err != nil {
@@ -35,22 +43,14 @@ func main() {
 	wb := frontend.New(app, frontend.Host{})
 	defer func() {
 		wb.WaitForTasks()
-		_ = wb.FlushPending()
+		if err := wb.FlushPending(); err != nil {
+			log.Printf("aion: failed to flush pending edits: %v", err)
+		}
 	}()
 
 	// Headless snapshot rendering mode for verification
-	if *snapshotPath != "" {
-		img := ui.Render(wb.View, 1360, 860, 1.0)
-		f, err := os.Create(*snapshotPath)
-		if err != nil {
-			log.Fatalf("aion: create snapshot file: %v", err)
-		}
-		if err := png.Encode(f, img); err != nil {
-			_ = f.Close()
-			log.Fatalf("aion: encode snapshot png: %v", err)
-		}
-		_ = f.Close()
-		return
+	if snapshotPath != "" {
+		return writeSnapshot(snapshotPath, wb.View)
 	}
 
 	// Sync initial saved theme before starting the native desktop window
@@ -137,17 +137,33 @@ func main() {
 				if bgErr == nil {
 					continue
 				}
-				errCopy := bgErr
 				win.Update(func() {
-					wb.RecordAsyncError(errCopy)
+					wb.RecordAsyncError(bgErr)
 				})
 			}
 		}()
 	})
 
 	if err := mygo.App.Run(); err != nil {
-		log.Fatalf("aion: app run error: %v", err)
+		return fmt.Errorf("app run error: %w", err)
 	}
+	return nil
+}
+
+func writeSnapshot(path string, view func(*ui.Context)) error {
+	img := ui.Render(view, 1360, 860, 1.0)
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create snapshot file: %w", err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("encode snapshot png: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close snapshot file: %w", err)
+	}
+	return nil
 }
 
 func applyNativeThemeSource(th string) {

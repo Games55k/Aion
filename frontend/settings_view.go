@@ -14,6 +14,22 @@ import (
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
+var (
+	backupIntervalOptions = []field.SelectOption{
+		{Value: "6h", Label: "每 6 小时"},
+		{Value: "12h", Label: "每 12 小时"},
+		{Value: "24h", Label: "每天 (每 24 小时)"},
+		{Value: "168h", Label: "每周 (每 7 天)"},
+	}
+	backupKeepOptions = []field.SelectOption{
+		{Value: "3", Label: "保留最近 3 份"},
+		{Value: "5", Label: "保留最近 5 份"},
+		{Value: "7", Label: "保留最近 7 份 (默认)"},
+		{Value: "14", Label: "保留最近 14 份"},
+		{Value: "30", Label: "保留最近 30 份"},
+	}
+)
+
 func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 	ui.Column(c).Fill().Children(func() {
 		// Top Header Bar
@@ -33,7 +49,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
 			ui.Column(c).Padding(24).Gap(20).MaxWidth(860).AlignSelf(ui.Stretch).Children(func() {
 				if w.IsBusy() {
-					ui.Row(c).Padding(12, 16).Gap(12).Radius(tk.BorderRadius).
+					ui.Row(c.Key("settings-busy-banner")).Padding(12, 16).Gap(12).Radius(tk.BorderRadius).
 						Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
 						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 						ui.Text(c, w.BusyLabel()).FontSize(13).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
@@ -47,7 +63,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 				}
 
 				// 1. Appearance & Theme Card
-				ui.Column(c).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
+				ui.Column(c.Key("settings-card-theme")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
 					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 					ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 						ui.Column(c).Gap(4).Children(func() {
@@ -77,7 +93,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 				})
 
 				// 2. Local Data Directory Card
-				ui.Column(c).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
+				ui.Column(c.Key("settings-card-datadir")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
 					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Icon(c, lucide.HardDrive()).FontSize(18).TextColor(tk.Primary)
@@ -116,10 +132,18 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 								Variant: action.Default,
 								Size:    theme.Small,
 							}).Clicked() {
+								var openErr error
 								if w.host.OpenPath != nil {
-									_ = w.host.OpenPath(dataDir)
+									openErr = w.host.OpenPath(dataDir)
 								} else if w.host.RevealPath != nil {
-									_ = w.host.RevealPath(dataDir)
+									openErr = w.host.RevealPath(dataDir)
+								}
+								if openErr != nil {
+									w.EnqueueToast(feedback.ToastProps{
+										Title:       "在 Finder 中打开失败",
+										Description: openErr.Error(),
+										Type:        feedback.ToastError,
+									})
 								}
 							}
 						})
@@ -127,7 +151,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 				})
 
 				// 3. Automatic Local Backup Card
-				ui.Column(c).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
+				ui.Column(c.Key("settings-card-backup-auto")).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
 					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 					ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 						ui.Column(c).Gap(4).Children(func() {
@@ -177,7 +201,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 						errMsg = w.LastAsyncError()
 					}
 					if errMsg != "" {
-						feedback.Alert(c, "最近一次自动备份失败", feedback.AlertProps{
+						feedback.Alert(c.Key("settings-backup-err"), "最近一次自动备份失败", feedback.AlertProps{
 							Type:        feedback.Error,
 							Variant:     feedback.Soft,
 							Description: errMsg,
@@ -185,17 +209,12 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					}
 
 					// Frequency & Keep Count Row
-					ui.Row(c).Gap(16).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+					ui.Row(c.Key("settings-backup-freq-keep")).Gap(16).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
 						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 							ui.Text(c, "自动备份频率").FontSize(13).FontWeight(500).TextColor(tk.Text)
 							beforeInt := w.backupIntervalSelect
 							field.Select(c.Key("backup-interval-select"), &w.backupIntervalSelect, field.SelectProps{
-								Options: []field.SelectOption{
-									{Value: "6h", Label: "每 6 小时"},
-									{Value: "12h", Label: "每 12 小时"},
-									{Value: "24h", Label: "每天 (每 24 小时)"},
-									{Value: "168h", Label: "每周 (每 7 天)"},
-								},
+								Options: backupIntervalOptions,
 							}).Label("自动备份频率选择")
 							if w.backupIntervalSelect != beforeInt {
 								w.SaveBackupPolicy()
@@ -206,13 +225,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							ui.Text(c, "自动备份保留份数").FontSize(13).FontWeight(500).TextColor(tk.Text)
 							beforeKeep := w.backupKeepSelect
 							field.Select(c.Key("backup-keep-select"), &w.backupKeepSelect, field.SelectProps{
-								Options: []field.SelectOption{
-									{Value: "3", Label: "保留最近 3 份"},
-									{Value: "5", Label: "保留最近 5 份"},
-									{Value: "7", Label: "保留最近 7 份 (默认)"},
-									{Value: "14", Label: "保留最近 14 份"},
-									{Value: "30", Label: "保留最近 30 份"},
-								},
+								Options: backupKeepOptions,
 							}).Label("自动备份保留份数选择")
 							if w.backupKeepSelect != beforeKeep {
 								w.SaveBackupPolicy()
@@ -221,13 +234,16 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					})
 
 					// Backup Directory Row
-					ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+					ui.Column(c.Key("settings-backup-dir")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 						ui.Text(c, "自动备份存储目录").FontSize(13).FontWeight(500).TextColor(tk.Text)
 						ui.Row(c).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 							ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-								field.Input(c.Key("backup-dir-input"), &w.backupDirInput, field.InputProps{
+								inp := field.Input(c.Key("backup-dir-input"), &w.backupDirInput, field.InputProps{
 									Placeholder: "默认目录: " + filepath.Join(w.app.DataDir(), "backups"),
 								}).Label("自动备份目录输入框")
+								if inp.Submitted() {
+									w.SaveBackupPolicy()
+								}
 							})
 
 							if action.Button(c, "选择目录...", action.ButtonProps{
@@ -258,7 +274,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 				})
 
 				// 4. Manual Backup Export & Full Restore Card
-				ui.Column(c).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
+				ui.Column(c.Key("settings-card-backup-manual")).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
 					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 					ui.Column(c).Gap(4).Children(func() {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -270,7 +286,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					})
 
 					if w.lastExportedZipPath != "" {
-						feedback.Alert(c, "最近一次手动备份已导出", feedback.AlertProps{
+						feedback.Alert(c.Key("settings-export-alert"), "最近一次手动备份已导出", feedback.AlertProps{
 							Type:        feedback.Success,
 							Variant:     feedback.Soft,
 							Description: "备份包路径: " + w.lastExportedZipPath,
@@ -278,14 +294,14 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					}
 
 					if w.lastRestoreResult != nil {
-						feedback.Alert(c, "数据已从备份包完整恢复", feedback.AlertProps{
+						feedback.Alert(c.Key("settings-restore-alert"), "数据已从备份包完整恢复", feedback.AlertProps{
 							Type:        feedback.Success,
 							Variant:     feedback.Soft,
 							Description: fmt.Sprintf("恢复前自动生成的安全备份已保存在: %s", w.lastRestoreResult.SafetyBackupPath),
 						})
 					}
 
-					ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Row(c.Key("settings-manual-actions")).Gap(12).AlignItems(ui.Center).Children(func() {
 						if action.Button(c, "导出完整备份 (.zip)", action.ButtonProps{
 							Variant: action.Primary,
 						}).Disabled(w.IsBusy()).Clicked() {
@@ -299,6 +315,15 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 								return
 							}
 							if err := w.FlushPending(); err != nil {
+								desc := w.saveErr
+								if desc == "" {
+									desc = err.Error()
+								}
+								w.EnqueueToast(feedback.ToastProps{
+									Title:       "当前任务存在未保存修改",
+									Description: desc + "，请先修正保存或放弃修改后再恢复备份",
+									Type:        feedback.ToastWarning,
+								})
 								return
 							}
 							if pick := w.host.PickOpenFiles; pick != nil {

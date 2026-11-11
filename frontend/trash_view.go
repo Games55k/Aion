@@ -16,31 +16,40 @@ import (
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
-	// Map deleted project IDs for quick lookup
-	deletedProjects := make(map[string]string)
-	for _, it := range w.trashItems {
-		if it.Kind == projects.TrashProject {
-			deletedProjects[it.ID] = it.Name
-		}
-	}
+var trashKindOptions = []field.SelectOption{
+	{Value: "", Label: "全部类型"},
+	{Value: projects.TrashProject, Label: "仅看项目"},
+	{Value: projects.TrashTask, Label: "仅看任务"},
+}
 
-	// Filter trash items by kind and search query
-	query := strings.ToLower(strings.TrimSpace(w.trashSearch))
+func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
+	// Map deleted project IDs and filter items only when the recycle bin is non-empty
+	var deletedProjects map[string]string
 	var filtered []model.TrashItem
-	for _, it := range w.trashItems {
-		if w.trashKindFilter != "" && it.Kind != w.trashKindFilter {
-			continue
-		}
-		if query != "" {
-			projName := w.projectNames[it.ProjectID]
-			matchTitle := strings.Contains(strings.ToLower(it.Name), query)
-			matchProj := strings.Contains(strings.ToLower(projName), query)
-			if !matchTitle && !matchProj {
-				continue
+	if len(w.trashItems) > 0 {
+		deletedProjects = make(map[string]string)
+		for _, it := range w.trashItems {
+			if it.Kind == projects.TrashProject {
+				deletedProjects[it.ID] = it.Name
 			}
 		}
-		filtered = append(filtered, it)
+
+		// Filter trash items by kind and search query
+		query := strings.ToLower(strings.TrimSpace(w.trashSearch))
+		for _, it := range w.trashItems {
+			if w.trashKindFilter != "" && it.Kind != w.trashKindFilter {
+				continue
+			}
+			if query != "" {
+				projName := w.projectNames[it.ProjectID]
+				matchTitle := strings.Contains(strings.ToLower(it.Name), query)
+				matchProj := strings.Contains(strings.ToLower(projName), query)
+				if !matchTitle && !matchProj {
+					continue
+				}
+			}
+			filtered = append(filtered, it)
+		}
 	}
 
 	ui.Column(c).Fill().Children(func() {
@@ -83,12 +92,8 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 				ui.Text(c, "类型:").FontSize(12).TextColor(tk.TextSecondary)
 				ui.Box(c).Width(130).Children(func() {
 					field.Select(c.Key("trash-kind-filter"), &w.trashKindFilter, field.SelectProps{
-						Size: theme.Small,
-						Options: []field.SelectOption{
-							{Value: "", Label: "全部类型"},
-							{Value: projects.TrashProject, Label: "仅看项目"},
-							{Value: projects.TrashTask, Label: "仅看任务"},
-						},
+						Size:    theme.Small,
+						Options: trashKindOptions,
 					}).Label("回收站类型筛选")
 				})
 			})
@@ -229,21 +234,19 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 		OkText:     "确认彻底删除",
 		CancelText: "取消",
 	}, func() {
-		itemTitle := ""
-		kindLabel := "条目"
+		desc := "即将彻底删除所选条目。关联的未引用本地附件文件也将从磁盘受管存储中永久清理。"
 		if w.confirmPermDeleteItem != nil {
-			itemTitle = w.confirmPermDeleteItem.Name
+			kindLabel := "任务"
 			if w.confirmPermDeleteItem.Kind == projects.TrashProject {
 				kindLabel = "项目及其下属所有任务"
-			} else {
-				kindLabel = "任务"
 			}
+			desc = fmt.Sprintf("即将彻底删除%s「%s」。关联的未引用本地附件文件也将从磁盘受管存储中永久清理。", kindLabel, w.confirmPermDeleteItem.Name)
 		}
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			feedback.Alert(c, "此操作不可撤销", feedback.AlertProps{
 				Type:        feedback.Error,
 				Variant:     feedback.Soft,
-				Description: fmt.Sprintf("即将彻底删除%s「%s」。关联的未引用本地附件文件也将从磁盘受管存储中永久清理。", kindLabel, itemTitle),
+				Description: desc,
 			})
 		})
 	}) {

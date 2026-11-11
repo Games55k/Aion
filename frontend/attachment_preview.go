@@ -113,18 +113,26 @@ func (w *Workbench) cacheBitmap(id string, bmp *ui.Bitmap) bool {
 	if size <= 0 || size > maxBitmapCacheBytes {
 		return false
 	}
+	if _, exists := w.bitmapCache[id]; exists {
+		delete(w.bitmapCache, id)
+		w.bitmapOrder = slices.DeleteFunc(w.bitmapOrder, func(existing string) bool { return existing == id })
+	}
 	var total int64
 	for _, cached := range w.bitmapCache {
 		total += bitmapBytes(cached)
 	}
 	for len(w.bitmapCache) >= maxBitmapCacheEntries || total+size > maxBitmapCacheBytes {
+		if len(w.bitmapOrder) == 0 {
+			clear(w.bitmapCache)
+			break
+		}
 		oldest := w.bitmapOrder[0]
 		w.bitmapOrder = w.bitmapOrder[1:]
 		total -= bitmapBytes(w.bitmapCache[oldest])
 		delete(w.bitmapCache, oldest)
 	}
 	w.bitmapCache[id] = bmp
-	w.touchBitmap(id)
+	w.bitmapOrder = append(w.bitmapOrder, id)
 	return true
 }
 
@@ -187,16 +195,27 @@ func decodeAttachmentPreview(r io.ReadSeeker) (image.Image, error) {
 // Scaling the decoded image must preserve the camera orientation that MyGo's
 // original DecodeBitmap path applied automatically.
 func previewOrientation(r io.Reader) int {
-	var marker [2]byte
-	if _, err := io.ReadFull(r, marker[:]); err != nil || marker != [2]byte{0xff, 0xd8} {
+	var soi [2]byte
+	if _, err := io.ReadFull(r, soi[:]); err != nil || soi != [2]byte{0xff, 0xd8} {
 		return 1
 	}
+	var b [1]byte
 	for {
-		if _, err := io.ReadFull(r, marker[:]); err != nil || marker[0] != 0xff {
+		if _, err := io.ReadFull(r, b[:]); err != nil || b[0] != 0xff {
 			return 1
 		}
-		if marker[1] == 0xda || marker[1] == 0xd9 {
+		for b[0] == 0xff {
+			if _, err := io.ReadFull(r, b[:]); err != nil {
+				return 1
+			}
+		}
+		marker := b[0]
+		if marker == 0xda || marker == 0xd9 {
 			return 1
+		}
+		// Standalone JPEG markers (TEM, RST0..RST7, SOI, stuffed 0x00) carry no segment length.
+		if marker == 0x00 || marker == 0x01 || (marker >= 0xd0 && marker <= 0xd8) {
+			continue
 		}
 		var length [2]byte
 		if _, err := io.ReadFull(r, length[:]); err != nil {
@@ -206,7 +225,7 @@ func previewOrientation(r io.Reader) int {
 		if n < 0 {
 			return 1
 		}
-		if marker[1] != 0xe1 {
+		if marker != 0xe1 {
 			if _, err := io.CopyN(io.Discard, r, n); err != nil {
 				return 1
 			}
@@ -216,37 +235,43 @@ func previewOrientation(r io.Reader) int {
 		if _, err := io.ReadFull(r, segment); err != nil {
 			return 1
 		}
-		if len(segment) < 14 || !bytes.HasPrefix(segment, []byte("Exif\x00\x00")) {
-			continue
+		if orientation, isExif := parseExifOrientation(segment); isExif {
+			return orientation
 		}
-		tiff := segment[6:]
-		var order binary.ByteOrder
-		switch string(tiff[:2]) {
-		case "II":
-			order = binary.LittleEndian
-		case "MM":
-			order = binary.BigEndian
-		default:
-			return 1
-		}
-		if order.Uint16(tiff[2:]) != 42 {
-			return 1
-		}
-		offset := int(order.Uint32(tiff[4:]))
-		if offset < 8 || offset > len(tiff)-2 {
-			return 1
-		}
-		count := int(order.Uint16(tiff[offset:]))
-		for entry := offset + 2; count > 0 && entry <= len(tiff)-12; entry, count = entry+12, count-1 {
-			if order.Uint16(tiff[entry:]) == 0x0112 && order.Uint16(tiff[entry+2:]) == 3 && order.Uint32(tiff[entry+4:]) == 1 {
-				if value := int(order.Uint16(tiff[entry+8:])); value >= 1 && value <= 8 {
-					return value
-				}
-				return 1
-			}
-		}
-		return 1
 	}
+}
+
+func parseExifOrientation(segment []byte) (int, bool) {
+	if len(segment) < 14 || !bytes.HasPrefix(segment, []byte("Exif\x00\x00")) {
+		return 1, false
+	}
+	tiff := segment[6:]
+	var order binary.ByteOrder
+	switch string(tiff[:2]) {
+	case "II":
+		order = binary.LittleEndian
+	case "MM":
+		order = binary.BigEndian
+	default:
+		return 1, true
+	}
+	if order.Uint16(tiff[2:]) != 42 {
+		return 1, true
+	}
+	offset := int(order.Uint32(tiff[4:]))
+	if offset < 8 || offset > len(tiff)-2 {
+		return 1, true
+	}
+	count := int(order.Uint16(tiff[offset:]))
+	for entry := offset + 2; count > 0 && entry <= len(tiff)-12; entry, count = entry+12, count-1 {
+		if order.Uint16(tiff[entry:]) == 0x0112 && order.Uint16(tiff[entry+2:]) == 3 && order.Uint32(tiff[entry+4:]) == 1 {
+			if value := int(order.Uint16(tiff[entry+8:])); value >= 1 && value <= 8 {
+				return value, true
+			}
+			return 1, true
+		}
+	}
+	return 1, true
 }
 
 // Orient only the small preview, keeping no reference to full-size source pixels.

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"aion/backend/model"
@@ -23,6 +24,7 @@ type Registry struct {
 }
 
 func (r *Registry) Register(m ModuleDescriptor) error {
+	m.Name = strings.TrimSpace(m.Name)
 	if !validModuleID(m.ID) || m.Name == "" || m.Version < 1 {
 		return model.ErrInvalid
 	}
