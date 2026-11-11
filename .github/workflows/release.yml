@@ -98,7 +98,7 @@ jobs:
           go vet ./...
           go tool mygo vet .
 
-      - name: Verify required release secrets
+      - name: Verify release secrets and signing mode
         env:
           MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -114,8 +114,17 @@ jobs:
             echo "::error::Missing MYGO_UPDATER_PRIVATE_KEY secret."
             exit 1
           fi
+
+          if [ -z "$MACOS_CERTIFICATE" ] && [ -z "$MACOS_CERTIFICATE_PASSWORD" ] && \
+             [ -z "$APPLE_ID" ] && [ -z "$APPLE_TEAM_ID" ] && [ -z "$APPLE_APP_PASSWORD" ] && \
+             [ -z "$APPLE_API_KEY" ] && [ -z "$APPLE_API_KEY_ID" ] && [ -z "$APPLE_API_ISSUER" ]; then
+            echo "APPLE_SIGNED=false" >> "$GITHUB_ENV"
+            echo "::notice::Apple Developer ID signing and notarization secrets are not configured; building ad-hoc signed artifacts without notarization."
+            exit 0
+          fi
+
           if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ]; then
-            echo "::error::Missing MACOS_CERTIFICATE or MACOS_CERTIFICATE_PASSWORD secret."
+            echo "::error::Incomplete Apple signing configuration: MACOS_CERTIFICATE and MACOS_CERTIFICATE_PASSWORD are both required."
             exit 1
           fi
           has_apple_id=0
@@ -130,8 +139,10 @@ jobs:
             echo "::error::Missing Apple notarization credentials (APPLE_ID + APPLE_TEAM_ID + APPLE_APP_PASSWORD, or APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER)."
             exit 1
           fi
+          echo "APPLE_SIGNED=true" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate and notary credentials
+        if: env.APPLE_SIGNED == 'true'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -188,13 +199,13 @@ jobs:
 
           echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
-      - name: Build, sign, notarize, and upload draft release
+      - name: Build and upload draft release
         env:
           GH_TOKEN: ${{ github.token }}
           MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         run: go tool mygo build -platform darwin/universal -upload
 
-      - name: Verify artifacts, checksums, codesign, notarization, and draft release
+      - name: Verify artifacts, checksums, signing, and draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -205,13 +216,18 @@ jobs:
 
           (cd build/darwin-universal && shasum -a 256 -c ../SHA256SUMS)
           codesign --verify --deep --strict --verbose=2 "build/darwin-universal/Aion.app"
-          spctl --assess --type exec --verbose=4 "build/darwin-universal/Aion.app"
 
           for dmg in build/darwin-universal/*.dmg; do
             test -f "$dmg"
-            xcrun stapler validate "$dmg"
-            spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+            if [ "${APPLE_SIGNED:-false}" = "true" ]; then
+              xcrun stapler validate "$dmg"
+              spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+            fi
           done
+
+          if [ "${APPLE_SIGNED:-false}" = "true" ]; then
+            spctl --assess --type exec --verbose=4 "build/darwin-universal/Aion.app"
+          fi
 
           release_info="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)"
           printf '%s\n' "$release_info" | jq '{isDraft, assets: [.assets[].name]}'
