@@ -866,3 +866,88 @@ func TestDefaultPolicyDirectoryFollowsRestoredStore(t *testing.T) {
 		t.Fatalf("restored policy = %+v, want directory %s and keep 3", got, want)
 	}
 }
+
+// Regression: every restore left a safety archive behind forever; only the newest MaxSafetyBackups owned archives are kept, and the archive being restored is never pruned.
+func TestRestoreRotatesOwnedSafetyBackups(t *testing.T) {
+	s := testStore(t)
+	seed(t, s, "live", "payload")
+	clock := newFakeClock()
+	service := New(s, Options{Now: clock.Now})
+	archive := filepath.Join(t.TempDir(), "backup.zip")
+	if err := service.Export(testCtx, archive); err != nil {
+		t.Fatal(err)
+	}
+	var safety []string
+	restore := func(source string) {
+		t.Helper()
+		clock.Advance(time.Minute)
+		result, err := service.Restore(testCtx, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		safety = append(safety, result.SafetyBackupPath)
+	}
+	for i := 0; i < MaxSafetyBackups+1; i++ {
+		restore(archive)
+	}
+	if _, err := os.Stat(safety[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oldest safety backup retained: %v", err)
+	}
+	for _, path := range safety[1:] {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("recent safety backup removed: %v", err)
+		}
+	}
+	// A user-placed file with a safety-style name is not owned and survives.
+	foreign := filepath.Join(s.Root(), "backups", "safety-mine.zip")
+	if err := os.WriteFile(foreign, []byte("mine"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Restoring from the oldest remaining safety archive must not delete it.
+	restore(safety[1])
+	for _, path := range []string{safety[1], foreign, archive} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("restore removed %s: %v", path, err)
+		}
+	}
+	assertSeed(t, s, "live", "payload")
+}
+
+// Regression: a restored archive carried the exporting machine's custom backup directory, which was then created and written to locally; the local directory is kept while schedule and retention are restored.
+func TestRestoreKeepsLocalBackupDirectory(t *testing.T) {
+	source := testStore(t)
+	seed(t, source, "live", "payload")
+	exported := New(source)
+	foreignDir := filepath.Join(t.TempDir(), "exporting-machine")
+	if err := exported.SetPolicy(testCtx, Policy{Enabled: true, Interval: 6 * time.Hour, Keep: 9, Directory: foreignDir}); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "backup.zip")
+	if err := exported.Export(testCtx, archive); err != nil {
+		t.Fatal(err)
+	}
+	for name, localDir := range map[string]string{"default": "", "custom": filepath.Join(t.TempDir(), "local")} {
+		t.Run(name, func(t *testing.T) {
+			target := testStore(t)
+			service := New(target)
+			want := filepath.Join(target.Root(), "backups")
+			if localDir != "" {
+				want = localDir
+				if err := service.SetPolicy(testCtx, Policy{Enabled: true, Interval: 24 * time.Hour, Keep: 2, Directory: localDir}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := service.Restore(testCtx, archive); err != nil {
+				t.Fatal(err)
+			}
+			got, err := service.GetPolicy(testCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Directory != want || got.Keep != 9 || got.Interval != 6*time.Hour {
+				t.Fatalf("policy after restore = %+v, want directory %s with restored schedule", got, want)
+			}
+			assertSeed(t, target, "live", "payload")
+		})
+	}
+}

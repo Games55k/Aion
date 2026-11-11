@@ -20,6 +20,8 @@ const (
 	policyKey         = "backup.auto.policy"
 	maxStateBytes     = 2 << 20
 	maxLastErrorBytes = 4096
+	// MaxSafetyBackups is how many pre-restore safety archives are retained.
+	MaxSafetyBackups = 5
 )
 
 type Policy struct {
@@ -41,7 +43,8 @@ type ownedBackup struct {
 type autoState struct {
 	Version int `json:"version"`
 	AutoStatus
-	Files []ownedBackup `json:"files"`
+	Files  []ownedBackup `json:"files"`
+	Safety []ownedBackup `json:"safety,omitempty"`
 }
 
 func (s *Service) statePath() string { return filepath.Join(s.store.Root(), ".backup-auto-state.json") }
@@ -125,12 +128,14 @@ func (s *Service) loadState() (autoState, error) {
 	if err = decodeJSON(b, &st); err != nil {
 		return st, err
 	}
-	if st.Version != 1 || len(st.Files) > 4096 {
+	if st.Version != 1 || len(st.Files) > 4096 || len(st.Safety) > 4096 {
 		return st, invalid("unsupported automatic backup state")
 	}
-	for _, item := range st.Files {
-		if !filepath.IsAbs(item.Path) || !validHash(item.SHA256) || !strings.HasPrefix(filepath.Base(item.Path), "auto-") || filepath.Ext(item.Path) != ".zip" || item.CreatedAt.IsZero() {
-			return st, invalid("invalid automatic backup ownership")
+	for prefix, items := range map[string][]ownedBackup{"auto-": st.Files, "safety-": st.Safety} {
+		for _, item := range items {
+			if !filepath.IsAbs(item.Path) || !validHash(item.SHA256) || !strings.HasPrefix(filepath.Base(item.Path), prefix) || filepath.Ext(item.Path) != ".zip" || item.CreatedAt.IsZero() {
+				return st, invalid("invalid backup ownership")
+			}
 		}
 	}
 	return st, nil
@@ -210,36 +215,50 @@ func truncateUTF8(s string, maxBytes int) string {
 // rotate only touches paths recorded locally after successful creation; neither
 // filenames nor an archive's own manifest establish ownership. Hash mismatches
 // lose ownership and are preserved (a user may have replaced a file manually).
-func (s *Service) rotate(ctx context.Context, st *autoState, keep int) error {
-	sort.SliceStable(st.Files, func(i, j int) bool { return st.Files[i].CreatedAt.Before(st.Files[j].CreatedAt) })
-	for len(st.Files) > keep {
+// It stops before deleting keepFile, and returns the entries still owned.
+func (s *Service) rotate(ctx context.Context, files []ownedBackup, keep int, keepFile os.FileInfo) ([]ownedBackup, error) {
+	sort.SliceStable(files, func(i, j int) bool { return files[i].CreatedAt.Before(files[j].CreatedAt) })
+	for len(files) > keep {
 		if err := ctx.Err(); err != nil {
-			return err
+			return files, err
 		}
-		old := st.Files[0]
-		h, err := archiveHash(ctx, old.Path)
-		if errors.Is(err, os.ErrNotExist) {
-			st.Files = st.Files[1:]
-			continue
-		}
-		if err != nil {
-			// A replaced symlink/special file is never removed.
-			if errors.Is(err, model.ErrInvalid) {
-				st.Files = st.Files[1:]
-				continue
+		old := files[0]
+		if keepFile != nil {
+			if info, err := os.Stat(old.Path); err == nil && os.SameFile(info, keepFile) {
+				return files, nil
 			}
-			return err
 		}
-		if h != old.SHA256 {
-			st.Files = st.Files[1:]
-			continue
+		h, err := archiveHash(ctx, old.Path)
+		// A missing file, or a replaced symlink/special file, is never removed.
+		if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, model.ErrInvalid) {
+			return files, err
 		}
-		if err = os.Remove(old.Path); err != nil {
-			return err
+		if err == nil && h == old.SHA256 {
+			if err = os.Remove(old.Path); err != nil {
+				return files, err
+			}
 		}
-		st.Files = st.Files[1:]
+		files = files[1:]
 	}
-	return nil
+	return files, nil
+}
+
+// recordSafetyBackup takes ownership of a new pre-restore archive and prunes
+// the oldest owned ones beyond MaxSafetyBackups, never the archive being
+// restored. It is best effort: a bookkeeping failure only leaves extra archives
+// on disk and must not fail or undo the restore.
+func (s *Service) recordSafetyBackup(ctx context.Context, path, hash string, restoring os.FileInfo) {
+	st, err := s.loadState()
+	if err != nil {
+		return
+	}
+	st.Safety = append(st.Safety, ownedBackup{Path: path, SHA256: hash, CreatedAt: s.now().UTC()})
+	// Persist ownership BEFORE deleting anything.
+	if s.saveState(st) != nil {
+		return
+	}
+	st.Safety, _ = s.rotate(ctx, st.Safety, MaxSafetyBackups, restoring)
+	_ = s.saveState(st)
 }
 
 // RunDue is synchronous. The application owns the periodic goroutine and must
@@ -280,7 +299,7 @@ func (s *Service) RunDue(ctx context.Context) (string, error) {
 		if err = s.saveState(st); err != nil {
 			return fmt.Errorf("save automatic backup status: %w", err)
 		}
-		if err = s.rotate(ctx, &st, p.Keep); err != nil {
+		if st.Files, err = s.rotate(ctx, st.Files, p.Keep, nil); err != nil {
 			return fail(fmt.Errorf("rotate automatic backups: %w", err))
 		}
 		return s.saveState(st)

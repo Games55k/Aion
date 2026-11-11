@@ -617,6 +617,7 @@ func (s *Service) Restore(ctx context.Context, source string) (RestoreResult, er
 	if err != nil {
 		return result, err
 	}
+	restoring, _ := os.Stat(source)
 	defer func() {
 		if dir != "" {
 			os.RemoveAll(dir)
@@ -635,10 +636,15 @@ func (s *Service) Restore(ctx context.Context, source string) (RestoreResult, er
 			return err
 		}
 		safety := filepath.Join(backupDir, "safety-"+model.NewID()+".zip")
-		if _, err := s.exportLocked(ctx, db, safety, "safety", false); err != nil {
+		hash, err := s.exportLocked(ctx, db, safety, "safety", false)
+		if err != nil {
 			return fmt.Errorf("safety backup: %w", err)
 		}
 		result.SafetyBackupPath = safety
+		s.recordSafetyBackup(ctx, safety, hash, restoring)
+		if err := s.keepLocalBackupDirectory(ctx, db, filepath.Join(dir, "database.sqlite")); err != nil {
+			return fmt.Errorf("prepare restored backup policy: %w", err)
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -669,4 +675,44 @@ func (s *Service) Restore(ctx context.Context, source string) (RestoreResult, er
 		return nil
 	})
 	return result, err
+}
+
+// keepLocalBackupDirectory rewrites the staged database's automatic backup
+// policy to use this machine's backup directory. The archive's schedule and
+// retention are restored, but its directory is a path on the machine that
+// exported it and must not be created or written to here. Runs before any live
+// file is replaced, so a failure aborts the restore cleanly.
+func (s *Service) keepLocalBackupDirectory(ctx context.Context, live *sql.DB, staged string) error {
+	local := ""
+	if p, err := s.policyLocked(ctx, live); err == nil && p.Directory != s.defaultPolicy().Directory {
+		local = p.Directory
+	}
+	u := url.URL{Scheme: "file", Path: staged}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	restored := s.defaultPolicy()
+	var raw string
+	err = db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=?", policyKey).Scan(&raw)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if local == "" {
+			return nil
+		}
+	case err != nil:
+		return err
+	case decodeJSON([]byte(raw), &restored) != nil:
+		// Leave an unreadable policy for RunDue to report, as it would live.
+		return nil
+	}
+	restored.Directory = local
+	b, err := json.Marshal(restored)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", policyKey, string(b))
+	return errors.Join(err, db.Close())
 }
