@@ -1091,6 +1091,9 @@ func TestSameFrameToastRendersImmediately(t *testing.T) {
 	if err := tt.Click("复制路径"); err != nil {
 		t.Fatalf("click 复制路径: %v", err)
 	}
+	if got := tt.Clipboard(); got != wb.app.DataDir() {
+		t.Fatalf("expected clipboard %q, got %q", wb.app.DataDir(), got)
+	}
 	if len(wb.pendingToasts) != 0 {
 		t.Fatalf("expected pendingToasts to drain before ToastHost in same frame, got %d remaining", len(wb.pendingToasts))
 	}
@@ -1492,5 +1495,64 @@ func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
 	}
 	if !strings.HasSuffix(wb.attachmentPaths[wb.detailAttachments[0].ID], wb.detailAttachments[0].StorageName) {
 		t.Fatalf("expected imported attachment path cached")
+	}
+}
+
+// Dragging a card onto its own column background ignores same-status drops while dropping onto another card reorders cleanly.
+func TestBoardColumnIgnoresSameStatusDropWhileCardReorders(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "同列拖拽测试项目"
+	wb.SubmitProjectModal()
+
+	t1, err := wb.QuickCreateTask(model.Planned, "卡片一")
+	if err != nil {
+		t.Fatalf("create t1: %v", err)
+	}
+	t2, err := wb.QuickCreateTask(model.Planned, "卡片二")
+	if err != nil {
+		t.Fatalf("create t2: %v", err)
+	}
+	t3, err := wb.QuickCreateTask(model.Planned, "卡片三")
+	if err != nil {
+		t.Fatalf("create t3: %v", err)
+	}
+	wb.ClearSelectedTask()
+	tt.Frame()
+
+	drag := func(fromX, fromY, toX, toY float32) {
+		tt.Press(fromX, fromY)
+		for step := 1; step <= 4; step++ {
+			f := float32(step) / 4
+			tt.Move(fromX+(toX-fromX)*f, fromY+(toY-fromY)*f)
+		}
+		tt.Release(toX, toY)
+	}
+
+	card1Rect, ok := tt.Find("任务卡片 卡片一")
+	if !ok {
+		t.Fatal("could not find 卡片一")
+	}
+	plannedColRect, ok := tt.Find("看板列 计划")
+	if !ok {
+		t.Fatal("could not find 看板列 计划")
+	}
+
+	// Dropping onto the source column header/whitespace must not jump t1 to the end.
+	drag(card1Rect.X+card1Rect.W/2, card1Rect.Y+16, plannedColRect.X+plannedColRect.W/2, plannedColRect.Y+14)
+	planned := wb.TasksInColumn(model.Planned)
+	if len(planned) != 3 || planned[0].ID != t1.ID || planned[1].ID != t2.ID || planned[2].ID != t3.ID {
+		t.Fatalf("expected same-column drop on column box to keep order [%s %s %s], got %+v", t1.ID, t2.ID, t3.ID, planned)
+	}
+
+	// Dropping onto the bottom half of t2 still reorders t1 after t2 within the same column.
+	card2Rect, ok := tt.Find("任务卡片 卡片二")
+	if !ok {
+		t.Fatal("could not find 卡片二")
+	}
+	drag(card1Rect.X+card1Rect.W/2, card1Rect.Y+16, card2Rect.X+card2Rect.W/2, card2Rect.Y+card2Rect.H*0.75)
+	planned = wb.TasksInColumn(model.Planned)
+	if len(planned) != 3 || planned[0].ID != t2.ID || planned[1].ID != t1.ID || planned[2].ID != t3.ID {
+		t.Fatalf("expected card drop onto bottom half of t2 to reorder [%s %s %s], got %+v", t2.ID, t1.ID, t3.ID, planned)
 	}
 }

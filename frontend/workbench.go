@@ -50,7 +50,6 @@ type Host struct {
 	OpenPath      func(path string) error
 	RevealPath    func(path string) error
 	SetTheme      func(theme string)
-	CopyText      func(text string)
 	// Dispatch, when set (e.g. win.Update in a desktop window), runs dialog blocking calls
 	// off the UI build pass and dispatches the state update back on the UI thread.
 	// When nil (e.g. in headless ui.Tester tests), dialog callbacks run synchronously.

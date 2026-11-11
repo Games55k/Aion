@@ -119,9 +119,6 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 								Size:    theme.Small,
 							}).Clicked() {
 								c.Services().WriteClipboard(dataDir)
-								if w.host.CopyText != nil {
-									w.host.CopyText(dataDir)
-								}
 								w.EnqueueToast(feedback.ToastProps{
 									Title:       "已复制数据目录路径",
 									Description: dataDir,

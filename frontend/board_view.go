@@ -226,11 +226,11 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 		Radius(tk.BorderRadiusLG).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
 		Label("看板列 " + col.Title)
 
-	// Highlight column when a task card is dragged over it
-	if _, over := ui.DragOver[DragTaskPayload](colBox); over {
+	// Highlight column when a task card from another column is dragged over it
+	if payload, over := ui.DragOver[DragTaskPayload](colBox); over && payload.FromStatus != col.Status {
 		colBox.Border(2, tk.Primary).Background(tk.PrimaryFillQuaternary)
 	}
-	if payload, dropped := ui.Drop[DragTaskPayload](colBox); dropped {
+	if payload, dropped := ui.Drop[DragTaskPayload](colBox); dropped && payload.FromStatus != col.Status {
 		w.MoveTaskToColumn(payload.TaskID, col.Status, -1)
 	}
 
