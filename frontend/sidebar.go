@@ -42,9 +42,8 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 				if len(w.modules) > 1 && nav.Expanded {
 					ui.Row(c).Gap(6).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
 						for _, mod := range w.modules {
-							mod := mod
 							active := w.activeModule == mod.ID
-							btn := ui.ButtonBase(c.Key(string(mod.ID))).Grow(1).Height(28).PaddingX(10).Gap(6).
+							btn := ui.ButtonBase(c.Key(mod.ID)).Grow(1).Height(28).PaddingX(10).Gap(6).
 								Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
 								Label("切换模块 " + mod.Name)
 							if active {

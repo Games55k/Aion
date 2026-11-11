@@ -281,7 +281,6 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 				ui.Text(c, "项目图标").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				ui.Row(c).Gap(6).Wrap().AlignSelf(ui.Stretch).Children(func() {
 					for _, opt := range ProjectIconOptions {
-						opt := opt
 						chosen := w.projectModalIcon == opt.Key
 						btn := ui.ButtonBase(c.Key("icon-"+opt.Key)).Padding(6, 10).Gap(6).Radius(tk.BorderRadiusSM).
 							AlignItems(ui.Center).Cursor(ui.CursorPointer)

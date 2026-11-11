@@ -91,14 +91,12 @@ func (w *Workbench) renderTaskDetailPanel(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			// Delete & Close Buttons
-			panelClosed := false
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if action.Button(c, "移入回收站", action.ButtonProps{
 					Variant: action.Text,
 					Size:    theme.Small,
 				}).Label("将任务移入回收站").Clicked() {
 					w.SoftDeleteTask(t.ID)
-					panelClosed = w.detailTask == nil
 					return
 				}
 				if action.ActionIcon(c, lucide.X(), action.ActionIconProps{
@@ -106,13 +104,8 @@ func (w *Workbench) renderTaskDetailPanel(c *ui.Context, tk *theme.Tokens) {
 					Title: "关闭详情面板",
 				}).Clicked() {
 					w.ClearSelectedTask()
-					panelClosed = w.detailTask == nil
-					return
 				}
 			})
-			if panelClosed {
-				return
-			}
 		})
 		if w.detailTask == nil {
 			return
@@ -309,7 +302,6 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 			ui.Row(c.Key("md-toolbar")).Gap(4).Wrap().Padding(4, 6).Radius(tk.BorderRadiusSM).
 				Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 				for _, tool := range markdownTools {
-					tool := tool
 					btn := ui.ButtonBase(c.Key("md-tool-" + tool.Key)).Height(22).PaddingX(6).Radius(4).
 						FontSize(11).TextColor(tk.TextSecondary).Cursor(ui.CursorPointer).
 						Label("格式 " + tool.Label)
@@ -615,7 +607,6 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 					if !IsImageAttachment(att) {
 						continue
 					}
-					att := att
 					thumb := ui.Column(c.Key("img-thumb-" + att.ID)).Gap(4).Width(116)
 					thumb.Children(func() {
 						bmp := w.bitmapCache[att.ID]
@@ -653,7 +644,6 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 		// Attachment List Rows with Open / Finder / Export / Remove actions
 		ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 			for _, att := range atts {
-				att := att
 				ui.Row(c.Key("att-row-"+att.ID)).Padding(8, 10).Gap(10).Radius(tk.BorderRadiusSM).
 					Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
 					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {

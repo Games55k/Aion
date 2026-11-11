@@ -127,7 +127,7 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
-	if _, err = tx.Exec("PRAGMA user_version=1"); err != nil {
+	if _, err = tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()

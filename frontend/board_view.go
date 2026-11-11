@@ -162,7 +162,6 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 					ui.Row(c).Gap(6).AlignItems(ui.Center).Wrap().Grow(1).MinWidth(0).Children(func() {
 						ui.Text(c, "标签:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 						for _, tag := range w.allBoardTags {
-							tag := tag
 							active := slices.Contains(w.tagFilters, tag)
 							pill := ui.ButtonBase(c.Key("filter-tag-" + tag)).Height(22).PaddingX(8).Radius(11).
 								FontSize(12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
