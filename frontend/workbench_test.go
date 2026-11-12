@@ -351,6 +351,7 @@ func TestTaskDetailMarkdownSubtasksAndAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QuickCreateTask: %v", err)
 	}
+	wb.SelectTask(task.ID)
 	tt.Frame()
 
 	// 1. Empty title validation guard
@@ -1069,6 +1070,7 @@ func TestThirdReviewDeletedProjectImagesMustLeaveCache(t *testing.T) {
 	}
 
 	// Even after rendering/decoding an image, deleting the task and clearing trash must evict cached bitmaps.
+	wb.SelectTask(task.ID)
 	_ = wb.AttachmentBitmap(wb.detailAttachments[0])
 	if len(wb.bitmapCache) != 1 {
 		t.Fatalf("expected 1 on-demand cached bitmap, got %d", len(wb.bitmapCache))
@@ -1465,9 +1467,11 @@ func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "异步分发项目"
 	wb.SubmitProjectModal()
-	if _, err := wb.QuickCreateTask(model.Planned, "异步附件任务"); err != nil {
+	task, err := wb.QuickCreateTask(model.Planned, "异步附件任务")
+	if err != nil {
 		t.Fatal(err)
 	}
+	wb.SelectTask(task.ID)
 
 	// Start real async attachment pick & import.
 	wb.PickAndImportAttachmentsToSelectedTask()
@@ -2142,9 +2146,11 @@ func TestSaveTimestampUsesHostClock(t *testing.T) {
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "clock"
 	wb.SubmitProjectModal()
-	if _, err := wb.QuickCreateTask(model.Planned, "task"); err != nil {
+	task, err := wb.QuickCreateTask(model.Planned, "task")
+	if err != nil {
 		t.Fatal(err)
 	}
+	wb.SelectTask(task.ID)
 	tt.Frame()
 	if err := tt.Click("任务详情标题"); err != nil {
 		t.Fatalf("click 任务详情标题: %v", err)
@@ -2194,6 +2200,7 @@ func TestRemoveAttachmentReportsFailedCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wb.SelectTask(task.ID)
 	src := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(src, []byte("notes"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2278,5 +2285,106 @@ func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
 	tt.Key(ui.Cmd, ui.KeyComma)
 	if wb.navPage != NavSettings || !tt.HasText("全局设置与数据管理") {
 		t.Fatalf("expected Cmd+, from focused search input to open Settings, got %s", wb.navPage)
+	}
+}
+
+// Regression: quick-move buttons on task cards previously always rendered right arrows (→) even when the target column was to the left.
+func TestQuickMoveButtonArrowsFollowColumnDirection(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "方向箭头测试"
+	wb.SubmitProjectModal()
+
+	task, err := wb.QuickCreateTask(model.Planned, "方向任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	// Planned (leftmost): both targets are to the right.
+	if !tt.HasText("→ 进行中") || !tt.HasText("→ 已完成") {
+		t.Fatalf("expected right arrows in Planned column, got texts %v", tt.Texts())
+	}
+
+	// Move right into InProgress: Planned is left (←), Done is right (→).
+	if err := tt.Click("移至进行中 方向任务"); err != nil {
+		t.Fatalf("click 移至进行中 方向任务: %v", err)
+	}
+	if !tt.HasText("← 计划") || !tt.HasText("→ 已完成") {
+		t.Fatalf("expected ← 计划 and → 已完成 in InProgress column, got texts %v", tt.Texts())
+	}
+
+	// Move right into Done: both targets are to the left.
+	if err := tt.Click("移至已完成 方向任务"); err != nil {
+		t.Fatalf("click 移至已完成 方向任务: %v", err)
+	}
+	if !tt.HasText("← 计划") || !tt.HasText("← 进行中") {
+		t.Fatalf("expected left arrows in Done column, got texts %v", tt.Texts())
+	}
+
+	// Move left back to Planned and verify persistence.
+	if err := tt.Click("移至计划 方向任务"); err != nil {
+		t.Fatalf("click 移至计划 方向任务: %v", err)
+	}
+	persisted, err := app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || persisted.Status != model.Planned {
+		t.Fatalf("expected task moved back to Planned in DB, got %+v err=%v", persisted, err)
+	}
+	if !tt.HasText("→ 进行中") || !tt.HasText("→ 已完成") {
+		t.Fatalf("expected right arrows after returning to Planned column, got texts %v", tt.Texts())
+	}
+}
+
+// Creating tasks via the top-right modal or column quick-add leaves the right detail sidebar collapsed until a task is explicitly selected.
+func TestCreateTaskDoesNotExpandDetailSidebar(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "默认不展开详情"
+	wb.SubmitProjectModal()
+	tt.Frame()
+
+	// 1. Top-right "+ 新建任务" modal creates a task without opening the detail sidebar.
+	if err := tt.Click("+ 新建任务"); err != nil {
+		t.Fatalf("click + 新建任务: %v", err)
+	}
+	if err := tt.Click("新建任务标题输入框"); err != nil {
+		t.Fatalf("click 新建任务标题输入框: %v", err)
+	}
+	tt.Type("弹窗新建任务")
+	if err := tt.Click("创建任务"); err != nil {
+		t.Fatalf("click 创建任务: %v", err)
+	}
+	if wb.detailExpanded || wb.selectedTaskID != "" {
+		t.Fatalf("expected detail sidebar collapsed after modal create, got expanded=%v selected=%q", wb.detailExpanded, wb.selectedTaskID)
+	}
+	if _, found := tt.Find("任务详情标题"); found {
+		t.Fatal("expected detail panel not rendered after modal create")
+	}
+
+	// 2. Column bottom quick-add creates a task without opening the detail sidebar.
+	if err := tt.Click("快速添加计划任务"); err != nil {
+		t.Fatalf("click 快速添加计划任务: %v", err)
+	}
+	tt.Type("快速添加任务")
+	tt.Key(0, ui.KeyEnter)
+	if wb.detailExpanded || wb.selectedTaskID != "" {
+		t.Fatalf("expected detail sidebar collapsed after quick-add, got expanded=%v selected=%q", wb.detailExpanded, wb.selectedTaskID)
+	}
+	if _, found := tt.Find("任务详情标题"); found {
+		t.Fatal("expected detail panel not rendered after quick-add")
+	}
+	if got := len(wb.TasksInColumn(model.Planned)); got != 2 {
+		t.Fatalf("expected 2 created tasks in Planned column, got %d", got)
+	}
+
+	// 3. Clicking a created task card explicitly opens its detail sidebar.
+	if err := tt.Click("任务卡片 快速添加任务"); err != nil {
+		t.Fatalf("click 任务卡片 快速添加任务: %v", err)
+	}
+	if !wb.detailExpanded || wb.selectedTaskID == "" {
+		t.Fatalf("expected detail sidebar expanded after clicking task card, got expanded=%v selected=%q", wb.detailExpanded, wb.selectedTaskID)
+	}
+	if _, found := tt.Find("任务详情标题"); !found {
+		t.Fatal("expected detail panel rendered after clicking task card")
 	}
 }

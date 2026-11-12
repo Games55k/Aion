@@ -437,7 +437,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn := ui.ButtonBase(c.Key("to-planned")).Height(20).PaddingX(6).Radius(4).
 						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
 						Cursor(ui.CursorPointer).Label("移至计划 " + t.Title)
-					btn.Children(func() { ui.Text(c, "→ 计划").SingleLine() })
+					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Planned, "计划")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
 						w.MoveTaskToColumn(t.ID, model.Planned, -1)
@@ -447,7 +447,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn := ui.ButtonBase(c.Key("to-progress")).Height(20).PaddingX(6).Radius(4).
 						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
 						Cursor(ui.CursorPointer).Label("移至进行中 " + t.Title)
-					btn.Children(func() { ui.Text(c, "→ 进行中").SingleLine() })
+					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.InProgress, "进行中")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
 						w.MoveTaskToColumn(t.ID, model.InProgress, -1)
@@ -457,7 +457,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn := ui.ButtonBase(c.Key("to-done")).Height(20).PaddingX(6).Radius(4).
 						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
 						Cursor(ui.CursorPointer).Label("移至已完成 " + t.Title)
-					btn.Children(func() { ui.Text(c, "→ 已完成").SingleLine() })
+					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Done, "已完成")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
 						w.MoveTaskToColumn(t.ID, model.Done, -1)
@@ -494,6 +494,26 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	if card.Clicked() && !actionClicked {
 		w.SelectTask(t.ID)
 	}
+}
+
+func columnOrder(s model.Status) int {
+	switch s {
+	case model.Planned:
+		return 0
+	case model.InProgress:
+		return 1
+	case model.Done:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func quickMoveButtonText(from, to model.Status, targetLabel string) string {
+	if columnOrder(to) < columnOrder(from) {
+		return "← " + targetLabel
+	}
+	return "→ " + targetLabel
 }
 
 func priorityBadgeSpec(p model.Priority) (string, display.TagColor) {

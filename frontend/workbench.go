@@ -1417,7 +1417,6 @@ func (w *Workbench) SubmitTaskModal() bool {
 
 	w.taskModalOpen = false
 	w.ReloadBoardTasks()
-	w.selectLoadedTask(created)
 	w.EnqueueToast(feedback.ToastProps{
 		Title:       "已创建任务",
 		Description: created.Title,
@@ -1455,7 +1454,6 @@ func (w *Workbench) QuickCreateTask(status model.Status, title string) (*model.T
 	}
 	w.quickTaskTitles[status] = ""
 	w.ReloadBoardTasks()
-	w.selectLoadedTask(created)
 	return &created, nil
 }
 

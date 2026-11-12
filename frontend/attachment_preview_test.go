@@ -27,9 +27,11 @@ func TestLargeAttachmentPreviewPreservesOriginalAndBoundsCache(t *testing.T) {
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "large photo"
 	wb.SubmitProjectModal()
-	if _, err := wb.QuickCreateTask(model.Planned, "photo"); err != nil {
+	task, err := wb.QuickCreateTask(model.Planned, "photo")
+	if err != nil {
 		t.Fatal(err)
 	}
+	wb.SelectTask(task.ID)
 	var original bytes.Buffer
 	if err := png.Encode(&original, image.NewNRGBA(image.Rect(0, 0, 3200, 3200))); err != nil {
 		t.Fatal(err)
@@ -122,9 +124,11 @@ func TestAttachmentPreviewAsyncRenderAndStaleCompletion(t *testing.T) {
 			wb.OpenCreateProjectModal()
 			wb.projectModalName = "async photo"
 			wb.SubmitProjectModal()
-			if _, err := wb.QuickCreateTask(model.Planned, "photo"); err != nil {
+			task, err := wb.QuickCreateTask(model.Planned, "photo")
+			if err != nil {
 				t.Fatal(err)
 			}
+			wb.SelectTask(task.ID)
 			path := filepath.Join(t.TempDir(), "photo.png")
 			writeSamplePNG(t, path)
 			wb.ImportAttachmentsToSelectedTask([]string{path})
@@ -226,9 +230,11 @@ func TestAttachmentPreviewLoadsWhenScrolledIntoView(t *testing.T) {
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "scroll photo"
 	wb.SubmitProjectModal()
-	if _, err := wb.QuickCreateTask(model.Planned, "photo"); err != nil {
+	task, err := wb.QuickCreateTask(model.Planned, "photo")
+	if err != nil {
 		t.Fatal(err)
 	}
+	wb.SelectTask(task.ID)
 	for i := 0; i < 16; i++ {
 		wb.editSubtasks = append(wb.editSubtasks, model.Subtask{
 			ID:    fmt.Sprintf("sub-%d", i),
