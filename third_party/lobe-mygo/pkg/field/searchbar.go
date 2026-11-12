@@ -77,7 +77,10 @@ func SearchBar(c *ui.Context, query *string, p SearchBarProps) ui.Element {
 			}
 			clear.Children(func() { ui.Icon(c, lucide.CircleX()).FontSize(14) })
 		case p.ShortKey != "" && !input.Focused():
-			display.Hotkey(c, p.ShortKey, display.HotkeyProps{Compact: true, Platform: p.Platform}).TextColor(tk.TextDescription)
+			hk := display.Hotkey(c, p.ShortKey, display.HotkeyProps{Compact: true, Size: p.Size, Platform: p.Platform}).TextColor(tk.TextDescription)
+			if p.Size == theme.Small {
+				hk.Margin(0, -4, 0, 0)
+			}
 		}
 	})
 	styleField(root, tk, p.Variant, false, input.Focused())

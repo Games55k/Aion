@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/lobehub/lobe-mygo/pkg/internal/testkit"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
@@ -62,5 +63,25 @@ func TestSearchBarEnterSearchesAndClearEmpties(t *testing.T) {
 	}
 	if _, ok := tt.AccessByRole(ui.RoleButton, "Clear"); ok {
 		t.Error("clear button shows with an empty query")
+	}
+}
+
+// Regression: a Small (24px) SearchBar previously rendered the 21.6px default hotkey cap flush against its top and bottom borders.
+func TestSmallSearchBarHotkeyHasVerticalMargin(t *testing.T) {
+	tk := theme.Light()
+	q := ""
+	tt := searchTester(&q, SearchBarProps{ShortKey: "mod+k", Size: theme.Small, Platform: 2})
+	k, ok := tt.Find("K")
+	if !ok {
+		t.Fatal("missing hotkey text K")
+	}
+	cy := k.Y + k.H/2
+	chipBg := testkit.Over(tk.BgContainer, tk.FillTertiary)
+	// 10 DIPs above/below the vertical center is inside the 24px bar (±12) but outside the 16px chip (±8).
+	for _, dy := range []float32{-10, 10} {
+		got := testkit.PixelAt(tt, 400, k.X, cy+dy)
+		if testkit.Near(got, chipBg) || !testkit.Near(got, tk.BgContainer) {
+			t.Fatalf("at dy=%v: pixel=%+v, want BgContainer %+v (outside chipBg %+v)", dy, got, tk.BgContainer, chipBg)
+		}
 	}
 }

@@ -32,6 +32,8 @@ type HotkeyProps struct {
 	Variant HotkeyVariant
 	// Compact puts all the keys in one cap.
 	Compact bool
+	// Size sets the cap size; Small fits inside compact 24px inputs with vertical breathing room.
+	Size theme.Size
 	// Platform names the keys as Apple devices (⌘ ⌥ ⇧ glyphs) or as others do (Ctrl, Alt, Shift):
 	// Auto asks the device the view runs on.
 	Platform HotkeyPlatform
@@ -53,24 +55,35 @@ func Hotkey(c *ui.Context, keys string, p HotkeyProps) ui.Element {
 	root := ui.Row(c).Gap(gap).AlignItems(ui.Center).Shrink(0)
 	root.Children(func() {
 		if joined {
-			hotkeyCap(c, tk, p.Variant).Gap(6).Children(func() {
+			capGap := float32(6)
+			if p.Size == theme.Small {
+				capGap = 4
+			}
+			hotkeyCap(c, tk, p.Variant, p.Size).Gap(capGap).Children(func() {
 				for i, k := range parts {
-					hotkeyKey(c.Key(i), k, apple)
+					hotkeyKey(c.Key(i), k, apple, p.Size)
 				}
 			})
 			return
 		}
 		for i, k := range parts {
-			hotkeyCap(c.Key(i), tk, p.Variant).Children(func() { hotkeyKey(c, k, apple) })
+			hotkeyCap(c.Key(i), tk, p.Variant, p.Size).Children(func() { hotkeyKey(c, k, apple, p.Size) })
 		}
 	})
 	return root
 }
 
-func hotkeyCap(c *ui.Context, tk *theme.Tokens, v HotkeyVariant) ui.Element {
-	const font = 12
-	e := ui.Row(c).AlignItems(ui.Center).Justify(ui.Center).Height(font * 1.8).MinWidth(font * 1.8).
-		PaddingX(8).Radius(tk.BorderRadiusSM).FontSize(font).LineHeight(1.1).TextColor(tk.TextSecondary).Shrink(0)
+func hotkeyCap(c *ui.Context, tk *theme.Tokens, v HotkeyVariant, size theme.Size) ui.Element {
+	font := float32(12)
+	height := font * 1.8
+	padX := float32(8)
+	if size == theme.Small {
+		font = 11
+		height = 16
+		padX = 6
+	}
+	e := ui.Row(c).AlignItems(ui.Center).Justify(ui.Center).Height(height).MinWidth(height).
+		PaddingX(padX).Radius(tk.BorderRadiusSM).FontSize(font).LineHeight(1.1).TextColor(tk.TextSecondary).Shrink(0)
 	switch v {
 	case HotkeyOutlined:
 		e.Border(1, tk.BorderSecondary)
@@ -115,15 +128,19 @@ var keyNames = map[string]keyName{
 	"equal":     {text: "+"},
 }
 
-func hotkeyKey(c *ui.Context, key string, apple bool) {
+func hotkeyKey(c *ui.Context, key string, apple bool, size theme.Size) {
+	iconSize := float32(12)
+	if size == theme.Small {
+		iconSize = 11
+	}
 	n, ok := keyNames[strings.ToLower(key)]
 	switch {
 	case ok && apple && n.apple != nil:
-		ui.Icon(c, n.apple()).FontSize(12 * n.scale)
+		ui.Icon(c, n.apple()).FontSize(iconSize * n.scale)
 	case ok && n.text != "":
 		ui.Text(c, n.text).SingleLine()
 	case ok && n.icon != nil:
-		ui.Icon(c, n.icon()).FontSize(12)
+		ui.Icon(c, n.icon()).FontSize(iconSize)
 	default:
 		ui.Text(c, startCase(key)).SingleLine()
 	}
