@@ -18,7 +18,9 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 
 Keep documentation in sync with code changes. Whenever you add, modify, or remove user-facing behaviour, shortcuts, CLI flags, data or backup layouts, build/test workflows, or repository structure, update the affected sections of `README.md`, `AGENTS.md`, and relevant comments in the same change. Update `CHANGELOG.md` when preparing a release.
 
-## Commit Messages
+## Commits
+
+Automatically commit your changes after completing each modification once documentation is synced and required tests and checks pass.
 
 Follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). Write the subject in English using `<type>(<scope>): <description>`. The scope is optional.
 
