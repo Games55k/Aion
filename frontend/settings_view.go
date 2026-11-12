@@ -93,11 +93,6 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Icon(c, lucide.HardDrive()).FontSize(18).TextColor(tk.Primary)
 						ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
-						display.Tag(c, "本地优先", display.TagProps{
-							Size:    theme.Small,
-							Variant: display.TagFilled,
-							Color:   display.TagGreen,
-						})
 					})
 					ui.Text(c, "所有项目、任务、回收站、附件与设置均保存在以下本地目录：").
 						FontSize(13).TextColor(tk.TextSecondary)
