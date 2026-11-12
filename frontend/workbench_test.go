@@ -2388,3 +2388,76 @@ func TestCreateTaskDoesNotExpandDetailSidebar(t *testing.T) {
 		t.Fatal("expected detail panel rendered after clicking task card")
 	}
 }
+
+// Clicking anywhere on a project card opens its board while nested action buttons handle their own actions without navigating to the board.
+func TestProjectCardClickOpensBoardWithoutTriggeringFromActionButtons(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "整卡跳转项目"
+	wb.SubmitProjectModal()
+	projID := wb.activeProjectID
+
+	// Return to All Projects overview.
+	wb.NavigateTo(NavAllProjects)
+	wb.activeProjectID = ""
+	tt.Frame()
+
+	// 1. Clicking Edit opens the modal without opening the project board.
+	if err := tt.Click("编辑项目 整卡跳转项目"); err != nil {
+		t.Fatalf("click 编辑项目 整卡跳转项目: %v", err)
+	}
+	if !wb.projectModalOpen || wb.navPage != NavAllProjects {
+		t.Fatalf("expected edit modal open on NavAllProjects, got open=%v page=%s", wb.projectModalOpen, wb.navPage)
+	}
+	wb.projectModalOpen = false
+	tt.Frame()
+
+	// 2. Clicking the project card opens its board.
+	if err := tt.Click("项目卡片 整卡跳转项目"); err != nil {
+		t.Fatalf("click 项目卡片 整卡跳转项目: %v", err)
+	}
+	if wb.navPage != NavProjectBoard || wb.activeProjectID != projID {
+		t.Fatalf("expected board open for %s, got page=%s active=%s", projID, wb.navPage, wb.activeProjectID)
+	}
+
+	// 3. Clicking Archive from All Projects archives without opening the board.
+	wb.NavigateTo(NavAllProjects)
+	wb.activeProjectID = ""
+	tt.Frame()
+	if err := tt.Click("归档项目 整卡跳转项目"); err != nil {
+		t.Fatalf("click 归档项目 整卡跳转项目: %v", err)
+	}
+	if wb.navPage != NavAllProjects || len(wb.activeProjects) != 0 || len(wb.archivedProjects) != 1 {
+		t.Fatalf("expected project archived on NavAllProjects, got page=%s active=%d archived=%d", wb.navPage, len(wb.activeProjects), len(wb.archivedProjects))
+	}
+
+	// 4. Clicking an archived project card opens its board; Unarchive stays in overview.
+	wb.NavigateTo(NavArchivedProjects)
+	tt.Frame()
+	if err := tt.Click("项目卡片 整卡跳转项目"); err != nil {
+		t.Fatalf("click archived 项目卡片 整卡跳转项目: %v", err)
+	}
+	if wb.navPage != NavProjectBoard || wb.activeProjectID != projID {
+		t.Fatalf("expected archived project board open, got page=%s active=%s", wb.navPage, wb.activeProjectID)
+	}
+
+	wb.NavigateTo(NavArchivedProjects)
+	wb.activeProjectID = ""
+	tt.Frame()
+	if err := tt.Click("恢复归档 整卡跳转项目"); err != nil {
+		t.Fatalf("click 恢复归档 整卡跳转项目: %v", err)
+	}
+	if wb.navPage != NavArchivedProjects || len(wb.activeProjects) != 1 {
+		t.Fatalf("expected project unarchived without opening board, got page=%s active=%d", wb.navPage, len(wb.activeProjects))
+	}
+
+	// 5. Clicking Move to Trash moves project without opening the board.
+	wb.NavigateTo(NavAllProjects)
+	tt.Frame()
+	if err := tt.Click("移入回收站 整卡跳转项目"); err != nil {
+		t.Fatalf("click 移入回收站 整卡跳转项目: %v", err)
+	}
+	if wb.navPage != NavAllProjects || len(wb.activeProjects) != 0 || len(wb.trashItems) != 1 {
+		t.Fatalf("expected project trashed without opening board, got page=%s active=%d trash=%d", wb.navPage, len(wb.activeProjects), len(wb.trashItems))
+	}
+}

@@ -121,8 +121,15 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 	}
 
 	card := ui.Column(c).Padding(18, 20).Gap(12).Radius(tk.BorderRadiusLG).
-		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch)
+		Background(tk.BgContainer).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
+		Label("项目卡片 " + p.Name)
+	if card.Hovered() {
+		card.Border(1, tk.PrimaryHover)
+	} else {
+		card.Border(1, tk.BorderSecondary)
+	}
 
+	actionClicked := false
 	card.Children(func() {
 		// Top Row: Icon + Name + Description + Actions
 		ui.Row(c).Gap(14).AlignItems(ui.Start).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
@@ -153,21 +160,11 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 
 			// Card Action Buttons
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				boardLabel := "打开看板"
-				if archived {
-					boardLabel = "查看看板"
-				}
-				if action.Button(c.Key("open-"+p.ID), boardLabel, action.ButtonProps{
-					Variant: action.Primary,
-					Size:    theme.Small,
-				}).Label(boardLabel + " " + p.Name).Clicked() {
-					w.SelectProject(p.ID)
-				}
-
 				if action.Button(c.Key("edit-"+p.ID), "编辑", action.ButtonProps{
 					Variant: action.Default,
 					Size:    theme.Small,
 				}).Label("编辑项目 " + p.Name).Clicked() {
+					actionClicked = true
 					w.OpenEditProjectModal(p)
 				}
 
@@ -176,6 +173,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 						Variant: action.Default,
 						Size:    theme.Small,
 					}).Label("恢复归档 " + p.Name).Clicked() {
+						actionClicked = true
 						w.UnarchiveProject(p.ID)
 					}
 				} else {
@@ -183,6 +181,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 						Variant: action.Default,
 						Size:    theme.Small,
 					}).Label("归档项目 " + p.Name).Clicked() {
+						actionClicked = true
 						w.ArchiveProject(p.ID)
 					}
 				}
@@ -191,6 +190,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 					Variant: action.Text,
 					Size:    theme.Small,
 				}).Label("移入回收站 " + p.Name).Clicked() {
+					actionClicked = true
 					w.SoftDeleteProject(p.ID)
 				}
 			})
@@ -236,6 +236,10 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 			})
 		})
 	})
+
+	if card.Clicked() && !actionClicked {
+		w.SelectProject(p.ID)
+	}
 }
 
 func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
