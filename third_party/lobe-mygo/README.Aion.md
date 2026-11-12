@@ -10,3 +10,5 @@ Aion-specific changes:
   sizing for `display.Hotkey` and passed `SearchBarProps.Size` so shortcut tags
   inside compact (`Small`) search bars have vertical and right-side breathing
   room.
+- `pkg/action/button.go`: added `Danger bool` to `ButtonProps` so destructive
+  buttons render with theme error borders, fills, and text across variants.

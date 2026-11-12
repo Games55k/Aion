@@ -24,6 +24,8 @@ type ButtonProps struct {
 	Variant ButtonVariant
 	// Size sets the height (24, 32 or 40), padding, font size and corner radius.
 	Size theme.Size
+	// Danger styles the button with error colors to highlight destructive actions.
+	Danger bool
 }
 
 type buttonMetrics struct {
@@ -51,6 +53,9 @@ func StyleButton(c *ui.Context, b ui.Element, label string, p ButtonProps) ui.El
 		Cursor(ui.CursorPointer).Transition(buttonTransition)
 
 	bg, border, fg := buttonColors(tk, p.Variant, stateOf(b))
+	if p.Danger {
+		bg, border, fg = dangerButtonColors(tk, p.Variant, stateOf(b))
+	}
 	b.Background(bg).Border(1, border).TextColor(fg)
 	switch p.Variant {
 	case Dashed:
@@ -121,6 +126,34 @@ func buttonColors(tk *theme.Tokens, v ButtonVariant, s buttonState) (bg, border,
 			border = theme.Mix(tk.Border, tk.Text, 0.08)
 		}
 		return bg, border, tk.Text
+	}
+}
+
+func dangerButtonColors(tk *theme.Tokens, v ButtonVariant, s buttonState) (bg, border, fg ui.Color) {
+	pick := func(rest, hover, active ui.Color) ui.Color {
+		switch s {
+		case buttonActive:
+			return active
+		case buttonHover:
+			return hover
+		}
+		return rest
+	}
+	fg = pick(tk.ErrorText, tk.ErrorTextHover, tk.ErrorTextActive)
+	switch v {
+	case Primary:
+		c := pick(tk.Error, tk.ErrorHover, tk.ErrorActive)
+		return c, c, tk.BgLayout
+	case Filled:
+		return pick(tk.ErrorFillTertiary, tk.ErrorFillSecondary, tk.ErrorFill), ui.Transparent, fg
+	case Text:
+		return pick(ui.Transparent, tk.ErrorBgHover, tk.ErrorBgActive), ui.Transparent, fg
+	case Link:
+		return ui.Transparent, ui.Transparent, fg
+	default:
+		return pick(tk.BgContainer, tk.ErrorBgHover, tk.ErrorBgActive),
+			pick(tk.ErrorBorder, tk.ErrorBorderHover, tk.Error),
+			fg
 	}
 }
 

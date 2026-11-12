@@ -93,8 +93,9 @@ func (w *Workbench) renderTaskDetailPanel(c *ui.Context, tk *theme.Tokens) {
 			// Delete & Close Buttons
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if action.Button(c, "移入回收站", action.ButtonProps{
-					Variant: action.Text,
+					Variant: action.Default,
 					Size:    theme.Small,
+					Danger:  true,
 				}).Label("将任务移入回收站").Clicked() {
 					w.SoftDeleteTask(t.ID)
 					return

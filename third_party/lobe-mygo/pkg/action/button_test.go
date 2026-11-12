@@ -109,3 +109,20 @@ func TestButtonReportsClicked(t *testing.T) {
 		t.Error("Clicked() did not report the click")
 	}
 }
+
+// Danger buttons paint theme error fills on Primary and error hover tints on Default so destructive actions stand out.
+func TestDangerButtonUsesErrorPalette(t *testing.T) {
+	tk := theme.Light()
+	primary := newButtonHarness(t, ButtonProps{Variant: Primary, Danger: true})
+	if got, want := primary.fill(), tk.Error; !testkit.Near(got, want) {
+		t.Errorf("danger primary fill = %+v, want Error %+v", got, want)
+	}
+
+	def := newButtonHarness(t, ButtonProps{Variant: Default, Danger: true})
+	x, y := def.center()
+	def.tt.Move(x, y)
+	def.tt.Advance(time.Second)
+	if got, want := def.fill(), tk.ErrorBgHover; !testkit.Near(got, want) {
+		t.Errorf("danger default hover fill = %+v, want ErrorBgHover %+v", got, want)
+	}
+}

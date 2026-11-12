@@ -79,6 +79,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 			if len(w.trashItems) > 0 {
 				if action.Button(c, "清空回收站", action.ButtonProps{
 					Variant: action.Primary,
+					Danger:  true,
 				}).Disabled(w.IsBusy()).Clicked() {
 					w.confirmClearTrashOpen = true
 				}
@@ -221,8 +222,9 @@ func (w *Workbench) renderTrashRow(c *ui.Context, tk *theme.Tokens, item model.T
 			}
 
 			if action.Button(c.Key("perm-del-"+item.ID), "彻底删除", action.ButtonProps{
-				Variant: action.Text,
+				Variant: action.Default,
 				Size:    theme.Small,
+				Danger:  true,
 			}).Disabled(w.IsBusy()).Label("彻底删除 " + item.Name).Clicked() {
 				itemCopy := item
 				w.confirmPermDeleteItem = &itemCopy

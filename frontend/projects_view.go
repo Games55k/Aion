@@ -187,8 +187,9 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 				}
 
 				if action.Button(c.Key("trash-"+p.ID), "移入回收站", action.ButtonProps{
-					Variant: action.Text,
+					Variant: action.Default,
 					Size:    theme.Small,
+					Danger:  true,
 				}).Label("移入回收站 " + p.Name).Clicked() {
 					actionClicked = true
 					w.SoftDeleteProject(p.ID)

@@ -110,8 +110,9 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 					}
 				}
 				if action.Button(c, "移入回收站", action.ButtonProps{
-					Variant: action.Text,
+					Variant: action.Default,
 					Size:    theme.Small,
+					Danger:  true,
 				}).Label("将项目移入回收站").Clicked() {
 					w.SoftDeleteProject(p.ID)
 				}
