@@ -34,16 +34,10 @@ var (
 func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 	ui.Column(c).Fill().Children(func() {
 		// Top Header Bar
-		ui.Row(c).Padding(20, 24, 16, 24).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+		ui.Row(c).MinHeight(66).Padding(16, 24).Gap(10).AlignItems(ui.Center).
 			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, lucide.Settings()).FontSize(22).TextColor(tk.Primary)
-					ui.Text(c, "全局设置与数据管理").FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
-				})
-				ui.Text(c, "配置界面外观主题、查看本地数据目录、管理自动备份与恢复，以及检查应用更新。").
-					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
-			})
+			ui.Icon(c, lucide.Settings()).FontSize(22).TextColor(tk.Primary)
+			ui.Text(c, "全局设置与数据管理").FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
 		})
 
 		// Settings Body
@@ -72,7 +66,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 								ui.Icon(c, lucide.Palette()).FontSize(18).TextColor(tk.Primary)
 								ui.Text(c, "外观与主题").FontSize(16).FontWeight(600).TextColor(tk.Text)
 							})
-							ui.Text(c, "支持跟随 macOS 系统外观，或固定为浅色、深色模式。设置将自动持久化到本地数据库。").
+							ui.Text(c, "支持跟随 macOS 系统外观，或固定为浅色、深色模式。").
 								FontSize(13).TextColor(tk.TextSecondary)
 						})
 

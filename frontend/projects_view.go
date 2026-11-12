@@ -18,11 +18,11 @@ import (
 func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived bool) {
 	list := w.activeProjects
 	title := "所有项目"
-	subtitle := fmt.Sprintf("共 %d 个活跃项目，点击任一项目进入三列看板", len(w.activeProjects))
+	subtitle := fmt.Sprintf("共 %d 个活跃项目", len(w.activeProjects))
 	if archived {
 		list = w.archivedProjects
 		title = "已归档项目"
-		subtitle = fmt.Sprintf("共 %d 个已归档项目，可随时查看看板、恢复归档或移入回收站", len(w.archivedProjects))
+		subtitle = fmt.Sprintf("共 %d 个已归档项目", len(w.archivedProjects))
 	}
 
 	ui.Column(c).Fill().Children(func() {
