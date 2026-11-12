@@ -27,3 +27,5 @@ require (
 )
 
 tool github.com/egoist/mygo/cmd/mygo
+
+replace github.com/lobehub/lobe-mygo => ./third_party/lobe-mygo
