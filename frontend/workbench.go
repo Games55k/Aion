@@ -1506,7 +1506,7 @@ func (w *Workbench) importAttachmentsWork(ctx context.Context, taskID string, pa
 	if imported > 0 {
 		toasts = append(toasts, feedback.ToastProps{
 			Title:       "附件已导入",
-			Description: fmt.Sprintf("成功导入 %d 个附件到受管存储", imported),
+			Description: fmt.Sprintf("成功导入 %d 个附件", imported),
 			Type:        feedback.ToastSuccess,
 		})
 	}
@@ -1536,7 +1536,7 @@ func (w *Workbench) ImportAttachmentsToSelectedTask(paths []string) {
 	}
 	taskID := w.selectedTaskID
 	pathsCopy := slices.Clone(paths)
-	w.runAsyncTask("正在导入附件到受管存储...", func(ctx context.Context) func() {
+	w.runAsyncTask("正在导入附件...", func(ctx context.Context) func() {
 		imported, toasts := w.importAttachmentsWork(ctx, taskID, pathsCopy)
 		return func() {
 			w.applyImportedAttachments(imported, toasts)

@@ -559,7 +559,7 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, lucide.Paperclip()).FontSize(14).TextColor(tk.TextSecondary)
-				ui.Text(c, fmt.Sprintf("本地附件 (%d)", len(atts))).
+				ui.Text(c, fmt.Sprintf("附件 (%d)", len(atts))).
 					FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 			})
 
@@ -584,7 +584,7 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 		dropzone.Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, lucide.Upload()).FontSize(14).TextColor(tk.TextTertiary)
-				ui.Text(c, "将文件或图片拖拽到此处导入受管存储（单文件 ≤ 256 MB）").
+				ui.Text(c, "将文件或图片拖拽到此处添加附件（单文件 ≤ 256 MB）").
 					FontSize(12).TextColor(tk.TextTertiary)
 			})
 		})
@@ -705,7 +705,7 @@ func (w *Workbench) openOrRevealAttachment(failTitle string, actionFn func(strin
 	if managedPath == "" {
 		w.EnqueueToast(feedback.ToastProps{
 			Title:       failTitle,
-			Description: "受管附件文件不存在或路径无效",
+			Description: "附件文件不存在或路径无效",
 			Type:        feedback.ToastError,
 		})
 		return

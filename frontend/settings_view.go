@@ -93,13 +93,13 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Icon(c, lucide.HardDrive()).FontSize(18).TextColor(tk.Primary)
 						ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
-						display.Tag(c, "Offline-First", display.TagProps{
+						display.Tag(c, "本地优先", display.TagProps{
 							Size:    theme.Small,
 							Variant: display.TagFilled,
 							Color:   display.TagGreen,
 						})
 					})
-					ui.Text(c, "所有项目、任务、回收站、设置（aion.sqlite）与受管附件（attachments/）均保存在以下本地目录，无需任何云端账号：").
+					ui.Text(c, "所有项目、任务、回收站、附件与设置均保存在以下本地目录：").
 						FontSize(13).TextColor(tk.TextSecondary)
 
 					dataDir := w.app.DataDir()
@@ -151,7 +151,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 								ui.Icon(c, lucide.Clock()).FontSize(18).TextColor(tk.Primary)
 								ui.Text(c, "本地自动备份").FontSize(16).FontWeight(600).TextColor(tk.Text)
 							})
-							ui.Text(c, "应用启动及运行期间按周期自动生成一致性快照压缩包（auto-*.zip），并自动轮转清理超出保留份数的旧自动备份。").
+							ui.Text(c, "按设定周期自动备份本地数据，超出保留份数的旧备份将自动清理。").
 								FontSize(13).TextColor(tk.TextSecondary)
 						})
 
@@ -278,7 +278,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							ui.Icon(c, lucide.ArchiveRestore()).FontSize(18).TextColor(tk.Primary)
 							ui.Text(c, "手动备份导出与完整恢复").FontSize(16).FontWeight(600).TextColor(tk.Text)
 						})
-						ui.Text(c, "手动导出的完整备份包（.zip）包含 SQLite 快照（database.sqlite）、全部受管附件（attachments/）及 SHA-256 校验清单（manifest.json），可用于跨设备迁移或灾难恢复。").
+						ui.Text(c, "将全部项目、任务、附件与设置为 .zip 备份包，可用于跨设备迁移或恢复数据。").
 							FontSize(13).TextColor(tk.TextSecondary)
 					})
 
@@ -380,7 +380,7 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
 				})
 			}
 		})
-		ui.Text(c, "手动从 GitHub Releases 获取已签名的 Aion 更新包；默认关闭后台自动检查，仅在主动检查或下载更新时连接 GitHub。").
+		ui.Text(c, "从 GitHub Releases 检查并获取新版本；仅在手动检查或下载更新时连接网络。").
 			FontSize(13).TextColor(tk.TextSecondary)
 
 		ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
@@ -424,7 +424,7 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c.Key("settings-updates-available"), "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), feedback.AlertProps{
 				Type:        feedback.Success,
 				Variant:     feedback.Soft,
-				Description: "点击“检查更新”打开原生更新窗口，可阅读版本说明、下载并安装更新。",
+				Description: "点击“检查更新”查看更新说明、下载并安装新版本。",
 			})
 		}
 	})
@@ -441,16 +441,16 @@ func (w *Workbench) renderSettingsModals(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c, "整包覆盖恢复说明", feedback.AlertProps{
 				Type:        feedback.Warning,
 				Variant:     feedback.Soft,
-				Description: "从备份包恢复将完整替换当前本地的所有项目、任务、子任务、标签、受管附件、回收站以及全局设置。",
+				Description: "从备份包恢复将完整替换当前本地的所有项目、任务、附件、回收站及全局设置。",
 			})
 			ui.Column(c).Gap(6).Padding(10, 12).Radius(tk.BorderRadius).
 				Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "待恢复备份包:").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
 				ui.Text(c, w.pendingRestoreZip).Font("monospace").FontSize(12).TextColor(tk.Text)
 			})
-			ui.Text(c, "• 恢复前将先校验备份包清单（manifest.json）、所有文件 SHA-256 摘要及 SQLite 完整性；若备份包损坏，恢复将立即中止且不改动现有数据。").
+			ui.Text(c, "• 恢复前会先校验备份包完整性；若文件损坏将自动中止，不会改动现有数据。").
 				FontSize(12).TextColor(tk.TextSecondary)
-			ui.Text(c, "• 替换前系统会自动将当前数据打包为一份安全备份（safety-*.zip）保存在备份目录中，以便随时回滚。").
+			ui.Text(c, "• 替换前会自动将当前数据另存为安全备份并保存在备份目录中，以便需要时回滚。").
 				FontSize(12).TextColor(tk.TextSecondary)
 		})
 	}) {

@@ -72,7 +72,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 						Variant: display.TagFilled,
 					})
 				})
-				ui.Text(c, "删除的项目与任务会暂存在此，您可以随时恢复；彻底删除或清空回收站将不可逆地移除记录并清理孤儿附件。").
+				ui.Text(c, "删除的项目与任务会暂存在此，可随时恢复；彻底删除或清空后将永久清除。").
 					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
 			})
 
@@ -253,7 +253,7 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c, "所属项目处于已删除状态", feedback.AlertProps{
 				Type:        feedback.Warning,
 				Variant:     feedback.Soft,
-				Description: fmt.Sprintf("任务「%s」所属的项目「%s」目前仍在回收站中。根据数据一致性规则，必须先恢复所属项目，才能恢复其中的任务。", taskTitle, projTitle),
+				Description: fmt.Sprintf("任务「%s」所属的项目「%s」仍在回收站中，请先恢复所属项目，才能恢复该任务。", taskTitle, projTitle),
 			})
 			ui.Text(c, "点击“一并恢复项目与任务”将立即恢复该项目及其关联任务。").
 				FontSize(13).TextColor(tk.TextSecondary)
@@ -269,13 +269,13 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 		OkText:     "确认彻底删除",
 		CancelText: "取消",
 	}, func() {
-		desc := "即将彻底删除所选条目。关联的未引用本地附件文件也将从磁盘受管存储中永久清理。"
+		desc := "即将永久删除所选条目及其本地附件，此操作无法恢复。"
 		if w.confirmPermDeleteItem != nil {
 			kindLabel := "任务"
 			if w.confirmPermDeleteItem.Kind == projects.TrashProject {
 				kindLabel = "项目及其下属所有任务"
 			}
-			desc = fmt.Sprintf("即将彻底删除%s「%s」。关联的未引用本地附件文件也将从磁盘受管存储中永久清理。", kindLabel, w.confirmPermDeleteItem.Name)
+			desc = fmt.Sprintf("即将永久删除%s「%s」及其本地附件，此操作无法恢复。", kindLabel, w.confirmPermDeleteItem.Name)
 		}
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			feedback.Alert(c, "此操作不可撤销", feedback.AlertProps{
@@ -299,7 +299,7 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c, "清空后无法恢复", feedback.AlertProps{
 				Type:        feedback.Error,
 				Variant:     feedback.Soft,
-				Description: fmt.Sprintf("即将永久删除回收站中的全部 %d 项内容（包含项目、任务及无引用的本地受管附件文件）。", len(w.trashItems)),
+				Description: fmt.Sprintf("即将永久删除回收站中的全部 %d 项内容（包括项目、任务及其关联附件）。", len(w.trashItems)),
 			})
 		})
 	}) {

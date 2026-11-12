@@ -75,7 +75,7 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 							display.Empty(c, display.EmptyProps{
 								Icon:        lucide.Archive(),
 								Title:       "暂无已归档项目",
-								Description: "归档后的项目将保存在此处，不占用左侧活跃项目列表空间。",
+								Description: "归档后的项目会保存在这里，可随时查看或恢复。",
 								Action: func() {
 									if action.Button(c, "查看所有活跃项目", action.ButtonProps{
 										Variant: action.Default,
@@ -88,7 +88,7 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 							display.Empty(c, display.EmptyProps{
 								Icon:        lucide.FolderKanban(),
 								Title:       "还没有任何项目",
-								Description: "创建一个项目即可开始使用计划、进行中、已完成三列看板管理您的任务与本地附件。",
+								Description: "创建一个项目即可开始管理您的任务与附件。",
 								Action: func() {
 									if action.Button(c, "创建第一个项目", action.ButtonProps{
 										Variant: action.Primary,
