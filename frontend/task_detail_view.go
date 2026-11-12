@@ -522,10 +522,14 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 
 		// Add New Subtask Row
 		ui.Row(c).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-			inp := field.Input(c.Key("new-subtask-"+t.ID), &w.newSubtaskTitle, field.InputProps{
-				Placeholder: "+ 输入新子任务标题...",
-				Size:        theme.Small,
-			}).Label("新子任务输入框")
+			var submitted bool
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				inp := field.Input(c.Key("new-subtask-"+t.ID), &w.newSubtaskTitle, field.InputProps{
+					Placeholder: "+ 输入新子任务标题...",
+					Size:        theme.Small,
+				}).Label("新子任务输入框")
+				submitted = inp.Submitted()
+			})
 			addSubtask := func() {
 				title := strings.TrimSpace(w.newSubtaskTitle)
 				if title == "" {
@@ -539,7 +543,7 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 				w.newSubtaskTitle = ""
 				_ = w.SaveSelectedTask()
 			}
-			if inp.Submitted() {
+			if submitted {
 				addSubtask()
 			}
 			if action.Button(c, "添加子任务", action.ButtonProps{

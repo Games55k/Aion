@@ -2461,3 +2461,34 @@ func TestProjectCardClickOpensBoardWithoutTriggeringFromActionButtons(t *testing
 		t.Fatalf("expected project trashed without opening board, got page=%s active=%d trash=%d", wb.navPage, len(wb.activeProjects), len(wb.trashItems))
 	}
 }
+
+// Regression: column quick-add inputs previously shrank to placeholder width instead of stretching across wide columns.
+func TestQuickAddInputFillsColumnWidth(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "全宽快速添加"
+	wb.SubmitProjectModal()
+	tt.Frame()
+
+	for _, pair := range []struct {
+		colLabel   string
+		inputLabel string
+	}{
+		{"看板列 计划", "快速添加计划任务"},
+		{"看板列 进行中", "快速添加进行中任务"},
+		{"看板列 已完成", "快速添加已完成任务"},
+	} {
+		col, ok := tt.Access(pair.colLabel)
+		if !ok {
+			t.Fatalf("missing %s", pair.colLabel)
+		}
+		inp, ok := tt.Access(pair.inputLabel)
+		if !ok {
+			t.Fatalf("missing %s", pair.inputLabel)
+		}
+		// Inside a column with 10px horizontal row padding and 8px input horizontal padding, the inner text input should span nearly the full column width.
+		if inp.Bounds.W < col.Bounds.W-48 {
+			t.Fatalf("%s width %.1f did not fill column %s width %.1f", pair.inputLabel, inp.Bounds.W, pair.colLabel, col.Bounds.W)
+		}
+	}
+}

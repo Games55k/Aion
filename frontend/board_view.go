@@ -281,14 +281,18 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 		ui.Row(c).Padding(8, 10).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).
 			BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
 			quickVal := w.quickTaskTitles[col.Status]
-			inp := field.Input(c.Key("quick-input-"+string(col.Status)), &quickVal, field.InputProps{
-				Placeholder: "+ 快速添加" + col.Title + "任务...",
-				Size:        theme.Small,
-				Variant:     field.InputFilled,
-			}).Label("快速添加" + col.Title + "任务")
+			var submitted bool
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				inp := field.Input(c.Key("quick-input-"+string(col.Status)), &quickVal, field.InputProps{
+					Placeholder: "+ 快速添加" + col.Title + "任务...",
+					Size:        theme.Small,
+					Variant:     field.InputFilled,
+				}).Label("快速添加" + col.Title + "任务")
+				submitted = inp.Submitted()
+			})
 			w.quickTaskTitles[col.Status] = quickVal
 
-			if inp.Submitted() && strings.TrimSpace(quickVal) != "" {
+			if submitted && strings.TrimSpace(quickVal) != "" {
 				if _, err := w.QuickCreateTask(col.Status, quickVal); err == nil {
 					quickVal = w.quickTaskTitles[col.Status]
 				}
