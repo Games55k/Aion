@@ -69,8 +69,8 @@ func TestProjectLifecycle(t *testing.T) {
 	app, wb, tt := openTestWorkbench(t, dataDir, Host{})
 
 	// Create first project via UI modal
-	if err := tt.Click("+ 新建项目"); err != nil {
-		t.Fatalf("click + 新建项目: %v", err)
+	if err := tt.Click("新建项目"); err != nil {
+		t.Fatalf("click 新建项目: %v", err)
 	}
 	if err := tt.Click("项目名称输入框"); err != nil {
 		t.Fatalf("click 项目名称输入框: %v", err)

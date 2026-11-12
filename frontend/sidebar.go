@@ -64,26 +64,6 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 						}
 					})
 				}
-
-				// Quick New Project Button
-				if nav.Expanded {
-					if action.Button(c, "+ 新建项目", action.ButtonProps{
-						Variant: action.Filled,
-						Size:    theme.Middle,
-					}).AlignSelf(ui.Stretch).Clicked() {
-						w.OpenCreateProjectModal()
-					}
-				} else {
-					ui.Row(c).Justify(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-						if action.ActionIcon(c, lucide.Plus(), action.ActionIconProps{
-							Variant: action.ActionIconFilled,
-							Size:    theme.Middle,
-							Title:   "新建项目",
-						}).Clicked() {
-							w.OpenCreateProjectModal()
-						}
-					})
-				}
 			})
 		},
 		Footer: func(nav layout.SideNavState) {
