@@ -2220,3 +2220,63 @@ func TestRemoveAttachmentReportsFailedCleanup(t *testing.T) {
 		t.Fatalf("expected the uncollected file to remain: %v %v", files, err)
 	}
 }
+
+// Pressing Cmd+, opens Settings from workspace views and focused inputs while respecting open modals, active invalid drafts, and already-open Settings edits.
+func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+
+	// 1. Open Settings via Cmd+, from the initial All Projects view.
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavSettings || !tt.HasText("全局设置与数据管理") {
+		t.Fatalf("expected Cmd+, to open Settings, navPage=%s", wb.navPage)
+	}
+
+	// 2. Pressing Cmd+, while already on Settings must not overwrite unsaved policy edits.
+	wb.backupDirInput = "/tmp/unsaved-custom-backup"
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavSettings || wb.backupDirInput != "/tmp/unsaved-custom-backup" {
+		t.Fatalf("expected Cmd+, on Settings to preserve unsaved backupDirInput, got %q", wb.backupDirInput)
+	}
+
+	// 3. Create a project and enter its board; Cmd+, must ignore while a modal is open.
+	wb.NavigateTo(NavAllProjects)
+	tt.Frame()
+	wb.OpenCreateProjectModal()
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavAllProjects || !wb.projectModalOpen {
+		t.Fatalf("expected Cmd+, behind modal to keep modal open and stay on %s, got %s (modal=%v)", NavAllProjects, wb.navPage, wb.projectModalOpen)
+	}
+	wb.projectModalName = "快捷键测试项目"
+	wb.SubmitProjectModal()
+	tt.Frame()
+
+	task, err := wb.QuickCreateTask(model.Planned, "待检查任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.SelectTask(task.ID)
+	tt.Frame()
+
+	// 4. An invalid unsaved task draft blocks Cmd+, from leaving the board.
+	wb.editTitle = "   "
+	wb.dirty = true
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavProjectBoard {
+		t.Fatalf("expected Cmd+, with invalid draft to remain on board, got %s", wb.navPage)
+	}
+	tt.Frame()
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatalf("click 放弃修改: %v", err)
+	}
+	tt.Frame()
+
+	// 5. Cmd+, still navigates to Settings when a text input on the board has focus.
+	if err := tt.Click("搜索任务"); err != nil {
+		t.Fatalf("click 搜索任务: %v", err)
+	}
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavSettings || !tt.HasText("全局设置与数据管理") {
+		t.Fatalf("expected Cmd+, from focused search input to open Settings, got %s", wb.navPage)
+	}
+}

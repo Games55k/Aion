@@ -701,6 +701,24 @@ func (w *Workbench) NavigateTo(page NavPage) {
 	}
 }
 
+func (w *Workbench) hasOpenModal() bool {
+	return w.projectModalOpen ||
+		w.taskModalOpen ||
+		w.trashParentErrModalOpen ||
+		w.confirmPermDeleteOpen ||
+		w.confirmClearTrashOpen ||
+		w.confirmRestoreOpen
+}
+
+// OpenSettings navigates to the global Settings view unless a modal dialog is
+// open or Settings is already active.
+func (w *Workbench) OpenSettings() {
+	if w.hasOpenModal() || w.navPage == NavSettings {
+		return
+	}
+	w.NavigateTo(NavSettings)
+}
+
 // ReloadBoardTasks reloads the tasks for the active project and applies any active filters.
 func (w *Workbench) ReloadBoardTasks() {
 	if w.activeProjectID == "" {
@@ -2308,6 +2326,12 @@ func (w *Workbench) View(c *ui.Context) {
 		theme.Apply(c)
 	}
 	tk := theme.TokensOf(c)
+
+	c.OnWindowShortcut(ui.Cmd, ui.KeyComma, func() {
+		if !c.ShortcutRepeated() {
+			w.OpenSettings()
+		}
+	})
 
 	ui.Row(c).Fill().Background(tk.BgLayout).TextColor(tk.Text).FontSize(tk.FontSize).Children(func() {
 		// Left Collapsible & Resizable Navigation Sidebar

@@ -76,9 +76,15 @@ func run(dataDir, snapshotPath string) error {
 	}))
 
 	mygo.App.WhenReady(func() {
-		mygo.App.SetMenu(buildAppMenu())
+		var openSettings func()
+		triggerOpenSettings := func() {
+			if openSettings != nil {
+				openSettings()
+			}
+		}
+		mygo.App.SetMenu(buildAppMenu(triggerOpenSettings))
 		mygo.App.OnLocaleChanged(func(string) {
-			mygo.App.SetMenu(buildAppMenu())
+			mygo.App.SetMenu(buildAppMenu(triggerOpenSettings))
 		})
 
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -91,6 +97,21 @@ func run(dataDir, snapshotPath string) error {
 			TrafficLightPosition: &mygo.Point{X: 13, Y: 14},
 			Content:              ui.View(wb.View),
 		})
+
+		openSettings = func() {
+			if win.IsMinimized() {
+				win.Restore()
+			}
+			if !win.IsVisible() {
+				win.Show()
+			}
+			if !win.IsFocused() {
+				win.Focus()
+			}
+			win.Update(func() {
+				wb.OpenSettings()
+			})
+		}
 
 		readUpdateInfo := func() frontend.UpdateCapability {
 			return frontend.UpdateCapability{
@@ -223,11 +244,21 @@ func writeSnapshot(path string, view func(*ui.Context)) error {
 	return nil
 }
 
-func buildAppMenu() *mygo.Menu {
+func buildAppMenu(onOpenSettings func()) *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Label: mygo.App.Name(), Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
 			updater.MenuItem(),
+			mygo.Separator(),
+			{
+				Label:       "设置…",
+				Accelerator: "CmdOrCtrl+,",
+				Click: func(*mygo.MenuItem, *mygo.Window) {
+					if onOpenSettings != nil {
+						onOpenSettings()
+					}
+				},
+			},
 			mygo.Separator(),
 			{Role: mygo.RoleServices},
 			mygo.Separator(),

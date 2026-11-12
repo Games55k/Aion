@@ -114,6 +114,7 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 							Key:   "nav:settings",
 							Label: "设置",
 							Icon:  lucide.Settings(),
+							Extra: "⌘,",
 						},
 					},
 				})
