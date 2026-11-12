@@ -72,7 +72,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 						Variant: display.TagFilled,
 					})
 				})
-				ui.Text(c, "删除的项目与任务会暂存在此，可随时恢复；彻底删除或清空后将永久清除。").
+				ui.Text(c, "已删除的项目与任务可在此恢复或彻底清除。").
 					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
 			})
 
