@@ -108,6 +108,7 @@ main.go                              原生窗口宿主入口、应用菜单/更
 mygo.json                            MyGo 应用配置、打包元数据与更新源配置
 CHANGELOG.md                         版本更新说明（发版说明与客户端更新窗口共用）
 .github/workflows/release.yml        标签触发的 macOS Universal 构建与草稿 Release 工作流
+.github/ISSUE_TEMPLATE/              GitHub Issue 表单模板与空白 Issue 禁用配置
 frontend/                            原生界面层：工作台状态、侧边栏、项目总览、三列看板、任务详情、回收站、设置与附件预览
 frontend/workbench_test.go           基于 ui.Tester 的端到端无头 UI 交互测试
 frontend/attachment_preview_test.go  图片缩略图解码、方向校正与有界缓存测试

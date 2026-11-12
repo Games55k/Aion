@@ -1,0 +1,42 @@
+name: 问题反馈与建议
+description: 提交 Bug 反馈或功能建议
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - Bug 反馈
+        - 功能建议
+        - 其他问题
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: Aion 版本
+      placeholder: 例如：v0.1.1（可在「设置 → 应用版本与更新」查看）
+
+  - type: input
+    id: os_version
+    attributes:
+      label: macOS 版本
+      placeholder: 例如：macOS 15.3 (Apple Silicon / Intel)
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / 建议内容
+      placeholder: 请简述遇到的问题、期望的行为或功能建议（支持直接粘贴截图）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤（选填）
+      placeholder: |
+        如果是 Bug，可简单描述触发步骤：
+        1. ...
+        2. ...
