@@ -403,12 +403,31 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 
 		// Priority & Category Tags Row
 		ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-			pLabel, pColor := priorityBadgeSpec(t.Priority)
-			display.Tag(c, pLabel, display.TagProps{
-				Size:    theme.Small,
-				Variant: display.TagFilled,
-				Color:   pColor,
+			prioOpen := ui.Local(card, "prioOpen", func() bool { return false })
+			pLabel, pFg, pBg, pHoverBorder := priorityPillSpec(tk, t.Priority)
+			prioChoice := overlay.DropdownMenu(c.Key("priority-menu"), prioOpen, overlay.DropdownMenuProps{
+				Items: priorityQuickMenuItems(t.Priority),
+			}, func(trig ui.Element) {
+				trig.Height(20).PaddingX(6).Gap(4).Radius(4).AlignItems(ui.Center).
+					Background(pBg).TextColor(pFg).FontSize(tk.FontSizeSM).
+					Cursor(ui.CursorPointer).Label("切换优先级 " + t.Title)
+				if trig.Hovered() || *prioOpen {
+					trig.Border(1, pHoverBorder)
+				} else {
+					trig.Border(1, ui.Transparent)
+				}
+				trig.Children(func() {
+					ui.Text(c, pLabel).SingleLine()
+					ui.Icon(c, lucide.ChevronDown()).FontSize(10).TextColor(pFg.Alpha(0.75))
+				})
+				if trig.Clicked() || trig.Pressed() || *prioOpen {
+					actionClicked = true
+				}
 			})
+			if prioChoice != "" {
+				actionClicked = true
+				w.SetTaskPriority(t.ID, model.Priority(prioChoice))
+			}
 
 			for _, tag := range t.Tags {
 				display.Tag(c.Key("tag-"+tag), "#"+tag, display.TagProps{
@@ -609,18 +628,35 @@ func renderStepReorderButton(c *ui.Context, tk *theme.Tokens, icon *ui.SVG, a11y
 	return btn.Clicked()
 }
 
-func priorityBadgeSpec(p model.Priority) (string, display.TagColor) {
+func priorityPillSpec(tk *theme.Tokens, p model.Priority) (label string, fg, bg, hoverBorder ui.Color) {
 	switch p {
 	case model.Urgent:
-		return "紧急", display.TagRed
+		return "紧急", tk.RedActive, tk.RedFillTertiary, tk.RedActive.Alpha(0.5)
 	case model.High:
-		return "高", display.TagOrange
+		return "高", tk.OrangeActive, tk.OrangeFillTertiary, tk.OrangeActive.Alpha(0.5)
 	case model.Medium:
-		return "中", display.TagBlue
+		return "中", tk.BlueActive, tk.BlueFillTertiary, tk.BlueActive.Alpha(0.5)
 	case model.Low:
-		return "低", display.TagCyan
+		return "低", tk.CyanActive, tk.CyanFillTertiary, tk.CyanActive.Alpha(0.5)
 	default:
-		return "无优先级", display.TagGray
+		return "无优先级", tk.TextSecondary, tk.FillTertiary, tk.Border
+	}
+}
+
+func priorityQuickMenuItems(current model.Priority) []overlay.MenuItem {
+	extraFor := func(p model.Priority) string {
+		if current == p {
+			return "✓"
+		}
+		return ""
+	}
+	return []overlay.MenuItem{
+		{Key: string(model.Urgent), Label: "紧急", Extra: extraFor(model.Urgent)},
+		{Key: string(model.High), Label: "高", Extra: extraFor(model.High)},
+		{Key: string(model.Medium), Label: "中", Extra: extraFor(model.Medium)},
+		{Key: string(model.Low), Label: "低", Extra: extraFor(model.Low)},
+		{Divider: true},
+		{Key: string(model.NoPriority), Label: "无优先级", Extra: extraFor(model.NoPriority)},
 	}
 }
 

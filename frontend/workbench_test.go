@@ -2857,3 +2857,76 @@ func TestTaskDetailModalPreservesBoardLayoutAndGuardsDismiss(t *testing.T) {
 		t.Fatalf("expected 关闭详情弹窗 to close modal, open=%v selected=%q", wb.detailModalOpen(), wb.selectedTaskID)
 	}
 }
+
+// Clicking the priority pill on a board card opens a quick-switch menu, persists the new priority without opening the detail modal, and updates active board filters.
+func TestCardPriorityBadgeQuickSwitch(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "快捷切换优先级项目"
+	wb.SubmitProjectModal()
+
+	ctx := context.Background()
+	task, err := app.Projects.CreateTask(ctx, wb.activeProjectID, projects.TaskInput{
+		Title:       "优先级切换卡片",
+		Description: "保持正文不变",
+		Status:      model.Done,
+		Priority:    model.NoPriority,
+		Tags:        []string{"UI"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadBoardTasks()
+	tt.Frame()
+
+	// 1. Clicking the priority badge opens the dropdown menu without opening the task detail modal.
+	if err := tt.Click("切换优先级 优先级切换卡片"); err != nil {
+		t.Fatalf("click 切换优先级 优先级切换卡片: %v", err)
+	}
+	tt.Advance(time.Second)
+	if wb.detailModalOpen() || wb.selectedTaskID != "" {
+		t.Fatalf("expected clicking priority badge not to open detail modal, open=%v selected=%q", wb.detailModalOpen(), wb.selectedTaskID)
+	}
+	if err := tt.Click("紧急"); err != nil {
+		t.Fatalf("click 紧急 in priority menu: %v", err)
+	}
+	tt.Advance(time.Second)
+
+	persisted, err := app.Projects.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after priority switch: %v", err)
+	}
+	if persisted.Priority != model.Urgent {
+		t.Fatalf("expected persisted priority %s, got %s", model.Urgent, persisted.Priority)
+	}
+	if persisted.Description != "保持正文不变" || persisted.Status != model.Done || !slices.Equal(persisted.Tags, []string{"UI"}) {
+		t.Fatalf("priority switch mutated unrelated fields: %+v", persisted)
+	}
+
+	// 2. Switching priority while an active priority filter matches the old priority updates filteredTasks immediately.
+	wb.priorityFilter = string(model.Urgent)
+	wb.applyBoardFilters()
+	tt.Frame()
+	if len(wb.filteredTasks) != 1 {
+		t.Fatalf("expected 1 visible task matching Urgent filter, got %d", len(wb.filteredTasks))
+	}
+	if err := tt.Click("切换优先级 优先级切换卡片"); err != nil {
+		t.Fatalf("reopen priority menu: %v", err)
+	}
+	tt.Advance(time.Second)
+	if err := tt.Click("低"); err != nil {
+		t.Fatalf("click 低 in priority menu: %v", err)
+	}
+	tt.Advance(time.Second)
+
+	persisted, err = app.Projects.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after second priority switch: %v", err)
+	}
+	if persisted.Priority != model.Low {
+		t.Fatalf("expected persisted priority %s, got %s", model.Low, persisted.Priority)
+	}
+	if len(wb.filteredTasks) != 0 {
+		t.Fatalf("expected task filtered out of Urgent view after switching to Low, got %d", len(wb.filteredTasks))
+	}
+}

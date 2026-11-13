@@ -1067,6 +1067,42 @@ func (w *Workbench) SaveSelectedTask() error {
 	return nil
 }
 
+// SetTaskPriority updates a task's priority directly from a board card and refreshes board filters in place.
+func (w *Workbench) SetTaskPriority(taskID string, priority model.Priority) {
+	if w.IsRestoring() {
+		return
+	}
+	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再修改优先级"); err != nil {
+		return
+	}
+	idx := slices.IndexFunc(w.boardTasks, func(t model.Task) bool { return t.ID == taskID })
+	if idx < 0 {
+		return
+	}
+	t := w.boardTasks[idx]
+	if t.Priority == priority {
+		return
+	}
+	updated, err := w.app.Projects.UpdateTask(context.Background(), taskID, projects.TaskInput{
+		Title:       t.Title,
+		Description: t.Description,
+		Status:      t.Status,
+		Priority:    priority,
+		Tags:        slices.Clone(t.Tags),
+		Subtasks:    slices.Clone(t.Subtasks),
+		DueDate:     t.DueDate,
+	})
+	if err != nil {
+		w.enqueueErrorToast("更新优先级失败", err)
+		return
+	}
+	w.boardTasks[idx] = updated
+	if w.selectedTaskID == updated.ID && !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
+		w.syncDetailFromTask(updated)
+	}
+	w.rebuildBoardDerived()
+}
+
 // MoveTaskToColumn moves a task to targetStatus at the given unfiltered index (or end of column when index < 0).
 func (w *Workbench) MoveTaskToColumn(taskID string, targetStatus model.Status, unfilteredIndex int) {
 	if w.IsRestoring() {
