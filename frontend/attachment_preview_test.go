@@ -263,7 +263,11 @@ func TestAttachmentPreviewLoadsWhenScrolledIntoView(t *testing.T) {
 	if tt.FramePending() {
 		t.Fatal("offscreen thumbnail must not keep requesting animation frames")
 	}
-	tt.Scroll(1200, 300, 0, 800)
+	modalRect, ok := tt.Find("任务详情弹窗")
+	if !ok {
+		t.Fatal("could not find 任务详情弹窗")
+	}
+	tt.Scroll(modalRect.X+modalRect.W/2, modalRect.Y+modalRect.H/2, 0, 800)
 	tt.Frame()
 	afterRect, found := tt.Find("图片预览 " + att.Name)
 	if !found || afterRect.Y >= 900 {

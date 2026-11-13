@@ -362,7 +362,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	// Context menu for right-click / keyboard menu key
 	menuChoice := overlay.ContextMenu(c, card, overlay.DropdownMenuProps{
 		Items: []overlay.MenuItem{
-			{Key: "open", Label: "打开任务详情", Icon: lucide.PanelRightOpen()},
+			{Key: "open", Label: "打开任务详情", Icon: lucide.SquarePen()},
 			{Divider: true},
 			{Key: "move:planned", Label: "移至 计划", Icon: lucide.CircleDashed(), Disabled: t.Status == model.Planned},
 			{Key: "move:in_progress", Label: "移至 进行中", Icon: lucide.Timer(), Disabled: t.Status == model.InProgress},

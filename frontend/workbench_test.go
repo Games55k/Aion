@@ -444,11 +444,11 @@ func TestTaskDetailMarkdownSubtasksAndAttachments(t *testing.T) {
 		}
 	}
 
-	// Scroll the task detail panel down so attachment action buttons are in view
-	if panelRect, ok := tt.Find("任务详情面板"); ok {
+	// Scroll the task detail modal down so attachment action buttons are in view
+	if panelRect, ok := tt.Find("任务详情弹窗"); ok {
 		tt.Scroll(panelRect.X+panelRect.W/2, panelRect.Y+panelRect.H/2, 0, 320)
 	} else {
-		tt.Scroll(1200, 200, 0, 320)
+		t.Fatal("could not find 任务详情弹窗")
 	}
 
 	// Open, Reveal in Finder, and Export attachment via UI buttons
@@ -2277,17 +2277,24 @@ func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
 	wb.SelectTask(task.ID)
 	tt.Frame()
 
-	// 4. An invalid unsaved task draft blocks Cmd+, from leaving the board.
+	// 4. Cmd+, is ignored while the task detail modal is open, and an invalid unsaved task draft blocks navigation when closed.
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if wb.navPage != NavProjectBoard || !wb.detailModalOpen() {
+		t.Fatalf("expected Cmd+, behind task detail modal to stay on board, got %s", wb.navPage)
+	}
 	wb.editTitle = "   "
 	wb.dirty = true
+	wb.detailExpanded = false
+	tt.Frame()
 	tt.Key(ui.Cmd, ui.KeyComma)
-	if wb.navPage != NavProjectBoard {
-		t.Fatalf("expected Cmd+, with invalid draft to remain on board, got %s", wb.navPage)
+	if wb.navPage != NavProjectBoard || !wb.detailModalOpen() {
+		t.Fatalf("expected Cmd+, with invalid draft to remain on board and reopen detail modal, got %s", wb.navPage)
 	}
 	tt.Frame()
 	if err := tt.Click("放弃修改"); err != nil {
 		t.Fatalf("click 放弃修改: %v", err)
 	}
+	wb.ClearSelectedTask()
 	tt.Frame()
 
 	// 5. Cmd+, still navigates to Settings when a text input on the board has focus.
@@ -2778,5 +2785,75 @@ func TestTaskCardQuickActionsRevealOnHoverOrSelection(t *testing.T) {
 	tt.Frame()
 	if _, ok := tt.Find("移至进行中 卡片甲"); !ok {
 		t.Fatal("expected quick-move buttons visible while card is selected")
+	}
+}
+
+// Opening task detail displays a modal dialog over the board without shifting column layout, and blocks Escape/close while an invalid draft exists.
+func TestTaskDetailModalPreservesBoardLayoutAndGuardsDismiss(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "弹窗详情项目"
+	wb.SubmitProjectModal()
+
+	task, err := wb.QuickCreateTask(model.Planned, "弹窗测试任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	plannedBefore, ok := tt.Find("看板列 计划")
+	if !ok {
+		t.Fatal("could not find 看板列 计划 before opening modal")
+	}
+	doneBefore, ok := tt.Find("看板列 已完成")
+	if !ok {
+		t.Fatal("could not find 看板列 已完成 before opening modal")
+	}
+
+	// 1. Clicking the task card opens the centered modal dialog without changing board column widths or positions.
+	if err := tt.Click("任务卡片 弹窗测试任务"); err != nil {
+		t.Fatalf("click task card: %v", err)
+	}
+	if _, ok := tt.Find("任务详情弹窗"); !ok {
+		t.Fatal("expected 任务详情弹窗 to be rendered")
+	}
+	plannedAfter, ok := tt.Find("看板列 计划")
+	if !ok || plannedAfter != plannedBefore {
+		t.Fatalf("expected 看板列 计划 layout unchanged: before=%+v after=%+v", plannedBefore, plannedAfter)
+	}
+	doneAfter, ok := tt.Find("看板列 已完成")
+	if !ok || doneAfter != doneBefore {
+		t.Fatalf("expected 看板列 已完成 layout unchanged: before=%+v after=%+v", doneBefore, doneAfter)
+	}
+
+	// 2. Pressing Escape while title is invalid must keep the modal open and preserve the draft.
+	wb.editTitle = "   "
+	wb.editDescription = "不可丢失的草稿"
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	if !wb.detailModalOpen() || wb.selectedTaskID != task.ID || wb.editDescription != "不可丢失的草稿" {
+		t.Fatalf("expected Escape with invalid draft to keep modal open and preserve draft, open=%v selected=%q", wb.detailModalOpen(), wb.selectedTaskID)
+	}
+
+	// 3. After fixing or discarding the draft, Escape closes the modal cleanly.
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatalf("click 放弃修改: %v", err)
+	}
+	tt.Key(0, ui.KeyEscape)
+	if wb.detailModalOpen() || wb.selectedTaskID != "" {
+		t.Fatalf("expected Escape to close valid task detail modal, open=%v selected=%q", wb.detailModalOpen(), wb.selectedTaskID)
+	}
+	if _, ok := tt.Find("任务详情弹窗"); ok {
+		t.Fatal("expected 任务详情弹窗 removed after Escape")
+	}
+
+	// 4. Reopening and clicking the header close button closes the modal cleanly.
+	wb.SelectTask(task.ID)
+	tt.Frame()
+	if err := tt.Click("关闭详情弹窗"); err != nil {
+		t.Fatalf("click 关闭详情弹窗: %v", err)
+	}
+	if wb.detailModalOpen() || wb.selectedTaskID != "" {
+		t.Fatalf("expected 关闭详情弹窗 to close modal, open=%v selected=%q", wb.detailModalOpen(), wb.selectedTaskID)
 	}
 }

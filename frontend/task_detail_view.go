@@ -35,234 +35,248 @@ var markdownTools = []struct {
 	{Key: "link", Label: "链接", Snippet: "[链接文字](https://example.com)"},
 }
 
-func (w *Workbench) renderTaskDetailPanel(c *ui.Context, tk *theme.Tokens) {
-	if w.detailTask == nil {
+func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
+	open := w.detailModalOpen()
+	if !open {
 		return
 	}
 	t := *w.detailTask
 
-	panelRoot := ui.Column(c).Fill().Background(tk.BgContainer).BorderWidth(0, 0, 0, 1).BorderColor(tk.BorderSecondary).
-		Label("任务详情面板")
+	var panelDismissed bool
+	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
+		backdrop.Padding(32, 24).Background(tk.BgContainer.Alpha(0.6))
+		panel.Width(720).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
+			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
+			Label("任务详情弹窗")
+		tk.Elevate(panel, theme.BoxShadow)
 
-	// Allow dropping files anywhere on the task detail panel or its attachment zone
-	if dropped := panelRoot.DroppedFiles(); len(dropped) > 0 {
-		w.ImportAttachmentsToSelectedTask(dropped)
-	}
-
-	panelRoot.Children(func() {
-		// 1. Top Header Bar: Save status + Delete + Close
-		ui.Row(c).Padding(12, 16).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			// Save status indicator
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-				switch w.saveState {
-				case "validation_error":
-					ui.Icon(c, lucide.TriangleAlert()).FontSize(14).TextColor(tk.Warning)
-					ui.Text(c, w.saveErr).FontSize(12).TextColor(tk.Warning).SingleLine()
-					if action.Button(c, "放弃修改", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
-					}).Clicked() {
-						w.DiscardSelectedTaskDraft()
-					}
-				case "error":
-					ui.Icon(c, lucide.CircleX()).FontSize(14).TextColor(tk.Error)
-					ui.Text(c, "保存失败: "+w.saveErr).FontSize(12).TextColor(tk.Error).SingleLine()
-					if action.Button(c, "重试保存", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
-					}).Clicked() {
-						_ = w.SaveSelectedTask()
-					}
-					if action.Button(c, "放弃修改", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
-					}).Clicked() {
-						w.DiscardSelectedTaskDraft()
-					}
-				default:
-					ui.Icon(c, lucide.CircleCheck()).FontSize(14).TextColor(tk.Success)
-					saveText := "已自动保存"
-					if !w.lastSavedAt.IsZero() {
-						saveText = "已自动保存 · " + w.lastSavedAt.Local().Format("15:04:05")
-					}
-					ui.Text(c, saveText).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-				}
-			})
-
-			// Delete & Close Buttons
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if action.Button(c, "移入回收站", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
-					Danger:  true,
-				}).Label("将任务移入回收站").Clicked() {
-					w.SoftDeleteTask(t.ID)
-					return
-				}
-				if action.ActionIcon(c, lucide.X(), action.ActionIconProps{
-					Size:  theme.Small,
-					Title: "关闭详情面板",
-				}).Clicked() {
-					w.ClearSelectedTask()
-				}
-			})
-		})
-		if w.detailTask == nil {
-			return
+		if panel.Dismissed() {
+			panelDismissed = true
 		}
 
-		// 2. Scrollable Detail Body
-		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Padding(16, 18, 24, 18).Gap(18).AlignSelf(ui.Stretch).Children(func() {
-				// Background Operation Banner
-				if w.IsBusy() {
-					ui.Row(c.Key("detail-busy-banner")).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
-						Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
-						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Text(c, w.BusyLabel()).FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
-						if action.Button(c, "取消操作", action.ButtonProps{
+		// Allow dropping files anywhere on the task detail modal or its attachment zone
+		if dropped := panel.DroppedFiles(); len(dropped) > 0 {
+			w.ImportAttachmentsToSelectedTask(dropped)
+		}
+
+		panel.Children(func() {
+			// 1. Top Header Bar: Save status + Delete + Close
+			ui.Row(c).Padding(14, 18).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+				AlignSelf(ui.Stretch).Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+				// Save status indicator
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+					switch w.saveState {
+					case "validation_error":
+						ui.Icon(c, lucide.TriangleAlert()).FontSize(14).TextColor(tk.Warning)
+						ui.Text(c, w.saveErr).FontSize(12).TextColor(tk.Warning).SingleLine()
+						if action.Button(c, "放弃修改", action.ButtonProps{
 							Variant: action.Default,
 							Size:    theme.Small,
 						}).Clicked() {
-							w.CancelBusyTask()
+							w.DiscardSelectedTaskDraft()
 						}
-					})
-				}
-
-				// Validation Alert Banner if title is empty
-				if w.saveState == "validation_error" {
-					feedback.Alert(c.Key("detail-validation-alert"), "任务标题不能为空，请输入有效标题以完成自动保存，或点击顶部“放弃修改”恢复原内容", feedback.AlertProps{
-						Type:    feedback.Warning,
-						Variant: feedback.Soft,
-					})
-				}
-
-				// Section A: Task Title
-				ui.Column(c.Key("detail-sec-title")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "任务标题").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
-					beforeTitle := w.editTitle
-					field.Input(c.Key("detail-title-"+t.ID), &w.editTitle, field.InputProps{
-						Placeholder: "输入任务标题（必填）",
-						Size:        theme.Large,
-						Invalid:     strings.TrimSpace(w.editTitle) == "",
-					}).Label("任务详情标题")
-					if w.editTitle != beforeTitle {
-						w.dirty = true
-						_ = w.SaveSelectedTask()
+					case "error":
+						ui.Icon(c, lucide.CircleX()).FontSize(14).TextColor(tk.Error)
+						ui.Text(c, "保存失败: "+w.saveErr).FontSize(12).TextColor(tk.Error).SingleLine()
+						if action.Button(c, "重试保存", action.ButtonProps{
+							Variant: action.Default,
+							Size:    theme.Small,
+						}).Clicked() {
+							_ = w.SaveSelectedTask()
+						}
+						if action.Button(c, "放弃修改", action.ButtonProps{
+							Variant: action.Default,
+							Size:    theme.Small,
+						}).Clicked() {
+							w.DiscardSelectedTaskDraft()
+						}
+					default:
+						ui.Icon(c, lucide.CircleCheck()).FontSize(14).TextColor(tk.Success)
+						saveText := "已自动保存"
+						if !w.lastSavedAt.IsZero() {
+							saveText = "已自动保存 · " + w.lastSavedAt.Local().Format("15:04:05")
+						}
+						ui.Text(c, saveText).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 					}
 				})
 
-				// Section B: Status, Priority, Due Date
-				ui.Row(c.Key("detail-sec-meta")).Gap(10).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
-					// Status
-					ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
-						ui.Text(c, "状态").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
-						beforeStatus := w.editStatus
-						field.Select(c.Key("detail-status-"+t.ID), &w.editStatus, field.SelectProps{
-							Size:    theme.Small,
-							Options: taskStatusOptions,
-						}).Label("任务详情状态")
-						if w.editStatus != beforeStatus {
-							w.dirty = true
-							_ = w.SaveSelectedTask()
-						}
-					})
-
-					// Priority
-					ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
-						ui.Text(c, "优先级").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
-						beforePriority := w.editPriority
-						field.Select(c.Key("detail-priority-"+t.ID), &w.editPriority, field.SelectProps{
-							Size:    theme.Small,
-							Options: taskPriorityOptions,
-						}).Label("任务详情优先级")
-						if w.editPriority != beforePriority {
-							w.dirty = true
-							_ = w.SaveSelectedTask()
-						}
-					})
-
-					// Due Date
-					ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
-						ui.Text(c, "截止日期").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
-						beforeDue := w.editDueDate
-						field.DatePicker(c.Key("detail-due-"+t.ID), &w.editDueDate, field.DatePickerProps{
-							Placeholder: "未设置截止日期",
-							AllowClear:  true,
-							Size:        theme.Small,
-						}).Label("任务详情截止日期")
-						if !w.editDueDate.Equal(beforeDue) {
-							w.dirty = true
-							_ = w.SaveSelectedTask()
-						}
-					})
+				// Delete & Close Buttons
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
+					if action.Button(c, "移入回收站", action.ButtonProps{
+						Variant: action.Default,
+						Size:    theme.Small,
+						Danger:  true,
+					}).Label("将任务移入回收站").Clicked() {
+						w.SoftDeleteTask(t.ID)
+						return
+					}
+					if action.ActionIcon(c, lucide.X(), action.ActionIconProps{
+						Size:  theme.Small,
+						Title: "关闭详情弹窗",
+					}).Clicked() {
+						w.ClearSelectedTask()
+					}
 				})
+			})
+			if w.detailTask == nil {
+				return
+			}
 
-				// Section C: Tags
-				ui.Column(c.Key("detail-sec-tags")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "分类标签").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
-					ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-						for i, tag := range w.editTags {
-							idx := i
-							tagVal := tag
-							ui.Row(c.Key("edit-tag-"+tagVal)).Gap(4).Padding(2, 8).Radius(tk.BorderRadiusSM).
-								Background(tk.FillTertiary).AlignItems(ui.Center).Children(func() {
-								ui.Text(c, "#"+tagVal).FontSize(12).TextColor(tk.Text).SingleLine()
-								rmBtn := ui.ButtonBase(c).Size(14, 14).Radius(7).Center().
-									Cursor(ui.CursorPointer).TextColor(tk.TextTertiary).
-									Label("移除标签 " + tagVal)
-								rmBtn.Children(func() { ui.Icon(c, lucide.X()).FontSize(11) })
-								if rmBtn.Clicked() {
-									w.editTags = slices.Delete(w.editTags, idx, idx+1)
-									_ = w.SaveSelectedTask()
-								}
-							})
+			// 2. Scrollable Detail Body
+			ui.Scroll(c.Key("detail-scroll-" + t.ID)).Shrink(1).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Padding(16, 18, 20, 18).Gap(18).AlignSelf(ui.Stretch).Children(func() {
+					// Background Operation Banner
+					if w.IsBusy() {
+						ui.Row(c.Key("detail-busy-banner")).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
+							Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
+							AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+							ui.Text(c, w.BusyLabel()).FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
+							if action.Button(c, "取消操作", action.ButtonProps{
+								Variant: action.Default,
+								Size:    theme.Small,
+							}).Clicked() {
+								w.CancelBusyTask()
+							}
+						})
+					}
+
+					// Validation Alert Banner if title is empty
+					if w.saveState == "validation_error" {
+						feedback.Alert(c.Key("detail-validation-alert"), "任务标题不能为空，请输入有效标题以完成自动保存，或点击顶部“放弃修改”恢复原内容", feedback.AlertProps{
+							Type:    feedback.Warning,
+							Variant: feedback.Soft,
+						})
+					}
+
+					// Section A: Task Title
+					ui.Column(c.Key("detail-sec-title")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "任务标题").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
+						beforeTitle := w.editTitle
+						field.Input(c.Key("detail-title-"+t.ID), &w.editTitle, field.InputProps{
+							Placeholder: "输入任务标题（必填）",
+							Size:        theme.Large,
+							Invalid:     strings.TrimSpace(w.editTitle) == "",
+						}).Label("任务详情标题")
+						if w.editTitle != beforeTitle {
+							w.dirty = true
+							_ = w.SaveSelectedTask()
 						}
+					})
 
-						// Add Tag Input + Button
-						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-							ui.Box(c).Width(150).Children(func() {
-								inp := field.Input(c.Key("new-tag-"+t.ID), &w.newTagInput, field.InputProps{
-									Placeholder: "+ 添加新标签...",
-									Size:        theme.Small,
-								}).Label("添加标签输入框")
-								if inp.Submitted() {
-									w.addTagFromInput()
-								}
-							})
-							if strings.TrimSpace(w.newTagInput) != "" {
-								if action.Button(c, "添加标签", action.ButtonProps{
-									Variant: action.Default,
-									Size:    theme.Small,
-								}).Clicked() {
-									w.addTagFromInput()
-								}
+					// Section B: Status, Priority, Due Date
+					ui.Row(c.Key("detail-sec-meta")).Gap(10).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+						// Status
+						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+							ui.Text(c, "状态").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
+							beforeStatus := w.editStatus
+							field.Select(c.Key("detail-status-"+t.ID), &w.editStatus, field.SelectProps{
+								Size:    theme.Small,
+								Options: taskStatusOptions,
+							}).Label("任务详情状态")
+							if w.editStatus != beforeStatus {
+								w.dirty = true
+								_ = w.SaveSelectedTask()
+							}
+						})
+
+						// Priority
+						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+							ui.Text(c, "优先级").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
+							beforePriority := w.editPriority
+							field.Select(c.Key("detail-priority-"+t.ID), &w.editPriority, field.SelectProps{
+								Size:    theme.Small,
+								Options: taskPriorityOptions,
+							}).Label("任务详情优先级")
+							if w.editPriority != beforePriority {
+								w.dirty = true
+								_ = w.SaveSelectedTask()
+							}
+						})
+
+						// Due Date
+						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
+							ui.Text(c, "截止日期").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
+							beforeDue := w.editDueDate
+							field.DatePicker(c.Key("detail-due-"+t.ID), &w.editDueDate, field.DatePickerProps{
+								Placeholder: "未设置截止日期",
+								AllowClear:  true,
+								Size:        theme.Small,
+							}).Label("任务详情截止日期")
+							if !w.editDueDate.Equal(beforeDue) {
+								w.dirty = true
+								_ = w.SaveSelectedTask()
 							}
 						})
 					})
-				})
 
-				// Section D: Markdown Description Editor & Preview
-				w.renderMarkdownSection(c, tk, t)
+					// Section C: Tags
+					ui.Column(c.Key("detail-sec-tags")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "分类标签").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
+						ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+							for i, tag := range w.editTags {
+								idx := i
+								tagVal := tag
+								ui.Row(c.Key("edit-tag-"+tagVal)).Gap(4).Padding(2, 8).Radius(tk.BorderRadiusSM).
+									Background(tk.FillTertiary).AlignItems(ui.Center).Children(func() {
+									ui.Text(c, "#"+tagVal).FontSize(12).TextColor(tk.Text).SingleLine()
+									rmBtn := ui.ButtonBase(c).Size(14, 14).Radius(7).Center().
+										Cursor(ui.CursorPointer).TextColor(tk.TextTertiary).
+										Label("移除标签 " + tagVal)
+									rmBtn.Children(func() { ui.Icon(c, lucide.X()).FontSize(11) })
+									if rmBtn.Clicked() {
+										w.editTags = slices.Delete(w.editTags, idx, idx+1)
+										_ = w.SaveSelectedTask()
+									}
+								})
+							}
 
-				// Section E: Subtask List
-				w.renderSubtasksSection(c, tk, t)
+							// Add Tag Input + Button
+							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+								ui.Box(c).Width(150).Children(func() {
+									inp := field.Input(c.Key("new-tag-"+t.ID), &w.newTagInput, field.InputProps{
+										Placeholder: "+ 添加新标签...",
+										Size:        theme.Small,
+									}).Label("添加标签输入框")
+									if inp.Submitted() {
+										w.addTagFromInput()
+									}
+								})
+								if strings.TrimSpace(w.newTagInput) != "" {
+									if action.Button(c, "添加标签", action.ButtonProps{
+										Variant: action.Default,
+										Size:    theme.Small,
+									}).Clicked() {
+										w.addTagFromInput()
+									}
+								}
+							})
+						})
+					})
 
-				// Section F: Local Attachments
-				w.renderAttachmentsSection(c, tk, t)
+					// Section D: Markdown Description Editor & Preview
+					w.renderMarkdownSection(c, tk, t)
 
-				// Section G: Metadata Timestamps
-				ui.Row(c.Key("detail-sec-timestamps")).Padding(12, 0, 0, 0).Justify(ui.SpaceBetween).AlignItems(ui.Center).
-					AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
-					ui.Text(c, "创建于 "+t.CreatedAt.Local().Format("2006-01-02 15:04:05")).
-						FontSize(11).TextColor(tk.TextTertiary).SingleLine()
-					ui.Text(c, "更新于 "+t.UpdatedAt.Local().Format("2006-01-02 15:04:05")).
-						FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+					// Section E: Subtask List
+					w.renderSubtasksSection(c, tk, t)
+
+					// Section F: Local Attachments
+					w.renderAttachmentsSection(c, tk, t)
+
+					// Section G: Metadata Timestamps
+					ui.Row(c.Key("detail-sec-timestamps")).Padding(12, 0, 0, 0).Justify(ui.SpaceBetween).AlignItems(ui.Center).
+						AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
+						ui.Text(c, "创建于 "+t.CreatedAt.Local().Format("2006-01-02 15:04:05")).
+							FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+						ui.Text(c, "更新于 "+t.UpdatedAt.Local().Format("2006-01-02 15:04:05")).
+							FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+					})
 				})
 			})
 		})
 	})
+	if panelDismissed {
+		w.ClearSelectedTask()
+	}
 }
 
 func (w *Workbench) addTagFromInput() {

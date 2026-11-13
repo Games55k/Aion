@@ -20,7 +20,6 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/lobehub/lobe-mygo/pkg/feedback"
 	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/layout"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
@@ -111,7 +110,6 @@ type Workbench struct {
 	// Layout state
 	sideWidth      float32
 	sideExpanded   bool
-	detailWidth    float32
 	detailExpanded bool
 
 	// Navigation & Module state
@@ -220,7 +218,6 @@ func New(app *backend.App, host Host) *Workbench {
 		host:              host,
 		sideWidth:         240,
 		sideExpanded:      true,
-		detailWidth:       440,
 		detailExpanded:    false,
 		activeModule:      "projects",
 		navPage:           NavAllProjects,
@@ -701,9 +698,14 @@ func (w *Workbench) NavigateTo(page NavPage) {
 	}
 }
 
+func (w *Workbench) detailModalOpen() bool {
+	return w.navPage == NavProjectBoard && w.detailExpanded && w.selectedTaskID != "" && w.detailTask != nil
+}
+
 func (w *Workbench) hasOpenModal() bool {
 	return w.projectModalOpen ||
 		w.taskModalOpen ||
+		w.detailModalOpen() ||
 		w.trashParentErrModalOpen ||
 		w.confirmPermDeleteOpen ||
 		w.confirmClearTrashOpen ||
@@ -882,7 +884,7 @@ func (w *Workbench) UnfilteredTasksInColumn(status model.Status) []model.Task {
 	return out
 }
 
-// SelectTask opens the task in the right-side detail panel after flushing any pending edits.
+// SelectTask opens the task detail modal after flushing any pending edits.
 func (w *Workbench) SelectTask(taskID string) {
 	if w.IsRestoring() {
 		return
@@ -962,8 +964,8 @@ func (w *Workbench) DiscardSelectedTaskDraft() {
 	}
 }
 
-// ClearSelectedTask closes the task detail panel after flushing any pending edits.
-// If flushing fails, the panel remains open and the unsaved draft is preserved.
+// ClearSelectedTask closes the task detail modal after flushing any pending edits.
+// If flushing fails, the modal remains open and the unsaved draft is preserved.
 func (w *Workbench) ClearSelectedTask() {
 	if w.IsRestoring() {
 		return
@@ -1005,7 +1007,7 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 	w.saveErr = ""
 }
 
-// SaveSelectedTask persists the current detail panel fields to SQLite via UpdateTask.
+// SaveSelectedTask persists the current task detail fields to SQLite via UpdateTask.
 func (w *Workbench) SaveSelectedTask() error {
 	if w.IsRestoring() || w.detailTaskEpoch != w.currentDataEpoch() {
 		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
@@ -2427,26 +2429,12 @@ func (w *Workbench) View(c *ui.Context) {
 				w.renderProjectsView(c, tk, false)
 			}
 		})
-
-		// Right Resizable Task Detail Panel (shown on Project Board when a task is selected)
-		if w.navPage == NavProjectBoard && w.selectedTaskID != "" && w.detailTask != nil {
-			layout.DraggablePanel(c, &w.detailWidth, &w.detailExpanded, layout.DraggablePanelProps{
-				Placement:         layout.Right,
-				MinSize:           380,
-				MaxSize:           720,
-				CollapseThreshold: 220,
-			}, func() {
-				w.renderTaskDetailPanel(c, tk)
-			})
-			if !w.detailExpanded {
-				w.ClearSelectedTask()
-			}
-		}
 	})
 
 	// Global Modals
 	w.renderProjectModal(c, tk)
 	w.renderTaskCreateModal(c, tk)
+	w.renderTaskDetailModal(c, tk)
 	w.renderTrashModals(c, tk)
 	w.renderSettingsModals(c, tk)
 
