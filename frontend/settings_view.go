@@ -340,15 +340,10 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
 	info := w.UpdateCapability()
 	canCheck, canOpenURL := w.updateActionsReady()
 	displayVersion := strings.TrimPrefix(strings.TrimSpace(info.Version), "v")
-	versionBadge := "开发版本"
-	versionTagColor := display.TagOrange
 	versionLine := "当前版本: 开发版本（未打包）"
 	if displayVersion != "" {
-		versionBadge = "v" + displayVersion
-		versionTagColor = display.TagBlue
 		versionLine = "当前版本: v" + displayVersion
 		if info.IsDev {
-			versionTagColor = display.TagOrange
 			versionLine += "（开发构建）"
 		}
 	}
@@ -362,11 +357,6 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, lucide.RefreshCw()).FontSize(18).TextColor(tk.Primary)
 			ui.Text(c, "应用版本与更新").FontSize(16).FontWeight(600).TextColor(tk.Text)
-			display.Tag(c, versionBadge, display.TagProps{
-				Size:    theme.Small,
-				Variant: display.TagFilled,
-				Color:   versionTagColor,
-			})
 			if info.AvailableVersion != "" {
 				display.Tag(c, "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), display.TagProps{
 					Size:    theme.Small,
@@ -375,8 +365,6 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *theme.Tokens) {
 				})
 			}
 		})
-		ui.Text(c, "从 GitHub Releases 检查并获取新版本；仅在手动检查或下载更新时连接网络。").
-			FontSize(13).TextColor(tk.TextSecondary)
 
 		ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
 			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
