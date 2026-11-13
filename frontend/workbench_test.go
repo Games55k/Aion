@@ -2572,3 +2572,98 @@ func TestQuickMoveMovesTaskToTopOfTargetColumn(t *testing.T) {
 		t.Fatalf("expected target at top of Done via context menu, got %+v", done)
 	}
 }
+
+// Dragging a card inserts cleanly into the top, middle, or bottom blank gap of a column without shifting card or column bounds during hover.
+func TestBoardDragInsertsIntoTopMiddleBottomGapsWithoutLayoutShift(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "间隙插入拖拽"
+	wb.SubmitProjectModal()
+
+	ip1, err := wb.QuickCreateTask(model.InProgress, "进行中卡片一")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip2, err := wb.QuickCreateTask(model.InProgress, "进行中卡片二")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1, err := wb.QuickCreateTask(model.Done, "完成卡片一")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, err := wb.QuickCreateTask(model.Done, "完成卡片二")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.ClearSelectedTask()
+	tt.Frame()
+
+	mustFind := func(label string) ui.Rect {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("missing %q", label)
+		}
+		return r
+	}
+	dragTo := func(fromX, fromY, toX, toY float32, whileOver func()) {
+		tt.Press(fromX, fromY)
+		for step := 1; step <= 4; step++ {
+			f := float32(step) / 4
+			tt.Move(fromX+(toX-fromX)*f, fromY+(toY-fromY)*f)
+		}
+		if whileOver != nil {
+			whileOver()
+		}
+		tt.Release(toX, toY)
+	}
+
+	// 1. Drag ip1 into the exact gap between d1 and d2; bounds must not shift during drag-over.
+	ip1Rect := mustFind("任务卡片 进行中卡片一")
+	d1RectBefore := mustFind("任务卡片 完成卡片一")
+	d2RectBefore := mustFind("任务卡片 完成卡片二")
+	doneColBefore := mustFind("看板列 已完成")
+	gapX := d1RectBefore.X + d1RectBefore.W/2
+	gapMidY := (d1RectBefore.Y + d1RectBefore.H + d2RectBefore.Y) / 2
+
+	dragTo(ip1Rect.X+ip1Rect.W/2, ip1Rect.Y+16, gapX, gapMidY, func() {
+		d1During := mustFind("任务卡片 完成卡片一")
+		d2During := mustFind("任务卡片 完成卡片二")
+		doneColDuring := mustFind("看板列 已完成")
+		if d1During != d1RectBefore || d2During != d2RectBefore || doneColDuring != doneColBefore {
+			t.Fatalf("expected zero layout shift while dragging over gap, before=(%v,%v,%v) during=(%v,%v,%v)",
+				d1RectBefore, d2RectBefore, doneColBefore, d1During, d2During, doneColDuring)
+		}
+	})
+	done := wb.TasksInColumn(model.Done)
+	if len(done) != 3 || done[0].ID != d1.ID || done[1].ID != ip1.ID || done[2].ID != d2.ID {
+		t.Fatalf("expected middle gap insertion [%s %s %s], got %+v", d1.ID, ip1.ID, d2.ID, done)
+	}
+
+	// 2. Drag ip2 into the top blank space above d1.
+	ip2Rect := mustFind("任务卡片 进行中卡片二")
+	d1Rect := mustFind("任务卡片 完成卡片一")
+	dragTo(ip2Rect.X+ip2Rect.W/2, ip2Rect.Y+16, d1Rect.X+d1Rect.W/2, d1Rect.Y-5, nil)
+	done = wb.TasksInColumn(model.Done)
+	if len(done) != 4 || done[0].ID != ip2.ID || done[1].ID != d1.ID || done[2].ID != ip1.ID || done[3].ID != d2.ID {
+		t.Fatalf("expected top gap insertion [%s %s %s %s], got %+v", ip2.ID, d1.ID, ip1.ID, d2.ID, done)
+	}
+
+	// 3. Same-column drag: drag top card (ip2) into the empty space below the last card (d2).
+	topRect := mustFind("任务卡片 进行中卡片二")
+	lastRect := mustFind("任务卡片 完成卡片二")
+	dragTo(topRect.X+topRect.W/2, topRect.Y+16, lastRect.X+lastRect.W/2, lastRect.Y+lastRect.H+40, nil)
+	done = wb.TasksInColumn(model.Done)
+	if len(done) != 4 || done[0].ID != d1.ID || done[1].ID != ip1.ID || done[2].ID != d2.ID || done[3].ID != ip2.ID {
+		t.Fatalf("expected bottom space insertion [%s %s %s %s], got %+v", d1.ID, ip1.ID, d2.ID, ip2.ID, done)
+	}
+
+	// 4. Same-column drag: drag bottom card (ip2) back to the top gap above d1.
+	bottomRect := mustFind("任务卡片 进行中卡片二")
+	firstRect := mustFind("任务卡片 完成卡片一")
+	dragTo(bottomRect.X+bottomRect.W/2, bottomRect.Y+16, firstRect.X+firstRect.W/2, firstRect.Y-5, nil)
+	done = wb.TasksInColumn(model.Done)
+	if len(done) != 4 || done[0].ID != ip2.ID || done[1].ID != d1.ID || done[2].ID != ip1.ID || done[3].ID != d2.ID {
+		t.Fatalf("expected same-column top insertion [%s %s %s %s], got %+v", ip2.ID, d1.ID, ip1.ID, d2.ID, done)
+	}
+}

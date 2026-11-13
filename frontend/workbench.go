@@ -1155,6 +1155,81 @@ func (w *Workbench) MoveOrReorderTaskOnto(draggedTaskID, targetTaskID string, pl
 	w.MoveTaskToColumn(draggedTaskID, targetTask.Status, destIdx)
 }
 
+// MoveOrReorderTaskToSlot moves draggedTaskID to the insertion gap visibleSlot
+// (0..len(visible)) within targetStatus, preserving hidden tasks when filtered.
+func (w *Workbench) MoveOrReorderTaskToSlot(draggedTaskID string, targetStatus model.Status, visibleSlot int) {
+	if w.IsRestoring() || draggedTaskID == "" || !targetStatus.Valid() {
+		return
+	}
+	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再移动任务"); err != nil {
+		return
+	}
+	var draggedTask *model.Task
+	for i := range w.boardTasks {
+		if w.boardTasks[i].ID == draggedTaskID {
+			draggedTask = &w.boardTasks[i]
+			break
+		}
+	}
+	if draggedTask == nil {
+		return
+	}
+
+	visible := w.TasksInColumn(targetStatus)
+	if visibleSlot < 0 {
+		visibleSlot = 0
+	} else if visibleSlot > len(visible) {
+		visibleSlot = len(visible)
+	}
+
+	if draggedTask.Status == targetStatus {
+		draggedIdx := slices.IndexFunc(visible, func(t model.Task) bool { return t.ID == draggedTaskID })
+		if draggedIdx < 0 || visibleSlot == draggedIdx || visibleSlot == draggedIdx+1 {
+			return
+		}
+		ids := make([]string, 0, len(visible))
+		for _, t := range visible {
+			if t.ID != draggedTaskID {
+				ids = append(ids, t.ID)
+			}
+		}
+		insertIdx := visibleSlot
+		if visibleSlot > draggedIdx {
+			insertIdx--
+		}
+		ids = slices.Insert(ids, insertIdx, draggedTaskID)
+		ctx := context.Background()
+		if err := w.app.Projects.ReorderTasks(ctx, w.activeProjectID, targetStatus, ids); err != nil {
+			w.enqueueErrorToast("排序失败", err)
+			return
+		}
+		w.ReloadBoardTasks()
+		return
+	}
+
+	destTasks := w.UnfilteredTasksInColumn(targetStatus)
+	destIdx := 0
+	switch {
+	case len(visible) == 0:
+		destIdx = 0
+	case visibleSlot == 0:
+		if idx := slices.IndexFunc(destTasks, func(t model.Task) bool { return t.ID == visible[0].ID }); idx >= 0 {
+			destIdx = idx
+		}
+	case visibleSlot >= len(visible):
+		if idx := slices.IndexFunc(destTasks, func(t model.Task) bool { return t.ID == visible[len(visible)-1].ID }); idx >= 0 {
+			destIdx = idx + 1
+		} else {
+			destIdx = len(destTasks)
+		}
+	default:
+		if idx := slices.IndexFunc(destTasks, func(t model.Task) bool { return t.ID == visible[visibleSlot].ID }); idx >= 0 {
+			destIdx = idx
+		}
+	}
+	w.MoveTaskToColumn(draggedTaskID, targetStatus, destIdx)
+}
+
 // StepTaskInColumn moves a task up (delta = -1) or down (delta = +1) within its visible column.
 func (w *Workbench) StepTaskInColumn(taskID string, status model.Status, delta int) {
 	if w.IsRestoring() {

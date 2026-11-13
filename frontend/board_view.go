@@ -226,12 +226,12 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 		Radius(tk.BorderRadiusLG).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
 		Label("看板列 " + col.Title)
 
-	// Highlight column when a task card from another column is dragged over it
+	// Header/outer column drop fallback from another column; keep border width fixed at 1px to avoid layout reflow during drag.
 	if payload, over := ui.DragOver[DragTaskPayload](colBox); over && payload.FromStatus != col.Status {
-		colBox.Border(2, tk.Primary).Background(tk.PrimaryFillQuaternary)
+		colBox.Border(1, col.Dot.Alpha(0.65))
 	}
 	if payload, dropped := ui.Drop[DragTaskPayload](colBox); dropped && payload.FromStatus != col.Status {
-		w.MoveTaskToColumn(payload.TaskID, col.Status, -1)
+		w.MoveOrReorderTaskToSlot(payload.TaskID, col.Status, 0)
 	}
 
 	colBox.Children(func() {
@@ -257,9 +257,11 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 			}
 		})
 
-		// Column Task Cards List
-		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Padding(10).Gap(10).AlignSelf(ui.Stretch).Children(func() {
+		// Column Task Cards List (single drop target per column so gap/card transitions never flicker or reflow)
+		scrollBox := ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch)
+		cardEls := make([]ui.Element, len(tasks))
+		scrollBox.Children(func() {
+			ui.Column(c).Padding(12, 10).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 				if len(tasks) == 0 {
 					emptyHint := "暂无" + col.Title + "任务"
 					if w.HasBoardFilters() {
@@ -271,11 +273,40 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 					})
 				} else {
 					for idx, task := range tasks {
-						w.renderTaskCard(c.Key(task.ID), tk, task, idx, len(tasks))
+						cardEls[idx] = w.renderTaskCard(c.Key(task.ID), tk, task, idx, len(tasks))
 					}
 				}
 			})
 		})
+
+		overPayload, isOver := ui.DragOver[DragTaskPayload](scrollBox)
+		dropPayload, isDropped := ui.Drop[DragTaskPayload](scrollBox)
+		if isOver || isDropped {
+			_, py, _ := scrollBox.PointerPosition()
+			sb := scrollBox.Bounds()
+			insertSlot := boardInsertionSlot(cardEls, sb.Y+py)
+
+			if isDropped {
+				w.MoveOrReorderTaskToSlot(dropPayload.TaskID, col.Status, insertSlot)
+			} else if isOver {
+				showIndicator := true
+				if overPayload.FromStatus == col.Status {
+					draggedIdx := slices.IndexFunc(tasks, func(t model.Task) bool { return t.ID == overPayload.TaskID })
+					if draggedIdx >= 0 && (insertSlot == draggedIdx || insertSlot == draggedIdx+1) {
+						showIndicator = false
+					}
+				} else {
+					colBox.Border(1, col.Dot.Alpha(0.65))
+				}
+				if showIndicator {
+					accent := col.Dot
+					slotRadius := tk.BorderRadius
+					scrollBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
+						paintBoardInsertionIndicator(p, accent, slotRadius, r, cardEls, insertSlot)
+					})
+				}
+			}
+		}
 
 		// Column Bottom Quick Add Input
 		ui.Row(c).Padding(8, 10).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).
@@ -309,7 +340,7 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 	})
 }
 
-func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task, indexInCol, colCount int) {
+func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task, indexInCol, colCount int) ui.Element {
 	selected := w.selectedTaskID == t.ID
 
 	card := ui.Column(c).Padding(12).Gap(8).Radius(tk.BorderRadius).
@@ -324,16 +355,8 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	} else {
 		card.Border(1, tk.BorderSecondary)
 	}
-
-	// Highlight and handle dropping another task card onto this card
-	if dragged, over := ui.DragOver[DragTaskPayload](card); over && dragged.TaskID != t.ID {
-		card.Border(2, tk.Primary).Background(tk.PrimaryFillQuaternary)
-	}
-	if dragged, dropped := ui.Drop[DragTaskPayload](card); dropped && dragged.TaskID != t.ID {
-		_, py, _ := card.PointerPosition()
-		bounds := card.Bounds()
-		placeAfter := py > bounds.H/2
-		w.MoveOrReorderTaskOnto(dragged.TaskID, t.ID, placeAfter)
+	if card.Dragging() {
+		card.Opacity(0.35)
 	}
 
 	// Context menu for right-click / keyboard menu key
@@ -499,6 +522,54 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	if card.Clicked() && !actionClicked {
 		w.SelectTask(t.ID)
 	}
+	return card
+}
+
+func boardInsertionSlot(cardEls []ui.Element, pointerWinY float32) int {
+	for i, cardEl := range cardEls {
+		b := cardEl.Bounds()
+		if b.H <= 0 {
+			continue
+		}
+		if pointerWinY <= b.Y+b.H/2 {
+			return i
+		}
+	}
+	return len(cardEls)
+}
+
+func paintBoardInsertionIndicator(p *ui.Painter, accent ui.Color, radius float32, r ui.Rect, cardEls []ui.Element, insertSlot int) {
+	p.Clip(r, 0, func() {
+		x := r.X + 10
+		w := max(r.W-20, 40)
+		if len(cardEls) == 0 {
+			slotRect := ui.Rect{X: x, Y: r.Y + 12, W: w, H: 48}
+			p.Fill(slotRect, accent.Alpha(0.08), radius)
+			p.StrokeDashed(slotRect, accent.Alpha(0.75), radius, 1.5)
+			return
+		}
+		if b0 := cardEls[0].Bounds(); b0.W > 0 {
+			x, w = b0.X, b0.W
+		}
+		var lineY float32
+		switch {
+		case insertSlot <= 0:
+			b := cardEls[0].Bounds()
+			lineY = b.Y - 6
+		case insertSlot >= len(cardEls):
+			b := cardEls[len(cardEls)-1].Bounds()
+			lineY = b.Y + b.H + 6
+		default:
+			prev := cardEls[insertSlot-1].Bounds()
+			next := cardEls[insertSlot].Bounds()
+			lineY = (prev.Y + prev.H + next.Y) / 2
+		}
+		lineY = max(r.Y+5, min(r.Y+r.H-5, lineY))
+		p.Fill(ui.Rect{X: x, Y: lineY - 5, W: w, H: 10}, accent.Alpha(0.16), 5)
+		p.Fill(ui.Rect{X: x + 4, Y: lineY - 1.5, W: max(w-8, 0), H: 3}, accent, 1.5)
+		p.Fill(ui.Rect{X: x, Y: lineY - 4, W: 8, H: 8}, accent, 4)
+		p.Fill(ui.Rect{X: x + w - 8, Y: lineY - 4, W: 8, H: 8}, accent, 4)
+	})
 }
 
 func columnOrder(s model.Status) int {
