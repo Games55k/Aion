@@ -456,67 +456,49 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 			})
 		}
 
-		// Quick Move & Reorder Bar
-		ui.Row(c).Padding(6, 0, 0, 0).Gap(4).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.FillTertiary).Children(func() {
-			// Move across columns
-			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-				if t.Status != model.Planned {
-					btn := ui.ButtonBase(c.Key("to-planned")).Height(20).PaddingX(6).Radius(4).
-						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
-						Cursor(ui.CursorPointer).Label("移至计划 " + t.Title)
-					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Planned, "计划")).SingleLine() })
-					if btn.Clicked() {
-						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.Planned, 0)
+		// Quick Move & Reorder Bar (minimalist card by default; revealed on card hover or selection)
+		if selected || card.Hovered() || card.Dragging() {
+			ui.Row(c).Padding(7, 0, 0, 0).Gap(6).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+				AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.FillTertiary).Children(func() {
+				// Move across columns
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					if t.Status != model.Planned {
+						if renderQuickMoveButton(c.Key("to-planned"), tk, t, model.Planned, "计划", "移至计划 "+t.Title, tk.Blue) {
+							actionClicked = true
+							w.MoveTaskToColumn(t.ID, model.Planned, 0)
+						}
 					}
-				}
-				if t.Status != model.InProgress {
-					btn := ui.ButtonBase(c.Key("to-progress")).Height(20).PaddingX(6).Radius(4).
-						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
-						Cursor(ui.CursorPointer).Label("移至进行中 " + t.Title)
-					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.InProgress, "进行中")).SingleLine() })
-					if btn.Clicked() {
-						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.InProgress, 0)
+					if t.Status != model.InProgress {
+						if renderQuickMoveButton(c.Key("to-progress"), tk, t, model.InProgress, "进行中", "移至进行中 "+t.Title, tk.Orange) {
+							actionClicked = true
+							w.MoveTaskToColumn(t.ID, model.InProgress, 0)
+						}
 					}
-				}
-				if t.Status != model.Done {
-					btn := ui.ButtonBase(c.Key("to-done")).Height(20).PaddingX(6).Radius(4).
-						Background(tk.FillQuaternary).FontSize(11).TextColor(tk.TextSecondary).
-						Cursor(ui.CursorPointer).Label("移至已完成 " + t.Title)
-					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Done, "已完成")).SingleLine() })
-					if btn.Clicked() {
-						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.Done, 0)
+					if t.Status != model.Done {
+						if renderQuickMoveButton(c.Key("to-done"), tk, t, model.Done, "已完成", "移至已完成 "+t.Title, tk.Green) {
+							actionClicked = true
+							w.MoveTaskToColumn(t.ID, model.Done, 0)
+						}
 					}
-				}
-			})
+				})
 
-			// Reorder up/down within column
-			ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-				if indexInCol > 0 {
-					upBtn := ui.ButtonBase(c.Key("up")).Size(20, 20).Radius(4).Center().
-						Background(tk.FillQuaternary).TextColor(tk.TextTertiary).
-						Cursor(ui.CursorPointer).Label("上移 " + t.Title)
-					upBtn.Children(func() { ui.Icon(c, lucide.ChevronUp()).FontSize(12) })
-					if upBtn.Clicked() {
-						actionClicked = true
-						w.StepTaskInColumn(t.ID, t.Status, -1)
+				// Reorder up/down within column
+				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+					if indexInCol > 0 {
+						if renderStepReorderButton(c.Key("up"), tk, lucide.ChevronUp(), "上移 "+t.Title) {
+							actionClicked = true
+							w.StepTaskInColumn(t.ID, t.Status, -1)
+						}
 					}
-				}
-				if indexInCol < colCount-1 {
-					downBtn := ui.ButtonBase(c.Key("down")).Size(20, 20).Radius(4).Center().
-						Background(tk.FillQuaternary).TextColor(tk.TextTertiary).
-						Cursor(ui.CursorPointer).Label("下移 " + t.Title)
-					downBtn.Children(func() { ui.Icon(c, lucide.ChevronDown()).FontSize(12) })
-					if downBtn.Clicked() {
-						actionClicked = true
-						w.StepTaskInColumn(t.ID, t.Status, 1)
+					if indexInCol < colCount-1 {
+						if renderStepReorderButton(c.Key("down"), tk, lucide.ChevronDown(), "下移 "+t.Title) {
+							actionClicked = true
+							w.StepTaskInColumn(t.ID, t.Status, 1)
+						}
 					}
-				}
+				})
 			})
-		})
+		}
 	})
 
 	if card.Clicked() && !actionClicked {
@@ -585,11 +567,46 @@ func columnOrder(s model.Status) int {
 	}
 }
 
-func quickMoveButtonText(from, to model.Status, targetLabel string) string {
-	if columnOrder(to) < columnOrder(from) {
-		return "← " + targetLabel
+func quickMoveIsLeft(from, to model.Status) bool {
+	return columnOrder(to) < columnOrder(from)
+}
+
+func renderQuickMoveButton(c *ui.Context, tk *theme.Tokens, t model.Task, target model.Status, textLabel, a11yLabel string, dot ui.Color) bool {
+	btn := ui.ButtonBase(c).Height(22).PaddingX(7).Gap(5).Radius(6).
+		AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(a11yLabel)
+	fg := tk.TextSecondary
+	if btn.Hovered() {
+		btn.Background(dot.Alpha(0.14)).Border(1, dot.Alpha(0.48))
+		fg = dot
+	} else {
+		btn.Background(tk.FillQuaternary).Border(1, tk.BorderSecondary)
 	}
-	return "→ " + targetLabel
+	isLeft := quickMoveIsLeft(t.Status, target)
+	btn.Children(func() {
+		if isLeft {
+			ui.Icon(c, lucide.ArrowLeft()).FontSize(11).TextColor(fg)
+		}
+		ui.Box(c).Size(5, 5).Radius(2.5).Background(dot)
+		ui.Text(c, textLabel).FontSize(11).TextColor(fg).SingleLine()
+		if !isLeft {
+			ui.Icon(c, lucide.ArrowRight()).FontSize(11).TextColor(fg)
+		}
+	})
+	return btn.Clicked()
+}
+
+func renderStepReorderButton(c *ui.Context, tk *theme.Tokens, icon *ui.SVG, a11yLabel string) bool {
+	btn := ui.ButtonBase(c).Size(22, 22).Radius(6).Center().
+		Cursor(ui.CursorPointer).Label(a11yLabel)
+	fg := tk.TextTertiary
+	if btn.Hovered() {
+		btn.Background(tk.FillTertiary).Border(1, tk.PrimaryBorder)
+		fg = tk.Text
+	} else {
+		btn.Background(tk.FillQuaternary).Border(1, tk.BorderSecondary)
+	}
+	btn.Children(func() { ui.Icon(c, icon).FontSize(12).TextColor(fg) })
+	return btn.Clicked()
 }
 
 func priorityBadgeSpec(p model.Priority) (string, display.TagColor) {

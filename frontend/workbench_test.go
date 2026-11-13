@@ -197,7 +197,12 @@ func TestKanbanBoardDragMoveFilterAndPersistence(t *testing.T) {
 		t.Fatalf("expected 3 planned tasks, got %d", got)
 	}
 
-	// Reorder within Planned column using the Up button on task 3
+	// Hover task 3 to reveal its quick-action bar and reorder within Planned column using the Up button
+	if r, ok := tt1.Find("任务卡片 编写自动化测试"); !ok {
+		t.Fatalf("could not find card 编写自动化测试")
+	} else {
+		tt1.Move(r.X+r.W/2, r.Y+16)
+	}
 	if err := tt1.Click("上移 编写自动化测试"); err != nil {
 		t.Fatalf("click 上移: %v", err)
 	}
@@ -206,7 +211,12 @@ func TestKanbanBoardDragMoveFilterAndPersistence(t *testing.T) {
 		t.Fatalf("unexpected order after step up: %v, %v", planned[1].Title, planned[2].Title)
 	}
 
-	// Move task 2 to InProgress via quick move button
+	// Hover task 2 and move it to InProgress via quick move button
+	if r, ok := tt1.Find("任务卡片 实现 MyGo 看板视图"); !ok {
+		t.Fatalf("could not find card 实现 MyGo 看板视图")
+	} else {
+		tt1.Move(r.X+r.W/2, r.Y+16)
+	}
 	if err := tt1.Click("移至进行中 实现 MyGo 看板视图"); err != nil {
 		t.Fatalf("click 移至进行中: %v", err)
 	}
@@ -1586,6 +1596,8 @@ func TestBoardColumnIgnoresSameStatusDropWhileCardReorders(t *testing.T) {
 	}
 
 	// Dropping onto the bottom half of t2 still reorders t1 after t2 within the same column.
+	// Hover card1 first (as a user's pointer does before pressing) so card2's target rect reflects the hovered layout.
+	tt.Move(card1Rect.X+card1Rect.W/2, card1Rect.Y+16)
 	card2Rect, ok := tt.Find("任务卡片 卡片二")
 	if !ok {
 		t.Fatal("could not find 卡片二")
@@ -2290,6 +2302,16 @@ func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
 
 // Regression: quick-move buttons on task cards previously always rendered right arrows (→) even when the target column was to the left.
 func TestQuickMoveButtonArrowsFollowColumnDirection(t *testing.T) {
+	if quickMoveIsLeft(model.Planned, model.InProgress) || quickMoveIsLeft(model.Planned, model.Done) {
+		t.Fatal("expected Planned -> InProgress/Done to point right")
+	}
+	if !quickMoveIsLeft(model.InProgress, model.Planned) || quickMoveIsLeft(model.InProgress, model.Done) {
+		t.Fatal("expected InProgress -> Planned left and InProgress -> Done right")
+	}
+	if !quickMoveIsLeft(model.Done, model.Planned) || !quickMoveIsLeft(model.Done, model.InProgress) {
+		t.Fatal("expected Done -> Planned/InProgress to point left")
+	}
+
 	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "方向箭头测试"
@@ -2301,25 +2323,45 @@ func TestQuickMoveButtonArrowsFollowColumnDirection(t *testing.T) {
 	}
 	tt.Frame()
 
-	// Planned (leftmost): both targets are to the right.
-	if !tt.HasText("→ 进行中") || !tt.HasText("→ 已完成") {
-		t.Fatalf("expected right arrows in Planned column, got texts %v", tt.Texts())
+	hoverTaskCard := func() {
+		r, ok := tt.Find("任务卡片 方向任务")
+		if !ok {
+			t.Fatal("could not find 任务卡片 方向任务")
+		}
+		tt.Move(r.X+r.W/2, r.Y+16)
 	}
 
-	// Move right into InProgress: Planned is left (←), Done is right (→).
+	// Planned (leftmost): hover reveals 进行中 and 已完成 actions.
+	hoverTaskCard()
+	if _, ok := tt.Find("移至进行中 方向任务"); !ok {
+		t.Fatal("expected 移至进行中 方向任务 on hover in Planned")
+	}
+	if _, ok := tt.Find("移至已完成 方向任务"); !ok {
+		t.Fatal("expected 移至已完成 方向任务 on hover in Planned")
+	}
+
+	// Move right into InProgress: hover reveals 计划 (left) and 已完成 (right).
 	if err := tt.Click("移至进行中 方向任务"); err != nil {
 		t.Fatalf("click 移至进行中 方向任务: %v", err)
 	}
-	if !tt.HasText("← 计划") || !tt.HasText("→ 已完成") {
-		t.Fatalf("expected ← 计划 and → 已完成 in InProgress column, got texts %v", tt.Texts())
+	hoverTaskCard()
+	if _, ok := tt.Find("移至计划 方向任务"); !ok {
+		t.Fatal("expected 移至计划 方向任务 on hover in InProgress")
+	}
+	if _, ok := tt.Find("移至已完成 方向任务"); !ok {
+		t.Fatal("expected 移至已完成 方向任务 on hover in InProgress")
 	}
 
-	// Move right into Done: both targets are to the left.
+	// Move right into Done: hover reveals 计划 and 进行中 (both left).
 	if err := tt.Click("移至已完成 方向任务"); err != nil {
 		t.Fatalf("click 移至已完成 方向任务: %v", err)
 	}
-	if !tt.HasText("← 计划") || !tt.HasText("← 进行中") {
-		t.Fatalf("expected left arrows in Done column, got texts %v", tt.Texts())
+	hoverTaskCard()
+	if _, ok := tt.Find("移至计划 方向任务"); !ok {
+		t.Fatal("expected 移至计划 方向任务 on hover in Done")
+	}
+	if _, ok := tt.Find("移至进行中 方向任务"); !ok {
+		t.Fatal("expected 移至进行中 方向任务 on hover in Done")
 	}
 
 	// Move left back to Planned and verify persistence.
@@ -2330,8 +2372,9 @@ func TestQuickMoveButtonArrowsFollowColumnDirection(t *testing.T) {
 	if err != nil || persisted.Status != model.Planned {
 		t.Fatalf("expected task moved back to Planned in DB, got %+v err=%v", persisted, err)
 	}
-	if !tt.HasText("→ 进行中") || !tt.HasText("→ 已完成") {
-		t.Fatalf("expected right arrows after returning to Planned column, got texts %v", tt.Texts())
+	hoverTaskCard()
+	if _, ok := tt.Find("移至进行中 方向任务"); !ok {
+		t.Fatal("expected 移至进行中 方向任务 after returning to Planned")
 	}
 }
 
@@ -2523,7 +2566,16 @@ func TestQuickMoveMovesTaskToTopOfTargetColumn(t *testing.T) {
 	wb.ClearSelectedTask()
 	tt.Frame()
 
+	hoverTarget := func() {
+		r, ok := tt.Find("任务卡片 待转移任务")
+		if !ok {
+			t.Fatal("could not find 任务卡片 待转移任务")
+		}
+		tt.Move(r.X+r.W/2, r.Y+16)
+	}
+
 	// 1. Quick-move from InProgress to Planned places target at the top of Planned.
+	hoverTarget()
 	if err := tt.Click("移至计划 待转移任务"); err != nil {
 		t.Fatalf("click 移至计划 待转移任务: %v", err)
 	}
@@ -2533,6 +2585,7 @@ func TestQuickMoveMovesTaskToTopOfTargetColumn(t *testing.T) {
 	}
 
 	// 2. Quick-move from Planned to Done places target at the top of Done.
+	hoverTarget()
 	if err := tt.Click("移至已完成 待转移任务"); err != nil {
 		t.Fatalf("click 移至已完成 待转移任务: %v", err)
 	}
@@ -2546,6 +2599,7 @@ func TestQuickMoveMovesTaskToTopOfTargetColumn(t *testing.T) {
 		t.Fatalf("click 搜索任务: %v", err)
 	}
 	tt.Type("待转移")
+	hoverTarget()
 	if err := tt.Click("移至进行中 待转移任务"); err != nil {
 		t.Fatalf("click 移至进行中 待转移任务: %v", err)
 	}
@@ -2665,5 +2719,64 @@ func TestBoardDragInsertsIntoTopMiddleBottomGapsWithoutLayoutShift(t *testing.T)
 	done = wb.TasksInColumn(model.Done)
 	if len(done) != 4 || done[0].ID != ip2.ID || done[1].ID != d1.ID || done[2].ID != ip1.ID || done[3].ID != d2.ID {
 		t.Fatalf("expected same-column top insertion [%s %s %s %s], got %+v", ip2.ID, d1.ID, ip1.ID, d2.ID, done)
+	}
+}
+
+// Task card quick-move and reorder buttons stay hidden on idle cards and reveal on pointer hover or card selection.
+func TestTaskCardQuickActionsRevealOnHoverOrSelection(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "悬停显示操作栏"
+	wb.SubmitProjectModal()
+
+	t1, err := wb.QuickCreateTask(model.Planned, "卡片甲")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wb.QuickCreateTask(model.Planned, "卡片乙"); err != nil {
+		t.Fatal(err)
+	}
+	wb.ClearSelectedTask()
+	tt.Frame()
+
+	// 1. Idle unselected cards keep quick-action bars hidden.
+	if _, ok := tt.Find("移至进行中 卡片甲"); ok {
+		t.Fatal("expected quick-move buttons hidden on unhovered, unselected card")
+	}
+	if _, ok := tt.Find("上移 卡片乙"); ok {
+		t.Fatal("expected reorder buttons hidden on unhovered, unselected card")
+	}
+
+	// 2. Hovering 卡片甲 reveals its quick-move and down-reorder buttons without opening detail panel.
+	card1Rect, ok := tt.Find("任务卡片 卡片甲")
+	if !ok {
+		t.Fatal("could not find 任务卡片 卡片甲")
+	}
+	tt.Move(card1Rect.X+card1Rect.W/2, card1Rect.Y+16)
+	if _, ok := tt.Find("移至进行中 卡片甲"); !ok {
+		t.Fatal("expected 移至进行中 卡片甲 visible while hovered")
+	}
+	if _, ok := tt.Find("下移 卡片甲"); !ok {
+		t.Fatal("expected 下移 卡片甲 visible while hovered")
+	}
+	if wb.selectedTaskID != "" {
+		t.Fatalf("expected hovering not to select task, got %q", wb.selectedTaskID)
+	}
+
+	// 3. Moving pointer out onto empty column header hides the quick-action bar again.
+	colRect, ok := tt.Find("看板列 进行中")
+	if !ok {
+		t.Fatal("could not find 看板列 进行中")
+	}
+	tt.Move(colRect.X+colRect.W/2, colRect.Y+14)
+	if _, ok := tt.Find("移至进行中 卡片甲"); ok {
+		t.Fatal("expected quick-move buttons hidden after pointer leaves card")
+	}
+
+	// 4. Selecting 卡片甲 keeps its quick-action bar visible even when pointer is elsewhere.
+	wb.SelectTask(t1.ID)
+	tt.Frame()
+	if _, ok := tt.Find("移至进行中 卡片甲"); !ok {
+		t.Fatal("expected quick-move buttons visible while card is selected")
 	}
 }
