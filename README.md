@@ -32,9 +32,16 @@ Aion（读作 `EYE-on`，源自古希腊语 αἰών，意为“生命、时代
 
 ## 快速开始
 
-需要 Go 1.27.3 或更新版本。获取仓库代码后进入项目根目录运行：
+### 直接使用（推荐）
+
+前往 [GitHub Releases](https://github.com/Games55k/Aion/releases) 下载最新版本的 `.dmg` 安装包，将 `Aion.app` 拖入「应用程序」目录即可使用（支持在设置页检查并安装更新）。
+
+### 从源码运行（开发者）
+
+如需自行构建或二次开发，请准备 Go 1.27.3 或更新版本并克隆仓库：
 
 ```bash
+git clone https://github.com/Games55k/Aion.git
 cd Aion
 go run .
 ```
@@ -83,16 +90,6 @@ AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestV
 - **手动导出**：随时将当前 SQLite 快照、全部受管附件及 `manifest.json` 校验清单打包导出为 `.zip`
 - **完整恢复**：恢复前先校验清单、文件 SHA-256 摘要与数据库结构；若备份包损坏则立即中止且不改动现有数据。正式替换前会自动将当前数据打包为一份 `safety-*.zip` 安全备份以便随时回滚
 
-## 安全与隐私
-
-Aion 从架构层保证个人数据完全受你控制：
-
-- **离线优先与最小网络访问**：核心功能离线运行，项目和附件保存在本机；无账号体系、无遥测上报、无第三方云同步。默认仅在用户主动检查或下载安装更新时访问 GitHub 下载服务，不上传项目内容
-- **进程内直连**：前端通过 Go 函数调用直接操作本地后端服务，不在本机暴露任何 HTTP 端口
-- **受管附件隔离**：导入附件会复制到应用受管目录并记录 SHA-256 摘要，源文件移动或删除不影响应用内预览与打开
-- **防误删保护**：项目与任务删除默认进入回收站，关联附件会一并保留，直到在回收站中确认“彻底删除”或“清空回收站”后才会物理移除记录并触发附件垃圾回收（GC）；在任务详情中主动移除单个附件则会直接解除关联并清理未引用文件
-- **单实例目录锁**：同一数据目录不可被两个实例同时打开，SQLite 事务与受管附件共享一致性锁，避免备份与编辑交错损坏
-
 ## 开发
 
 | 命令 | 用途 |
@@ -104,24 +101,27 @@ Aion 从架构层保证个人数据完全受你控制：
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
 
 ```text
-main.go                              原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
-mygo.json                            MyGo 应用配置、打包元数据与更新源配置
-CHANGELOG.md                         版本更新说明（发版说明与客户端更新窗口共用）
-.github/workflows/release.yml        标签触发的 macOS Universal 构建与草稿 Release 工作流
-.github/ISSUE_TEMPLATE/              GitHub Issue 表单模板与空白 Issue 禁用配置
-frontend/                            原生界面层：工作台状态、侧边栏、项目总览、三列看板、任务详情、回收站、设置与附件预览
-frontend/workbench_test.go           基于 ui.Tester 的端到端无头 UI 交互测试
-frontend/attachment_preview_test.go  图片缩略图解码、方向校正与有界缓存测试
-backend/                             后端总入口、模块注册、全局设置与自动备份调度生命周期
-backend/integration_test.go          跨目录备份迁移与彻底删除 GC 集成测试
-backend/model/                       领域模型、状态枚举与哨兵错误定义
-backend/store/                       SQLite 事务、Schema 迁移与读写一致性锁
-backend/projects/                    项目、任务、三列移动/排序、搜索筛选与回收站服务
-backend/attachments/                 本地受管文件导入、导出、路径解析与孤儿文件 GC
-backend/backup/                      全量 ZIP 导出、完整性校验、安全备份与自动轮转
-assets/icon/                         Aion 品牌图标源文件（SVG）、打包用 PNG 与 Go 嵌入封装（icon.go）
-assets/badges/                       README 徽章图标（Lobe MyGo SVG）
-assets/screenshot.png                无头渲染的界面预览截图（1440×900）
+Aion/
+├── main.go                                 # 原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
+├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
+├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
+├── .github/
+│   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
+│   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
+├── frontend/                               # 原生界面层：工作台状态、侧边栏、项目总览、三列看板、任务详情、回收站、设置与附件预览
+│   ├── workbench_test.go                   # 基于 ui.Tester 的端到端无头 UI 交互测试
+│   └── attachment_preview_test.go          # 图片缩略图解码、方向校正与有界缓存测试
+├── backend/                                # 后端总入口、模块注册、全局设置与自动备份调度生命周期
+│   ├── integration_test.go                 # 跨目录备份迁移与彻底删除 GC 集成测试
+│   ├── model/                              # 领域模型、状态枚举与哨兵错误定义
+│   ├── store/                              # SQLite 事务、Schema 迁移与读写一致性锁
+│   ├── projects/                           # 项目、任务、三列移动/排序、搜索筛选与回收站服务
+│   ├── attachments/                        # 本地受管文件导入、导出、路径解析与孤儿文件 GC
+│   └── backup/                             # 全量 ZIP 导出、完整性校验、安全备份与自动轮转
+└── assets/
+    ├── icon/                               # Aion 品牌图标源文件（SVG）、打包用 PNG 与 Go 嵌入封装（icon.go）
+    ├── badges/                             # README 徽章图标（Lobe MyGo SVG）
+    └── screenshot.png                      # 无头渲染的界面预览截图（1440×900）
 ```
 
 基于 [MyGo](https://github.com/egoist/mygo)、[Lobe MyGo UI](https://github.com/lobehub/lobe-mygo) 构建。
