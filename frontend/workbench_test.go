@@ -2492,3 +2492,83 @@ func TestQuickAddInputFillsColumnWidth(t *testing.T) {
 		}
 	}
 }
+
+// Clicking a task card's quick-move buttons (or context menu move items) inserts the task at the top of the target column instead of appending it to the bottom.
+func TestQuickMoveMovesTaskToTopOfTargetColumn(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "快捷移动置顶"
+	wb.SubmitProjectModal()
+
+	p1, err := wb.QuickCreateTask(model.Planned, "计划已有任务一")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := wb.QuickCreateTask(model.Planned, "计划已有任务二")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip1, err := wb.QuickCreateTask(model.InProgress, "进行中已有任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := wb.QuickCreateTask(model.InProgress, "待转移任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1, err := wb.QuickCreateTask(model.Done, "已完成已有任务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.ClearSelectedTask()
+	tt.Frame()
+
+	// 1. Quick-move from InProgress to Planned places target at the top of Planned.
+	if err := tt.Click("移至计划 待转移任务"); err != nil {
+		t.Fatalf("click 移至计划 待转移任务: %v", err)
+	}
+	planned := wb.TasksInColumn(model.Planned)
+	if len(planned) != 3 || planned[0].ID != target.ID || planned[1].ID != p1.ID || planned[2].ID != p2.ID {
+		t.Fatalf("expected [%s %s %s] in Planned, got %+v", target.ID, p1.ID, p2.ID, planned)
+	}
+
+	// 2. Quick-move from Planned to Done places target at the top of Done.
+	if err := tt.Click("移至已完成 待转移任务"); err != nil {
+		t.Fatalf("click 移至已完成 待转移任务: %v", err)
+	}
+	done := wb.TasksInColumn(model.Done)
+	if len(done) != 2 || done[0].ID != target.ID || done[1].ID != d1.ID {
+		t.Fatalf("expected [%s %s] in Done, got %+v", target.ID, d1.ID, done)
+	}
+
+	// 3. Even with an active filter hiding existing InProgress tasks, quick-move to InProgress inserts at absolute top (position 0).
+	if err := tt.Click("搜索任务"); err != nil {
+		t.Fatalf("click 搜索任务: %v", err)
+	}
+	tt.Type("待转移")
+	if err := tt.Click("移至进行中 待转移任务"); err != nil {
+		t.Fatalf("click 移至进行中 待转移任务: %v", err)
+	}
+	wb.ClearBoardFilters()
+	tt.Frame()
+	inProgress := wb.TasksInColumn(model.InProgress)
+	if len(inProgress) != 2 || inProgress[0].ID != target.ID || inProgress[1].ID != ip1.ID {
+		t.Fatalf("expected [%s %s] in InProgress after filtered quick-move, got %+v", target.ID, ip1.ID, inProgress)
+	}
+	persisted, err := app.Projects.GetTask(context.Background(), target.ID)
+	if err != nil || persisted.Status != model.InProgress || persisted.Position != 0 {
+		t.Fatalf("expected persisted task at InProgress pos 0, got %+v err=%v", persisted, err)
+	}
+
+	// 4. Context menu move item also places target at the top of the destination column.
+	if err := tt.RightClick("任务卡片 待转移任务"); err != nil {
+		t.Fatalf("right click 任务卡片 待转移任务: %v", err)
+	}
+	if err := tt.Click("移至 已完成"); err != nil {
+		t.Fatalf("click context menu 移至 已完成: %v", err)
+	}
+	done = wb.TasksInColumn(model.Done)
+	if len(done) != 2 || done[0].ID != target.ID || done[1].ID != d1.ID {
+		t.Fatalf("expected target at top of Done via context menu, got %+v", done)
+	}
+}

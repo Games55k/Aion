@@ -355,11 +355,11 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	case "open":
 		w.SelectTask(t.ID)
 	case "move:planned":
-		w.MoveTaskToColumn(t.ID, model.Planned, -1)
+		w.MoveTaskToColumn(t.ID, model.Planned, 0)
 	case "move:in_progress":
-		w.MoveTaskToColumn(t.ID, model.InProgress, -1)
+		w.MoveTaskToColumn(t.ID, model.InProgress, 0)
 	case "move:done":
-		w.MoveTaskToColumn(t.ID, model.Done, -1)
+		w.MoveTaskToColumn(t.ID, model.Done, 0)
 	case "step:up":
 		w.StepTaskInColumn(t.ID, t.Status, -1)
 	case "step:down":
@@ -445,7 +445,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Planned, "计划")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.Planned, -1)
+						w.MoveTaskToColumn(t.ID, model.Planned, 0)
 					}
 				}
 				if t.Status != model.InProgress {
@@ -455,7 +455,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.InProgress, "进行中")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.InProgress, -1)
+						w.MoveTaskToColumn(t.ID, model.InProgress, 0)
 					}
 				}
 				if t.Status != model.Done {
@@ -465,7 +465,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 					btn.Children(func() { ui.Text(c, quickMoveButtonText(t.Status, model.Done, "已完成")).SingleLine() })
 					if btn.Clicked() {
 						actionClicked = true
-						w.MoveTaskToColumn(t.ID, model.Done, -1)
+						w.MoveTaskToColumn(t.ID, model.Done, 0)
 					}
 				}
 			})
