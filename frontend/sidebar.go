@@ -38,31 +38,50 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 					}
 				})
 
-				// Registered Module Switcher (only shown when multiple modules are registered)
-				if len(w.modules) > 1 && nav.Expanded {
-					ui.Row(c).Gap(6).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
-						for _, mod := range w.modules {
-							active := w.activeModule == mod.ID
-							btn := ui.ButtonBase(c.Key(mod.ID)).Grow(1).Height(28).PaddingX(10).Gap(6).
-								Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
-								Label("切换模块 " + mod.Name)
-							if active {
-								btn.Background(tk.BgElevated).TextColor(tk.Text).FontWeight(600)
-							} else {
-								btn.TextColor(tk.TextSecondary)
-							}
-							btn.Children(func() {
-								ui.Icon(c, ModuleIconSVG(mod)).FontSize(14)
-								ui.Text(c, mod.Name).FontSize(12).SingleLine()
-							})
-							if btn.Clicked() {
-								w.activeModule = mod.ID
-								if w.navPage == NavTrash || w.navPage == NavSettings {
-									w.NavigateTo(NavAllProjects)
+				// Registered Module Switcher (shown in both expanded and collapsed sidebar modes)
+				if len(w.modules) > 1 {
+					if nav.Expanded {
+						ui.Row(c).Gap(6).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
+							for _, mod := range w.modules {
+								active := w.activeModule == mod.ID
+								btn := ui.ButtonBase(c.Key(mod.ID)).Grow(1).Height(28).PaddingX(10).Gap(6).
+									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
+									Label("切换模块 " + mod.Name)
+								if active {
+									btn.Background(tk.BgElevated).TextColor(tk.Text).FontWeight(600)
+								} else {
+									btn.TextColor(tk.TextSecondary)
+								}
+								btn.Children(func() {
+									ui.Icon(c, ModuleIconSVG(mod)).FontSize(14)
+									ui.Text(c, mod.Name).FontSize(12).SingleLine()
+								})
+								if btn.Clicked() {
+									w.SwitchModule(mod.ID)
 								}
 							}
-						}
-					})
+						})
+					} else {
+						ui.Column(c).Gap(4).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
+							for _, mod := range w.modules {
+								active := w.activeModule == mod.ID
+								btn := ui.ButtonBase(c.Key("collapsed-"+mod.ID)).Height(28).PaddingX(6).
+									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).AlignSelf(ui.Stretch).
+									Cursor(ui.CursorPointer).Label("切换模块 " + mod.Name)
+								if active {
+									btn.Background(tk.BgElevated).TextColor(tk.Text)
+								} else {
+									btn.TextColor(tk.TextSecondary)
+								}
+								btn.Children(func() {
+									ui.Icon(c, ModuleIconSVG(mod)).FontSize(15)
+								})
+								if btn.Clicked() {
+									w.SwitchModule(mod.ID)
+								}
+							}
+						})
+					}
 				}
 			})
 		},
@@ -108,126 +127,206 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 		},
 	}, func(nav layout.SideNavState) {
 		ui.Column(c).Padding(4, 8, 12, 8).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-			// Top Overview & Archived Navigation
-			topActive := ""
-			switch w.navPage {
-			case NavAllProjects:
-				topActive = "nav:all_projects"
-			case NavArchivedProjects:
-				topActive = "nav:archived_projects"
+			if w.activeModule == "job_applications" {
+				w.renderJobSidebar(c, tk, nav)
+				return
 			}
-			activeExtra := ""
-			if len(w.activeProjects) > 0 {
-				activeExtra = fmt.Sprint(len(w.activeProjects))
-			}
-			archivedExtra := ""
-			if len(w.archivedProjects) > 0 {
-				archivedExtra = fmt.Sprint(len(w.archivedProjects))
-			}
-			topChosen := display.List(c.Key("top-nav"), display.ListProps{
-				Active:    topActive,
-				Collapse:  nav.Collapse,
-				RailWidth: nav.RailWidth,
-				Items: []display.ListItem{
-					{
-						Key:   "nav:all_projects",
-						Label: "所有项目",
-						Icon:  lucide.LayoutGrid(),
-						Extra: activeExtra,
-					},
-					{
-						Key:   "nav:archived_projects",
-						Label: "已归档项目",
-						Icon:  lucide.Archive(),
-						Extra: archivedExtra,
-					},
-				},
-			})
-			switch topChosen {
-			case "nav:all_projects":
-				w.NavigateTo(NavAllProjects)
-			case "nav:archived_projects":
-				w.NavigateTo(NavArchivedProjects)
-			}
-
-			// Subtle Divider between Global Nav and Project List
-			if nav.Expanded {
-				ui.Box(c).Height(1).Margin(6, 6).Background(tk.BorderSecondary)
-			}
-
-			// Active Projects Section Header
-			if nav.Expanded {
-				ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "项目列表").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
-					if action.ActionIcon(c, lucide.FolderPlus(), action.ActionIconProps{
-						Size:  theme.Small,
-						Title: "创建项目",
-					}).Clicked() {
-						w.OpenCreateProjectModal()
-					}
-				})
-			}
-
-			// Active Projects List
-			if len(w.activeProjects) == 0 && nav.Expanded {
-				ui.Column(c).Padding(12, 8).Gap(4).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "暂无进行中的项目").FontSize(12).TextColor(tk.TextTertiary)
-				})
-			} else {
-				projItems := make([]display.ListItem, 0, len(w.activeProjects))
-				for _, proj := range w.activeProjects {
-					p := proj
-					sum := w.projectSummaries[p.ID]
-					extra := ""
-					if sum.Total > 0 {
-						extra = fmt.Sprintf("%d/%d", sum.Done, sum.Total)
-					}
-					var actions func()
-					if nav.Expanded {
-						isProjActive := w.navPage == NavProjectBoard && w.activeProjectID == p.ID
-						actions = func() {
-							bg := tk.FillTertiary.Over(tk.BgContainer)
-							if isProjActive {
-								bg = tk.FillSecondary.Over(tk.BgContainer)
-							}
-							ui.Row(c).Height(28).Background(bg).PaddingX(2).Radius(tk.BorderRadiusSM).Gap(2).AlignItems(ui.Center).Children(func() {
-								if action.ActionIcon(c.Key("edit-"+p.ID), lucide.Pencil(), action.ActionIconProps{
-									Size:  theme.Small,
-									Title: "编辑项目: " + p.Name,
-								}).Clicked() {
-									w.OpenEditProjectModal(p)
-								}
-								if action.ActionIcon(c.Key("archive-"+p.ID), lucide.Archive(), action.ActionIconProps{
-									Size:  theme.Small,
-									Title: "归档项目: " + p.Name,
-								}).Clicked() {
-									w.ArchiveProject(p.ID)
-								}
-							})
-						}
-					}
-					projItems = append(projItems, display.ListItem{
-						Key:     "proj:" + p.ID,
-						Label:   p.Name,
-						Icon:    ProjectIconSVG(p.Icon),
-						Extra:   extra,
-						Actions: actions,
-					})
-				}
-				activeProjKey := ""
-				if w.navPage == NavProjectBoard && w.activeProjectID != "" {
-					activeProjKey = "proj:" + w.activeProjectID
-				}
-				chosenProj := display.List(c.Key("active-projects-list"), display.ListProps{
-					Active:    activeProjKey,
-					Collapse:  nav.Collapse,
-					RailWidth: nav.RailWidth,
-					Items:     projItems,
-				})
-				if len(chosenProj) > 5 && chosenProj[:5] == "proj:" {
-					w.SelectProject(chosenProj[5:])
-				}
-			}
+			w.renderProjectSidebar(c, tk, nav)
 		})
 	})
+}
+
+func (w *Workbench) renderJobSidebar(c *ui.Context, tk *theme.Tokens, nav layout.SideNavState) {
+	if nav.Expanded {
+		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, "投递记录").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
+			if action.ActionIcon(c, lucide.Plus(), action.ActionIconProps{
+				Size:  theme.Small,
+				Title: "快速新增投递",
+			}).Clicked() {
+				w.OpenJobCreateModal()
+			}
+		})
+	}
+	countStr := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return fmt.Sprint(n)
+	}
+	activeKey := ""
+	switch w.navPage {
+	case NavJobAll:
+		activeKey = "nav:job_all"
+	case NavJobActive:
+		activeKey = "nav:job_active"
+	case NavJobOffer:
+		activeKey = "nav:job_offer"
+	case NavJobClosed:
+		activeKey = "nav:job_closed"
+	}
+	chosen := display.List(c.Key("job-nav"), display.ListProps{
+		Active:    activeKey,
+		Collapse:  nav.Collapse,
+		RailWidth: nav.RailWidth,
+		Items: []display.ListItem{
+			{
+				Key:   "nav:job_all",
+				Label: "全部投递",
+				Icon:  lucide.Briefcase(),
+				Extra: countStr(w.jobStats.Total),
+			},
+			{
+				Key:   "nav:job_active",
+				Label: "进行中",
+				Icon:  lucide.Clock(),
+				Extra: countStr(w.jobStats.Active),
+			},
+			{
+				Key:   "nav:job_offer",
+				Label: "已获 Offer",
+				Icon:  lucide.Award(),
+				Extra: countStr(w.jobStats.Offered),
+			},
+			{
+				Key:   "nav:job_closed",
+				Label: "已结束",
+				Icon:  lucide.FolderCheck(),
+				Extra: countStr(w.jobStats.Closed),
+			},
+		},
+	})
+	switch chosen {
+	case "nav:job_all":
+		w.NavigateTo(NavJobAll)
+	case "nav:job_active":
+		w.NavigateTo(NavJobActive)
+	case "nav:job_offer":
+		w.NavigateTo(NavJobOffer)
+	case "nav:job_closed":
+		w.NavigateTo(NavJobClosed)
+	}
+}
+
+func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav layout.SideNavState) {
+	// Top Overview & Archived Navigation
+	topActive := ""
+	switch w.navPage {
+	case NavAllProjects:
+		topActive = "nav:all_projects"
+	case NavArchivedProjects:
+		topActive = "nav:archived_projects"
+	}
+	activeExtra := ""
+	if len(w.activeProjects) > 0 {
+		activeExtra = fmt.Sprint(len(w.activeProjects))
+	}
+	archivedExtra := ""
+	if len(w.archivedProjects) > 0 {
+		archivedExtra = fmt.Sprint(len(w.archivedProjects))
+	}
+	topChosen := display.List(c.Key("top-nav"), display.ListProps{
+		Active:    topActive,
+		Collapse:  nav.Collapse,
+		RailWidth: nav.RailWidth,
+		Items: []display.ListItem{
+			{
+				Key:   "nav:all_projects",
+				Label: "所有项目",
+				Icon:  lucide.LayoutGrid(),
+				Extra: activeExtra,
+			},
+			{
+				Key:   "nav:archived_projects",
+				Label: "已归档项目",
+				Icon:  lucide.Archive(),
+				Extra: archivedExtra,
+			},
+		},
+	})
+	switch topChosen {
+	case "nav:all_projects":
+		w.NavigateTo(NavAllProjects)
+	case "nav:archived_projects":
+		w.NavigateTo(NavArchivedProjects)
+	}
+
+	// Subtle Divider between Global Nav and Project List
+	if nav.Expanded {
+		ui.Box(c).Height(1).Margin(6, 6).Background(tk.BorderSecondary)
+	}
+
+	// Active Projects Section Header
+	if nav.Expanded {
+		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, "项目列表").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
+			if action.ActionIcon(c, lucide.FolderPlus(), action.ActionIconProps{
+				Size:  theme.Small,
+				Title: "创建项目",
+			}).Clicked() {
+				w.OpenCreateProjectModal()
+			}
+		})
+	}
+
+	// Active Projects List
+	if len(w.activeProjects) == 0 && nav.Expanded {
+		ui.Column(c).Padding(12, 8).Gap(4).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, "暂无进行中的项目").FontSize(12).TextColor(tk.TextTertiary)
+		})
+	} else {
+		projItems := make([]display.ListItem, 0, len(w.activeProjects))
+		for _, proj := range w.activeProjects {
+			p := proj
+			sum := w.projectSummaries[p.ID]
+			extra := ""
+			if sum.Total > 0 {
+				extra = fmt.Sprintf("%d/%d", sum.Done, sum.Total)
+			}
+			var actions func()
+			if nav.Expanded {
+				isProjActive := w.navPage == NavProjectBoard && w.activeProjectID == p.ID
+				actions = func() {
+					bg := tk.FillTertiary.Over(tk.BgContainer)
+					if isProjActive {
+						bg = tk.FillSecondary.Over(tk.BgContainer)
+					}
+					ui.Row(c).Height(28).Background(bg).PaddingX(2).Radius(tk.BorderRadiusSM).Gap(2).AlignItems(ui.Center).Children(func() {
+						if action.ActionIcon(c.Key("edit-"+p.ID), lucide.Pencil(), action.ActionIconProps{
+							Size:  theme.Small,
+							Title: "编辑项目: " + p.Name,
+						}).Clicked() {
+							w.OpenEditProjectModal(p)
+						}
+						if action.ActionIcon(c.Key("archive-"+p.ID), lucide.Archive(), action.ActionIconProps{
+							Size:  theme.Small,
+							Title: "归档项目: " + p.Name,
+						}).Clicked() {
+							w.ArchiveProject(p.ID)
+						}
+					})
+				}
+			}
+			projItems = append(projItems, display.ListItem{
+				Key:     "proj:" + p.ID,
+				Label:   p.Name,
+				Icon:    ProjectIconSVG(p.Icon),
+				Extra:   extra,
+				Actions: actions,
+			})
+		}
+		activeProjKey := ""
+		if w.navPage == NavProjectBoard && w.activeProjectID != "" {
+			activeProjKey = "proj:" + w.activeProjectID
+		}
+		chosenProj := display.List(c.Key("active-projects-list"), display.ListProps{
+			Active:    activeProjKey,
+			Collapse:  nav.Collapse,
+			RailWidth: nav.RailWidth,
+			Items:     projItems,
+		})
+		if len(chosenProj) > 5 && chosenProj[:5] == "proj:" {
+			w.SelectProject(chosenProj[5:])
+		}
+	}
 }

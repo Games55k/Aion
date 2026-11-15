@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"aion/backend"
+	"aion/backend/jobapplications"
 	"aion/backend/model"
 	"aion/backend/projects"
 )
@@ -170,7 +171,7 @@ func TestModuleRegistrationAndSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("register trimmed module failed: %v", err)
 	}
 	mods := a.Modules.List()
-	if len(mods) != 2 || mods[1].Name != "笔记" {
+	if len(mods) != 3 || mods[0].ID != "projects" || mods[1].ID != "job_applications" || mods[2].Name != "笔记" {
 		t.Fatalf("unexpected modules: %+v", mods)
 	}
 	if err := a.Settings.Set(ctx, "notes.sidebar_width", 280); err != nil {
@@ -179,5 +180,103 @@ func TestModuleRegistrationAndSettingsRoundTrip(t *testing.T) {
 	var width int
 	if err := a.Settings.Get(ctx, "notes.sidebar_width", &width); err != nil || width != 280 {
 		t.Fatalf("Settings.Get width = %d, err = %v", width, err)
+	}
+}
+
+// Global recycle bin aggregates projects, tasks, and job applications while dispatching restores, cascades, and attachment GC cleanly.
+func TestCrossModuleTrashDispatchAndAttachmentCleanup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	a, err := backend.Open(ctx, backend.Options{DataDir: dir, DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	p, err := a.Projects.CreateProject(ctx, projects.ProjectInput{Name: "工作项目", Icon: "folder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := a.Projects.CreateTask(ctx, p.ID, projects.TaskInput{Title: "带附件任务"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attFile := filepath.Join(t.TempDir(), "spec.txt")
+	if err := os.WriteFile(attFile, []byte("attachment-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	att, err := a.Attachments.Import(ctx, task.ID, attFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app1, err := a.JobApplications.Create(ctx, jobapplications.CreateInput{CompanyName: "星辰科技", PositionName: "Go 工程师", AppliedDate: "2026-11-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.JobApplications.ChangeStage(ctx, jobapplications.ChangeStageInput{ID: app1.ID, ToStage: model.JobStageInterview1}); err != nil {
+		t.Fatal(err)
+	}
+	app2, err := a.JobApplications.Create(ctx, jobapplications.CreateInput{CompanyName: "海岳科技", PositionName: "架构师", AppliedDate: "2026-11-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.Projects.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.JobApplications.Delete(ctx, app1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.JobApplications.Delete(ctx, app2.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	trash, err := a.ListTrash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trash) != 3 {
+		t.Fatalf("trash len = %d, want 3 (%+v)", len(trash), trash)
+	}
+
+	// Restoring a job application preserves full timeline history.
+	if err := a.RestoreTrash(ctx, jobapplications.TrashKind, app1.ID); err != nil {
+		t.Fatal(err)
+	}
+	events, err := a.JobApplications.ListEvents(ctx, app1.ID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("restored events = %+v, err = %v", events, err)
+	}
+
+	// Permanently deleting app2 removes only app2 and keeps task intact.
+	if err := a.PermanentlyDelete(ctx, jobapplications.TrashKind, app2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.JobApplications.Get(ctx, app2.ID); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("expected app2 deleted, err=%v", err)
+	}
+
+	// Re-delete app1, lock attachments dir to simulate GC failure, and verify ClearTrash reports partial cleanup error after clearing DB metadata.
+	if err := a.JobApplications.Delete(ctx, app1.ID); err != nil {
+		t.Fatal(err)
+	}
+	attDir := filepath.Join(dir, "attachments")
+	if err := os.Chmod(attDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(attDir, 0700)
+
+	err = a.ClearTrash(ctx)
+	var cleanupErr *backend.AttachmentCleanupError
+	if !errors.As(err, &cleanupErr) {
+		t.Fatalf("ClearTrash err = %v, want *AttachmentCleanupError", err)
+	}
+	trashAfter, err := a.ListTrash(ctx)
+	if err != nil || len(trashAfter) != 0 {
+		t.Fatalf("expected empty trash metadata after partial-success ClearTrash, got %+v err=%v", trashAfter, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(attDir, att.StorageName)); statErr != nil {
+		t.Fatalf("expected unremovable attachment file to remain during chmod 0500, got %v", statErr)
 	}
 }

@@ -94,7 +94,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 						ui.Icon(c, lucide.HardDrive()).FontSize(18).TextColor(tk.Primary)
 						ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
 					})
-					ui.Text(c, "所有项目、任务、回收站、附件与设置均保存在以下本地目录：").
+					ui.Text(c, "所有项目、任务、求职投递、回收站、附件与设置均保存在以下本地目录：").
 						FontSize(13).TextColor(tk.TextSecondary)
 
 					dataDir := w.app.DataDir()
@@ -273,7 +273,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *theme.Tokens) {
 							ui.Icon(c, lucide.ArchiveRestore()).FontSize(18).TextColor(tk.Primary)
 							ui.Text(c, "手动备份导出与完整恢复").FontSize(16).FontWeight(600).TextColor(tk.Text)
 						})
-						ui.Text(c, "将全部项目、任务、附件与设置为 .zip 备份包，可用于跨设备迁移或恢复数据。").
+						ui.Text(c, "将全部项目、任务、求职投递、附件与设置导出为 .zip 备份包，可用于跨设备迁移或恢复数据。").
 							FontSize(13).TextColor(tk.TextSecondary)
 					})
 
@@ -424,7 +424,7 @@ func (w *Workbench) renderSettingsModals(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c, "整包覆盖恢复说明", feedback.AlertProps{
 				Type:        feedback.Warning,
 				Variant:     feedback.Soft,
-				Description: "从备份包恢复将完整替换当前本地的所有项目、任务、附件、回收站及全局设置。",
+				Description: "从备份包恢复将完整替换当前工作区的全部项目、任务、求职投递、附件、回收站及全局设置。若恢复较早版本且不含求职数据的备份包，当前求职记录将被清空，并在备份目录保留恢复前安全备份。",
 			})
 			ui.Column(c).Gap(6).Padding(10, 12).Radius(tk.BorderRadius).
 				Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {

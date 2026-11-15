@@ -14,6 +14,7 @@ import (
 
 	"aion/backend"
 	"aion/backend/backup"
+	"aion/backend/jobapplications"
 	"aion/backend/model"
 	"aion/backend/projects"
 
@@ -37,9 +38,21 @@ const (
 	NavAllProjects      NavPage = "all_projects"
 	NavProjectBoard     NavPage = "project_board"
 	NavArchivedProjects NavPage = "archived_projects"
+	NavJobAll           NavPage = "job_all"
+	NavJobActive        NavPage = "job_active"
+	NavJobOffer         NavPage = "job_offer"
+	NavJobClosed        NavPage = "job_closed"
 	NavTrash            NavPage = "trash"
 	NavSettings         NavPage = "settings"
 )
+
+func isProjectNavPage(p NavPage) bool {
+	return p == NavAllProjects || p == NavProjectBoard || p == NavArchivedProjects
+}
+
+func isJobNavPage(p NavPage) bool {
+	return p == NavJobAll || p == NavJobActive || p == NavJobOffer || p == NavJobClosed
+}
 
 const defaultReleasesURL = "https://github.com/Games55k/Aion/releases"
 
@@ -116,7 +129,86 @@ type Workbench struct {
 	modules         []backend.ModuleDescriptor
 	activeModule    string
 	navPage         NavPage
+	lastProjectPage NavPage
+	lastJobPage     NavPage
 	activeProjectID string
+
+	// Job Applications module state (filter/sort/page preserved across module switches)
+	jobApps              []model.JobApplication
+	filteredJobApps      []model.JobApplication
+	jobStats             model.JobApplicationStats
+	jobSearchQuery       string
+	jobStageFilter       string
+	jobOutcomeFilter     string
+	jobAppliedDateFilter time.Time
+	jobSortBy            jobapplications.JobSort
+	jobPage              int
+	jobPageSize          int
+	jobTableScroll       ui.ScrollState
+
+	// Job Create modal state
+	jobCreateOpen         bool
+	jobCreateCompany      string
+	jobCreatePosition     string
+	jobCreateAppliedDate  time.Time
+	jobCreateStage        string
+	jobCreateURL          string
+	jobCreateChannel      string
+	jobCreateFollowUpDate time.Time
+	jobCreateNotes        string
+	jobCreateErr          string
+
+	// Job Detail modal & auto-save state
+	selectedJobID        string
+	detailJob            *model.JobApplication
+	detailJobEpoch       uint64
+	detailJobEvents      []model.JobApplicationEvent
+	jobDetailOpen        bool
+	editJobCompany       string
+	editJobPosition      string
+	editJobAppliedDate   time.Time
+	editJobURL           string
+	editJobChannel       string
+	editJobFollowUpDate  time.Time
+	editJobFollowUpDirty bool
+	editJobNotes         string
+	editJobClosureReason string
+	editJobReasonDirty   bool
+	jobSaveState         string // "saved", "saving", "validation_error", "error"
+	jobSaveErr           string
+	jobLastSavedAt       time.Time
+	jobDirty             bool
+	jobSaveRevision      uint64
+	jobSaving            bool
+	pendingJobSave       *jobSave
+	discardJobAfterSave  bool
+	jobsNeedReload       bool
+
+	// Job Timeline input & retry state
+	jobNoteInput       string
+	jobNoteDate        time.Time
+	jobNoteErr         string
+	jobNoteOpID        string
+	jobBackfillStage   string
+	jobBackfillDate    time.Time
+	jobBackfillNote    string
+	jobBackfillErr     string
+	jobBackfillOpID    string
+	pendingStageAppID  string
+	pendingStageTarget model.JobStage
+	pendingStageOpID   string
+	jobReopenNote      string
+	jobReopenOpID      string
+	jobReopenErr       string
+
+	// Job Close workflow modal state
+	jobCloseOpen         bool
+	jobCloseAppID        string
+	jobCloseOutcome      string
+	jobCloseReason       string
+	jobCloseConfirmOffer bool
+	jobCloseErr          string
+	jobCloseOpID         string
 
 	// Projects & Tasks state
 	activeProjects   []model.Project
@@ -230,6 +322,8 @@ func New(app *backend.App, host Host) *Workbench {
 		detailExpanded:    false,
 		activeModule:      "projects",
 		navPage:           NavAllProjects,
+		lastProjectPage:   NavAllProjects,
+		lastJobPage:       NavJobAll,
 		projectSummaries:  make(map[string]ProjectSummary),
 		projectNames:      make(map[string]string),
 		taskAttachments:   make(map[string][]model.Attachment),
@@ -239,6 +333,10 @@ func New(app *backend.App, host Host) *Workbench {
 		bitmapCache:       make(map[string]*ui.Bitmap),
 		bitmapFailed:      make(map[string]bool),
 		saveState:         "saved",
+		jobSaveState:      "saved",
+		jobSortBy:         jobapplications.SortAppliedDesc,
+		jobPageSize:       20,
+		jobBackfillStage:  string(model.JobStageInterview1),
 		themeSetting:      ThemeSystem,
 		updateInfo:        host.UpdateInfo,
 	}
@@ -405,6 +503,9 @@ func (w *Workbench) enqueueErrorToast(title string, err error) {
 }
 
 func (w *Workbench) flushErrorDetail(err error) string {
+	if w.jobSelected() && strings.TrimSpace(w.jobSaveErr) != "" {
+		return w.jobSaveErr
+	}
 	if strings.TrimSpace(w.saveErr) != "" {
 		return w.saveErr
 	}
@@ -419,7 +520,14 @@ func (w *Workbench) flushPendingOrToast(title, suffix string) error {
 	if err == nil {
 		return nil
 	}
-	w.detailExpanded = true
+	if w.jobSelected() {
+		w.jobDetailOpen = true
+		if title == "当前任务存在未保存修改" {
+			title = "当前投递存在未保存修改"
+		}
+	} else {
+		w.detailExpanded = true
+	}
 	w.EnqueueToast(feedback.ToastProps{
 		Title:       title,
 		Description: w.flushErrorDetail(err) + suffix,
@@ -529,35 +637,52 @@ func (w *Workbench) hasUnsavedChangesFromDetailTask() bool {
 }
 
 // FlushPending requests persistence of any unsaved draft. With Host.Dispatch it
-// returns errSavePending until the worker result has been applied on the UI thread.
+// returns errSavePending/errJobSavePending until the worker result has been applied on the UI thread.
 func (w *Workbench) FlushPending() error {
-	if w.IsRestoring() || (w.detailTask != nil && w.detailTaskEpoch != w.currentDataEpoch()) {
+	if w.IsRestoring() ||
+		(w.detailTask != nil && w.detailTaskEpoch != w.currentDataEpoch()) ||
+		(w.detailJob != nil && w.detailJobEpoch != w.currentDataEpoch()) {
 		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
 	}
-	if w.selectedTaskID == "" || w.detailTask == nil {
-		return nil
+	if w.selectedTaskID != "" && w.detailTask != nil {
+		if w.saving {
+			return errSavePending
+		}
+		if w.dirty || w.hasUnsavedChangesFromDetailTask() {
+			if err := w.SaveSelectedTask(); err != nil {
+				return err
+			}
+			if w.saving {
+				return errSavePending
+			}
+		}
 	}
-	if w.saving {
-		return errSavePending
-	}
-	if !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
-		return nil
-	}
-	if err := w.SaveSelectedTask(); err != nil {
-		return err
-	}
-	if w.saving {
-		return errSavePending
+	if w.selectedJobID != "" && w.detailJob != nil {
+		if w.jobSaving {
+			return errJobSavePending
+		}
+		if w.jobDirty || w.hasUnsavedChangesFromDetailJob() {
+			if err := w.SaveSelectedJob(); err != nil {
+				return err
+			}
+			if w.jobSaving {
+				return errJobSavePending
+			}
+		}
 	}
 	return nil
 }
 
 // PrepareClose verifies whether the window can safely close.
-// If there are unsaved task edits that fail validation/persistence, or a background task is running,
-// PrepareClose keeps the draft/task visible, notifies the user, and returns false.
+// If there are unsaved task or job edits that fail validation/persistence, or a background task is running,
+// PrepareClose keeps the draft/modal visible, notifies the user, and returns false.
 func (w *Workbench) PrepareClose() bool {
 	if w.saving {
 		w.EnqueueToast(feedback.ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: feedback.ToastInfo})
+		return false
+	}
+	if w.jobSaving {
+		w.EnqueueToast(feedback.ToastProps{Title: "正在保存投递记录", Description: "保存完成后再关闭窗口", Type: feedback.ToastInfo})
 		return false
 	}
 	if w.IsBusy() {
@@ -569,7 +694,26 @@ func (w *Workbench) PrepareClose() bool {
 		return false
 	}
 	if err := w.FlushPending(); err != nil {
+		if w.jobSelected() {
+			w.activeModule = "job_applications"
+			if !isJobNavPage(w.navPage) {
+				if isJobNavPage(w.lastJobPage) {
+					w.navPage = w.lastJobPage
+				} else {
+					w.navPage = NavJobAll
+				}
+			}
+			w.jobDetailOpen = true
+			w.EnqueueToast(feedback.ToastProps{
+				Title:       "存在未保存的投递修改",
+				Description: w.flushErrorDetail(err) + "，请先修正保存或点击“放弃修改”后再退出应用",
+				Type:        feedback.ToastWarning,
+			})
+			return false
+		}
+		w.activeModule = "projects"
 		w.navPage = NavProjectBoard
+		w.lastProjectPage = NavProjectBoard
 		w.detailExpanded = true
 		w.EnqueueToast(feedback.ToastProps{
 			Title:       "存在未保存的任务修改",
@@ -581,7 +725,7 @@ func (w *Workbench) PrepareClose() bool {
 	return true
 }
 
-// ReloadAll reloads modules, projects, board tasks, trash, settings, and backup status from the backend.
+// ReloadAll reloads modules, projects, job applications, trash, settings, and backup status from the backend.
 func (w *Workbench) ReloadAll() {
 	w.modules = w.app.Modules.List()
 	if len(w.modules) > 0 && w.activeModule == "" {
@@ -589,6 +733,7 @@ func (w *Workbench) ReloadAll() {
 	}
 
 	w.ReloadProjects()
+	w.ReloadJobApplications()
 	w.ReloadTrash()
 	w.ReloadSettings()
 }
@@ -705,27 +850,95 @@ func (w *Workbench) SelectProject(projectID string) {
 		w.tagFilters = nil
 		w.resetSelectedTaskState()
 	}
+	w.activeModule = "projects"
+	w.lastProjectPage = NavProjectBoard
 	w.navigationVersion++
 	w.navPage = NavProjectBoard
 	w.reloadBoardTasks(true)
 }
 
-// NavigateTo switches the top-level page after flushing any pending task edits.
+// SwitchModule switches between registered modules while protecting drafts and preserving per-module navigation/filter state.
+func (w *Workbench) SwitchModule(modID string) {
+	if w.IsRestoring() || modID == "" {
+		return
+	}
+	if isProjectNavPage(w.navPage) {
+		w.lastProjectPage = w.navPage
+	} else if isJobNavPage(w.navPage) {
+		w.lastJobPage = w.navPage
+	}
+	if w.activeModule == modID && !w.IsGlobalPage() {
+		return
+	}
+	if !w.afterPendingSave(func() { w.SwitchModule(modID) }, "存在未保存修改", "，请先修正保存或放弃修改后再切换模块") {
+		return
+	}
+	w.activeModule = modID
+	w.navigationVersion++
+	switch modID {
+	case "job_applications":
+		target := w.lastJobPage
+		if !isJobNavPage(target) {
+			target = NavJobAll
+		}
+		w.navPage = target
+		w.rebuildJobDerived()
+		if !w.IsBusy() {
+			w.reloadJobApplications(true)
+		}
+	default:
+		w.activeModule = "projects"
+		target := w.lastProjectPage
+		if !isProjectNavPage(target) || (target == NavProjectBoard && w.activeProjectID == "") {
+			target = NavAllProjects
+		}
+		w.navPage = target
+		if !w.IsBusy() {
+			if target == NavProjectBoard {
+				w.reloadBoardTasks(true)
+			} else {
+				w.reloadProjects(true)
+			}
+		}
+	}
+}
+
+// IsGlobalPage reports whether the current navigation page is shared across modules (Trash or Settings).
+func (w *Workbench) IsGlobalPage() bool {
+	return w.navPage == NavTrash || w.navPage == NavSettings
+}
+
+// NavigateTo switches the top-level page after flushing any pending task or job edits.
 func (w *Workbench) NavigateTo(page NavPage) {
 	if w.IsRestoring() {
 		return
 	}
-	if !w.afterPendingSave(func() { w.NavigateTo(page) }, "当前任务存在未保存修改", "，请先修正保存或放弃修改后再离开当前看板") {
+	if isProjectNavPage(w.navPage) {
+		w.lastProjectPage = w.navPage
+	} else if isJobNavPage(w.navPage) {
+		w.lastJobPage = w.navPage
+	}
+	if !w.afterPendingSave(func() { w.NavigateTo(page) }, "当前任务存在未保存修改", "，请先修正保存或放弃修改后再离开当前页面") {
 		return
 	}
 	w.navigationVersion++
 	w.navPage = page
+	if isProjectNavPage(page) {
+		w.activeModule = "projects"
+		w.lastProjectPage = page
+	} else if isJobNavPage(page) {
+		w.activeModule = "job_applications"
+		w.lastJobPage = page
+		w.rebuildJobDerived()
+	}
 	if w.IsBusy() {
 		return
 	}
 	switch page {
 	case NavAllProjects, NavArchivedProjects:
 		w.reloadProjects(true)
+	case NavJobAll, NavJobActive, NavJobOffer, NavJobClosed:
+		w.reloadJobApplications(true)
 	case NavTrash:
 		w.reloadTrash(true)
 	case NavSettings:
@@ -739,10 +952,17 @@ func (w *Workbench) detailModalOpen() bool {
 	return w.navPage == NavProjectBoard && w.detailExpanded && w.selectedTaskID != "" && w.detailTask != nil
 }
 
+func (w *Workbench) jobDetailModalOpen() bool {
+	return w.jobDetailOpen && w.selectedJobID != "" && w.detailJob != nil
+}
+
 func (w *Workbench) hasOpenModal() bool {
 	return w.projectModalOpen ||
 		w.taskModalOpen ||
 		w.detailModalOpen() ||
+		w.jobCreateOpen ||
+		w.jobDetailModalOpen() ||
+		w.jobCloseOpen ||
 		w.trashParentErrModalOpen ||
 		w.confirmPermDeleteOpen ||
 		w.confirmClearTrashOpen ||
@@ -1877,13 +2097,13 @@ func (w *Workbench) AttachmentManagedPath(att model.Attachment) string {
 	return ""
 }
 
-// ReloadTrash reloads deleted projects and tasks from the backend.
+// ReloadTrash reloads deleted items across all modules from the backend.
 func (w *Workbench) ReloadTrash() { w.reloadTrash(false) }
 
 func (w *Workbench) reloadTrash(async bool) {
-	service := w.app.Projects
+	app := w.app
 	w.loadUI("trash", async, func() func() {
-		items, err := service.ListTrash(context.Background())
+		items, err := app.ListTrash(context.Background())
 		return func() {
 			if err != nil {
 				w.enqueueErrorToast("加载回收站失败", err)
@@ -1895,7 +2115,7 @@ func (w *Workbench) reloadTrash(async bool) {
 	})
 }
 
-// RestoreTrashItem restores a deleted project or task from the Recycle Bin.
+// RestoreTrashItem restores a deleted item (project, task, or job application) from the Recycle Bin.
 // If restoring a task fails with model.ErrParentDeleted, it opens a helper modal
 // allowing the user to restore the parent project and the task together.
 func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
@@ -1903,7 +2123,7 @@ func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
 		return
 	}
 	ctx := context.Background()
-	err := w.app.Projects.RestoreTrash(ctx, item.Kind, item.ID)
+	err := w.app.RestoreTrash(ctx, item.Kind, item.ID)
 	if err != nil {
 		if errors.Is(err, model.ErrParentDeleted) {
 			itemCopy := item
@@ -1927,6 +2147,7 @@ func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
 		return
 	}
 	w.ReloadProjects()
+	w.ReloadJobApplications()
 	w.ReloadTrash()
 	w.EnqueueToast(feedback.ToastProps{
 		Title:       "已从回收站恢复",
@@ -2003,6 +2224,7 @@ func (w *Workbench) ConfirmPermanentDelete() {
 				w.trashOrphanParent = nil
 			}
 			w.ReloadProjects()
+			w.ReloadJobApplications()
 			w.ReloadTrash()
 			w.pruneAttachmentCaches()
 			if cleanupErr != nil {
@@ -2047,6 +2269,7 @@ func (w *Workbench) ConfirmClearTrash() {
 			w.confirmPermDeleteOpen = false
 			w.confirmPermDeleteItem = nil
 			w.ReloadProjects()
+			w.ReloadJobApplications()
 			w.ReloadTrash()
 			w.pruneAttachmentCaches()
 			if cleanupErr != nil {
@@ -2055,7 +2278,7 @@ func (w *Workbench) ConfirmClearTrash() {
 			}
 			w.EnqueueToast(feedback.ToastProps{
 				Title:       "回收站已清空",
-				Description: "所有回收站项目、任务与未引用附件均已彻底清理",
+				Description: "所有回收站项目、任务、投递记录与未引用附件均已彻底清理",
 				Type:        feedback.ToastInfo,
 			})
 		}
@@ -2388,7 +2611,44 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.confirmRestoreOpen = false
 	w.lastSavedAt = time.Time{}
 
+	// Reset Job Applications UI/filter/modal/draft state cleanly without writing old drafts into restored DB.
+	w.jobApps = nil
+	w.filteredJobApps = nil
+	w.jobStats = model.JobApplicationStats{}
+	w.jobSearchQuery = ""
+	w.jobStageFilter = ""
+	w.jobOutcomeFilter = ""
+	w.jobAppliedDateFilter = time.Time{}
+	w.jobSortBy = jobapplications.SortAppliedDesc
+	w.jobPage = 0
+	w.jobTableScroll = ui.ScrollState{}
+	w.jobCreateOpen = false
+	w.jobCreateCompany = ""
+	w.jobCreatePosition = ""
+	w.jobCreateAppliedDate = time.Time{}
+	w.jobCreateStage = ""
+	w.jobCreateURL = ""
+	w.jobCreateChannel = ""
+	w.jobCreateFollowUpDate = time.Time{}
+	w.jobCreateNotes = ""
+	w.jobCreateErr = ""
+	w.jobCloseOpen = false
+	w.jobCloseAppID = ""
+	w.jobCloseOutcome = ""
+	w.jobCloseReason = ""
+	w.jobCloseConfirmOffer = false
+	w.jobCloseErr = ""
+	w.jobCloseOpID = ""
+	w.pendingStageAppID = ""
+	w.pendingStageTarget = ""
+	w.pendingStageOpID = ""
+	w.jobReopenNote = ""
+	w.jobReopenOpID = ""
+	w.jobReopenErr = ""
+	w.jobLastSavedAt = time.Time{}
+
 	w.resetSelectedTaskState()
+	w.resetSelectedJobState()
 	w.ReloadAll()
 	if len(w.activeProjects) > 0 {
 		w.activeProjectID = w.activeProjects[0].ID
@@ -2398,6 +2658,7 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 		w.ReloadBoardTasks()
 		if w.navPage == NavProjectBoard {
 			w.navPage = NavAllProjects
+			w.lastProjectPage = NavAllProjects
 		}
 	}
 	if w.host.SetTheme != nil {
@@ -2412,8 +2673,8 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 
 // TriggerRestoreBackup executes app.Backups.Restore off the UI thread via runAsyncTask.
 func (w *Workbench) TriggerRestoreBackup() {
-	if w.saving {
-		w.EnqueueToast(feedback.ToastProps{Title: "正在保存任务", Description: "保存完成后再恢复备份", Type: feedback.ToastInfo})
+	if w.saving || w.jobSaving {
+		w.EnqueueToast(feedback.ToastProps{Title: "正在保存未完成修改", Description: "保存完成后再恢复备份", Type: feedback.ToastInfo})
 		return
 	}
 	if w.IsBusy() || w.IsRestoring() {
@@ -2486,6 +2747,8 @@ func (w *Workbench) View(c *ui.Context) {
 				w.renderProjectsView(c, tk, true)
 			case NavProjectBoard:
 				w.renderBoardView(c, tk)
+			case NavJobAll, NavJobActive, NavJobOffer, NavJobClosed:
+				w.renderJobApplicationsView(c, tk)
 			case NavTrash:
 				w.renderTrashView(c, tk)
 			case NavSettings:
@@ -2500,6 +2763,9 @@ func (w *Workbench) View(c *ui.Context) {
 	w.renderProjectModal(c, tk)
 	w.renderTaskCreateModal(c, tk)
 	w.renderTaskDetailModal(c, tk)
+	w.renderJobCreateModal(c, tk)
+	w.renderJobDetailModal(c, tk)
+	w.renderJobCloseModal(c, tk)
 	w.renderTrashModals(c, tk)
 	w.renderSettingsModals(c, tk)
 

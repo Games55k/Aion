@@ -4,14 +4,18 @@ package backend
 
 import (
 	"context"
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
 	"aion/backend/attachments"
 	"aion/backend/backup"
+	"aion/backend/jobapplications"
+	"aion/backend/model"
 	"aion/backend/projects"
 	"aion/backend/store"
 )
@@ -25,17 +29,18 @@ type Options struct {
 	Now func() time.Time
 }
 type App struct {
-	Projects    *projects.Service
-	Attachments *attachments.Service
-	Backups     *backup.Service
-	Settings    *Settings
-	Modules     *Registry
-	s           *store.Store
-	cancel      context.CancelFunc
-	workers     sync.WaitGroup
-	once        sync.Once
-	closeErr    error
-	errors      chan error
+	Projects        *projects.Service
+	JobApplications *jobapplications.Service
+	Attachments     *attachments.Service
+	Backups         *backup.Service
+	Settings        *Settings
+	Modules         *Registry
+	s               *store.Store
+	cancel          context.CancelFunc
+	workers         sync.WaitGroup
+	once            sync.Once
+	closeErr        error
+	errors          chan error
 }
 
 func DefaultDataDir() (string, error) {
@@ -61,8 +66,21 @@ func Open(ctx context.Context, options Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{Projects: projects.New(s), Attachments: attachments.New(s), Backups: backup.New(s, backup.Options{Now: options.Now}), Settings: &Settings{s: s}, Modules: &Registry{}, s: s, errors: make(chan error, 1)}
+	a := &App{
+		Projects:        projects.New(s),
+		JobApplications: jobapplications.New(s, jobapplications.Options{Now: options.Now}),
+		Attachments:     attachments.New(s),
+		Backups:         backup.New(s, backup.Options{Now: options.Now}),
+		Settings:        &Settings{s: s},
+		Modules:         &Registry{},
+		s:               s,
+		errors:          make(chan error, 1),
+	}
 	if err = a.Modules.Register(ModuleDescriptor{ID: "projects", Name: "项目", Version: 1}); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err = a.Modules.Register(ModuleDescriptor{ID: "job_applications", Name: "求职", Version: 1}); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -87,7 +105,43 @@ func (e *AttachmentCleanupError) Unwrap() error { return e.Err }
 // PermanentlyDelete purges a recycled item and then reclaims files that no
 // module references. A cleanup error does not undo the database deletion; GC
 // can be retried safely. The host owns the user confirmation interaction.
+// ListTrash aggregates soft-deleted items from all built-in modules ordered newest-deleted first.
+func (a *App) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
+	projectItems, err := a.Projects.ListTrash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	jobItems, err := a.JobApplications.ListTrash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]model.TrashItem, 0, len(projectItems)+len(jobItems))
+	items = append(items, projectItems...)
+	items = append(items, jobItems...)
+	slices.SortFunc(items, func(x, y model.TrashItem) int {
+		if c := y.DeletedAt.Compare(x.DeletedAt); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(x.Kind, y.Kind); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.ID, y.ID)
+	})
+	return items, nil
+}
+
+// RestoreTrash restores a soft-deleted item by dispatching to the owning module service.
+func (a *App) RestoreTrash(ctx context.Context, kind, id string) error {
+	if kind == jobapplications.TrashKind {
+		return a.JobApplications.Restore(ctx, id)
+	}
+	return a.Projects.RestoreTrash(ctx, kind, id)
+}
+
 func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
+	if kind == jobapplications.TrashKind {
+		return a.JobApplications.PermanentlyDelete(ctx, id)
+	}
 	if err := a.Projects.PermanentlyDelete(ctx, kind, id); err != nil {
 		return err
 	}
@@ -97,9 +151,12 @@ func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
 	return nil
 }
 
-// ClearTrash purges all project recycle-bin contents, then collects unused files.
+// ClearTrash purges recycle-bin contents across all modules, then collects unused project files.
 func (a *App) ClearTrash(ctx context.Context) error {
 	if err := a.Projects.ClearTrash(ctx); err != nil {
+		return err
+	}
+	if err := a.JobApplications.ClearTrash(ctx); err != nil {
 		return err
 	}
 	if _, err := a.Attachments.GC(ctx); err != nil {

@@ -1,10 +1,15 @@
 package frontend
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -19,6 +24,7 @@ import (
 	"aion/backend"
 	"aion/backend/attachments"
 	"aion/backend/backup"
+	"aion/backend/jobapplications"
 	"aion/backend/model"
 	"aion/backend/projects"
 	"aion/backend/store"
@@ -624,8 +630,11 @@ func TestRecycleBinAndSettingsBackupRestore(t *testing.T) {
 func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
 	settingsOutPath := os.Getenv("AION_SAVE_SETTINGS_SNAPSHOT")
-	if outPath == "" && settingsOutPath == "" {
-		t.Skip("set AION_SAVE_SNAPSHOT or AION_SAVE_SETTINGS_SNAPSHOT to export a PNG for visual inspection")
+	jobsOutPath := os.Getenv("AION_SAVE_JOBS_SNAPSHOT")
+	jobsNarrowOutPath := os.Getenv("AION_SAVE_JOBS_NARROW_SNAPSHOT")
+	jobDetailOutPath := os.Getenv("AION_SAVE_JOB_DETAIL_SNAPSHOT")
+	if outPath == "" && settingsOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
+		t.Skip("set AION_SAVE_*_SNAPSHOT to export a PNG for visual inspection")
 	}
 	dataDir := t.TempDir()
 	srcDir := t.TempDir()
@@ -696,6 +705,83 @@ func TestVisualSnapshotRender(t *testing.T) {
 		}
 		if err := f.Close(); err != nil {
 			t.Fatalf("close settings snapshot file: %v", err)
+		}
+	}
+
+	if jobsOutPath != "" || jobsNarrowOutPath != "" || jobDetailOutPath != "" {
+		ctx := context.Background()
+		longCompany := "超长名称科技有限公司（分布式基础设施与云原生系统研发中心）"
+		longPos := "资深 Go 分布式存储架构师 / 核心引擎技术专家（高并发低延迟方向）"
+		a1, _ := wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:      longCompany,
+			PositionName:     longPos,
+			AppliedDate:      "2026-11-12",
+			Stage:            model.JobStageInterview2,
+			ApplicationURL:   "https://careers.example.com/positions/senior-go-storage-architect",
+			Channel:          "内部推荐",
+			NextFollowUpDate: "2026-11-20",
+			Notes:            "一面深挖了 Raft 与 SQLite WAL 一致性细节，需要二面重点准备多租户隔离与压测数据分析，这是一个故意编写的非常长的多行备注\n第二行详细跟进要点。",
+		})
+		a2, _ := wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:    "示例云科技",
+			PositionName:   "后端平台研发工程师",
+			AppliedDate:    "2026-11-08",
+			Stage:          model.JobStageOffer,
+			ApplicationURL: "https://jobs.example.org/backend",
+			Channel:        "官网直投",
+		})
+		_, _ = wb.app.JobApplications.BackfillStageEvent(ctx, jobapplications.BackfillStageInput{
+			ApplicationID: a1.ID,
+			Stage:         model.JobStageInterview1,
+			OccurredDate:  "2026-11-05",
+			Note:          "补录一面记录：重点考察网络 IO 与并发锁设计",
+		})
+		_, _ = wb.app.JobApplications.AddNoteEvent(ctx, jobapplications.AddNoteInput{
+			ApplicationID: a1.ID,
+			Note:          "已联系 HR 确认二面时间",
+		})
+		a3, _ := wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:  "星海量化",
+			PositionName: "Rust 基础组件开发",
+			AppliedDate:  "2026-11-01",
+			Stage:        model.JobStageInterview2,
+			Channel:      "猎头推荐",
+		})
+		_, _ = wb.app.JobApplications.Close(ctx, jobapplications.CloseInput{
+			ID:      a3.ID,
+			Outcome: model.JobOutcomeRejected,
+			Reason:  "二面系统设计环节在跨地域多活一致性与流量削峰策略上需要进一步打磨",
+		})
+		_ = a2
+		wb.SwitchModule("job_applications")
+		wb.pendingToasts = nil
+
+		encodePNG := func(targetPath string, wPx, hPx int) {
+			img := ui.Render(wb.View, wPx, hPx, 1.0)
+			f, err := os.Create(targetPath)
+			if err != nil {
+				t.Fatalf("create snapshot %s: %v", targetPath, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				_ = f.Close()
+				t.Fatalf("encode snapshot %s: %v", targetPath, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close snapshot %s: %v", targetPath, err)
+			}
+		}
+		if jobsOutPath != "" {
+			encodePNG(jobsOutPath, 1440, 900)
+		}
+		if jobsNarrowOutPath != "" {
+			wb.sideExpanded = false
+			encodePNG(jobsNarrowOutPath, 780, 740)
+			wb.sideExpanded = true
+		}
+		if jobDetailOutPath != "" {
+			wb.SelectJobApplication(a1.ID)
+			wb.pendingToasts = nil
+			encodePNG(jobDetailOutPath, 1440, 920)
 		}
 	}
 }
@@ -3055,3 +3141,819 @@ func TestTrashCleanupFailureRefreshesDeletedItems(t *testing.T) {
 		})
 	}
 }
+
+func openTestWorkbenchAt(t *testing.T, dataDir string, now func() time.Time, host Host) (*backend.App, *Workbench, *ui.Tester) {
+	t.Helper()
+	if host.Now == nil {
+		host.Now = now
+	}
+	app, err := backend.Open(context.Background(), backend.Options{
+		DataDir:          dataDir,
+		DisableScheduler: true,
+		Now:              now,
+	})
+	if err != nil {
+		t.Fatalf("backend.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Close()
+	})
+	wb := New(app, host)
+	tt := ui.NewTesterWith(wb.View, 1440, 900, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+	tt.Frame()
+	return app, wb, tt
+}
+
+func buildFrontendV1BackupZip(t *testing.T, createdAt time.Time, mutate func(*sql.DB)) string {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "v1.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplySchemaUpTo(context.Background(), db, store.MinSchemaVersion); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	ts := createdAt.UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(`INSERT INTO projects(id,name,icon,description,archived,created_at,updated_at) VALUES('v1-proj','旧版项目','folder','v1 backup',0,?,?)`, ts, ts); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasks(id,project_id,title,description,status,priority,tags,subtasks,due_date,position,created_at,updated_at) VALUES('v1-task','v1-proj','旧版任务','','planned','medium','[]','[]','2026-12-01',0,?,?)`, ts, ts); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if mutate != nil {
+		mutate(db)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dbBytes, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(dbBytes)
+	type fileRec struct {
+		Path   string `json:"path"`
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	type manifestRec struct {
+		Version       int       `json:"version"`
+		SchemaVersion int       `json:"schema_version"`
+		CreatedAt     time.Time `json:"created_at"`
+		Kind          string    `json:"kind"`
+		Files         []fileRec `json:"files"`
+	}
+	m := manifestRec{
+		Version:       backup.FormatVersion,
+		SchemaVersion: store.MinSchemaVersion,
+		CreatedAt:     createdAt.UTC(),
+		Kind:          "manual",
+		Files: []fileRec{{
+			Path:   "database.sqlite",
+			Size:   int64(len(dbBytes)),
+			SHA256: hex.EncodeToString(sum[:]),
+		}},
+	}
+	manifestBytes, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "v1-backup.zip")
+	f, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	for _, entry := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "manifest.json", data: manifestBytes},
+		{name: "database.sqlite", data: dbBytes},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(entry.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return zipPath
+}
+
+func typeIntoJobField(t *testing.T, tt *ui.Tester, label, value string) {
+	t.Helper()
+	if err := tt.Click(label); err != nil {
+		t.Fatalf("click %q: %v", label, err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type(value)
+	tt.Frame()
+}
+
+func chooseSelectOption(t *testing.T, tt *ui.Tester, selectLabel, optionLabel string) {
+	t.Helper()
+	if err := tt.Click(selectLabel); err != nil {
+		t.Fatalf("click select %q: %v", selectLabel, err)
+	}
+	tt.Advance(time.Second)
+	tt.Frame()
+	if err := tt.Click(optionLabel); err != nil {
+		t.Fatalf("click option %q for %q: %v", optionLabel, selectLabel, err)
+	}
+	tt.Advance(time.Second)
+	tt.Frame()
+}
+
+func pickDatePickerDay(t *testing.T, tt *ui.Tester, label string, dayDate time.Time) {
+	t.Helper()
+	b, ok := tt.AccessByRole(ui.RoleButton, label)
+	if !ok {
+		t.Fatalf("datepicker button %q not found", label)
+	}
+	tt.ClickAt(b.Bounds.X+b.Bounds.W/2, b.Bounds.Y+b.Bounds.H/2)
+	tt.Advance(time.Second)
+	tt.Frame()
+	dayLabel := dayDate.Format("2006-01-02")
+	d, ok := tt.AccessByRole(ui.RoleButton, dayLabel)
+	if !ok {
+		t.Fatalf("datepicker day %q not found for %q", dayLabel, label)
+	}
+	tt.ClickAt(d.Bounds.X+d.Bounds.W/2, d.Bounds.Y+d.Bounds.H/2)
+	tt.Advance(time.Second)
+	tt.Frame()
+}
+
+// Switching between modules works in both expanded and collapsed sidebar states while preserving each module's active view and filters.
+func TestJobModuleSwitchingExpandedCollapsedAndPreservedState(t *testing.T) {
+	fixed := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	app, wb, tt := openTestWorkbenchAt(t, t.TempDir(), func() time.Time { return fixed }, Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "后端架构"
+	wb.SubmitProjectModal()
+	if _, err := app.JobApplications.Create(context.Background(), jobapplications.CreateInput{
+		CompanyName:  "北极星实验室",
+		PositionName: "系统工程师",
+		Stage:        model.JobStageApplied,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadJobApplications()
+	tt.Frame()
+
+	// Expanded switcher enters 求职, then preserves page, search, filter, and sort across switching to 项目 and back.
+	if err := tt.Click("切换模块 求职"); err != nil {
+		t.Fatalf("switch to jobs: %v", err)
+	}
+	tt.Frame()
+	if wb.activeModule != "job_applications" || wb.navPage != NavJobAll {
+		t.Fatalf("expected job_applications active module and NavJobAll, got module=%q page=%v", wb.activeModule, wb.navPage)
+	}
+	if err := tt.Click("进行中"); err != nil {
+		t.Fatalf("navigate to active jobs view: %v", err)
+	}
+	typeIntoJobField(t, tt, "搜索投递记录", "北极星")
+	chooseSelectOption(t, tt, "筛选阶段", "笔试 / 测评")
+	chooseSelectOption(t, tt, "排序方式", "最近更新 ↓")
+
+	if err := tt.Click("切换模块 项目"); err != nil {
+		t.Fatalf("switch back to projects: %v", err)
+	}
+	tt.Frame()
+	if wb.activeModule != "projects" || wb.navPage != NavProjectBoard {
+		t.Fatalf("expected projects active module and preserved NavProjectBoard, got module=%q page=%v", wb.activeModule, wb.navPage)
+	}
+
+	if err := tt.Click("切换模块 求职"); err != nil {
+		t.Fatalf("switch back to jobs: %v", err)
+	}
+	tt.Frame()
+	if wb.navPage != NavJobActive || wb.jobSearchQuery != "北极星" || wb.jobStageFilter != string(model.JobStageAssessment) || wb.jobSortBy != jobapplications.SortUpdatedDesc {
+		t.Fatalf("expected preserved job state across module switch, got page=%v search=%q stage=%q sort=%q", wb.navPage, wb.jobSearchQuery, wb.jobStageFilter, wb.jobSortBy)
+	}
+
+	// Collapse sidebar and verify compact switcher still toggles cleanly between 项目 and 求职.
+	tt.Move(100, 200)
+	tt.Advance(time.Second)
+	handle, ok := tt.AccessByRole(ui.RoleButton, "Collapse side nav")
+	if !ok {
+		t.Fatal("Collapse side nav handle not found")
+	}
+	tt.ClickAt(handle.Bounds.X+handle.Bounds.W/2, handle.Bounds.Y+handle.Bounds.H/2)
+	tt.Advance(time.Second)
+	tt.Frame()
+
+	if err := tt.Click("切换模块 项目"); err != nil {
+		t.Fatalf("collapsed switch to projects: %v", err)
+	}
+	tt.Frame()
+	if wb.activeModule != "projects" {
+		t.Fatalf("expected projects module when collapsed, got %q", wb.activeModule)
+	}
+	if err := tt.Click("切换模块 求职"); err != nil {
+		t.Fatalf("collapsed switch to jobs: %v", err)
+	}
+	tt.Frame()
+	if wb.activeModule != "job_applications" || wb.navPage != NavJobActive {
+		t.Fatalf("expected jobs module + preserved NavJobActive when collapsed, got module=%q page=%v", wb.activeModule, wb.navPage)
+	}
+}
+
+// Creating jobs validates inputs, surfaces non-blocking duplicate alerts, updates inline stage and follow-up date, and triggers URL clipboard/open feedback.
+func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
+	nowVal := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	var openedURL string
+	var openURLErr error
+	app, wb, tt := openTestWorkbenchAt(t, t.TempDir(), func() time.Time { return nowVal }, Host{
+		OpenURL: func(rawURL string) error {
+			openedURL = rawURL
+			return openURLErr
+		},
+	})
+	wb.SwitchModule("job_applications")
+	tt.Frame()
+
+	// Create modal rejects invalid URL scheme without inserting into SQLite.
+	if err := tt.Click("新增投递"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	typeIntoJobField(t, tt, "创建公司名称", "星河云")
+	typeIntoJobField(t, tt, "创建岗位名称", "Go 后端工程师")
+	typeIntoJobField(t, tt, "创建投递渠道", "官网内推")
+	typeIntoJobField(t, tt, "创建投递链接", "ftp://invalid.example.com")
+	if err := tt.Click("确认创建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !wb.jobCreateOpen || wb.jobCreateErr == "" {
+		t.Fatalf("expected invalid URL error in create modal, open=%v err=%q", wb.jobCreateOpen, wb.jobCreateErr)
+	}
+
+	// Fix URL, pick follow-up date, add notes, and submit successfully.
+	typeIntoJobField(t, tt, "创建投递链接", "https://jobs.example.com/backend")
+	pickDatePickerDay(t, tt, "创建下次跟进日期", time.Date(2026, 11, 20, 0, 0, 0, 0, time.Local))
+	typeIntoJobField(t, tt, "创建通用备注", "一面约周三")
+	if err := tt.Click("确认创建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.jobCreateOpen || len(wb.jobApps) != 1 {
+		t.Fatalf("expected modal closed and 1 job created, open=%v len=%d err=%q", wb.jobCreateOpen, len(wb.jobApps), wb.jobCreateErr)
+	}
+	first := wb.jobApps[0]
+	if first.AppliedDate != "2026-11-15" || first.NextFollowUpDate != "2026-11-20" || first.Stage != model.JobStageApplied {
+		t.Fatalf("unexpected created job defaults/fields: %+v", first)
+	}
+
+	// Reopening create modal for same active company + position shows non-blocking duplicate warning yet still allows creation.
+	if err := tt.Click("新增投递"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	typeIntoJobField(t, tt, "创建公司名称", "星河云")
+	typeIntoJobField(t, tt, "创建岗位名称", "Go 后端工程师")
+	if !tt.HasText("检测到 1 条同公司同岗位的进行中记录") {
+		t.Fatalf("expected non-blocking duplicate warning alert, texts=%q", tt.Texts())
+	}
+	if err := tt.Click("确认创建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.jobApps) != 2 {
+		t.Fatalf("expected non-blocking duplicate create to succeed, got %d apps", len(wb.jobApps))
+	}
+
+	// Different role at same company has no duplicate warning, and closing allows re-applying without warning.
+	wb.OpenJobCreateModal()
+	wb.jobCreateCompany = "星河云"
+	wb.jobCreatePosition = "前端工程师"
+	tt.Frame()
+	if strings.Contains(strings.Join(tt.Texts(), "\n"), "检测到") {
+		t.Fatalf("unexpected duplicate warning for different position at same company")
+	}
+	if err := tt.Click("确认创建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.jobApps) != 3 {
+		t.Fatalf("expected 3 jobs after multi-role create, got %d", len(wb.jobApps))
+	}
+
+	// Inline stage selector and follow-up DatePicker mutate table row and persist stage event in chronological order.
+	nowVal = nowVal.Add(time.Minute)
+	chooseSelectOption(t, tt, "阶段 星河云 前端工程师", "一面")
+	pickDatePickerDay(t, tt, "下次跟进 星河云 前端工程师", time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local))
+	var frontendApp model.JobApplication
+	for _, a := range wb.jobApps {
+		if a.PositionName == "前端工程师" {
+			frontendApp = a
+			break
+		}
+	}
+	if frontendApp.Stage != model.JobStageInterview1 || frontendApp.NextFollowUpDate != "2026-11-25" {
+		t.Fatalf("inline edits not persisted cleanly: %+v", frontendApp)
+	}
+	events, err := app.JobApplications.ListEvents(context.Background(), frontendApp.ID)
+	if err != nil || len(events) != 2 || events[0].EventType != model.JobEventCreated || events[1].EventType != model.JobEventStageChanged || events[1].ToStage != model.JobStageInterview1 {
+		t.Fatalf("expected [created, stage_changed] timeline events, err=%v events=%+v", err, events)
+	}
+
+	// Closing a job removes it from active duplicate warnings so re-applying is clean.
+	if _, err := app.JobApplications.Close(context.Background(), jobapplications.CloseInput{
+		ID:      frontendApp.ID,
+		Outcome: model.JobOutcomeRejected,
+		Reason:  "一面结束",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadJobApplications()
+	wb.OpenJobCreateModal()
+	wb.jobCreateCompany = "星河云"
+	wb.jobCreatePosition = "前端工程师"
+	tt.Frame()
+	if strings.Contains(strings.Join(tt.Texts(), "\n"), "检测到") {
+		t.Fatalf("expected no duplicate warning after prior match closed, texts=%q", tt.Texts())
+	}
+	wb.jobCreateOpen = false
+	tt.Frame()
+
+	// Copy URL and OpenURL actions (plus Host.OpenURL error feedback).
+	if err := tt.Click("复制链接: 星河云 Go 后端工程师"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tt.Clipboard(); got != "https://jobs.example.com/backend" {
+		t.Fatalf("expected clipboard URL, got %q", got)
+	}
+	if err := tt.Click("打开链接: 星河云 Go 后端工程师"); err != nil {
+		t.Fatal(err)
+	}
+	if openedURL != "https://jobs.example.com/backend" {
+		t.Fatalf("expected Host.OpenURL call, got %q", openedURL)
+	}
+	openURLErr = errors.New("browser unavailable")
+	if err := tt.Click("打开链接: 星河云 Go 后端工程师"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("打开投递链接失败") {
+		t.Fatalf("expected open URL failure toast, texts=%q", tt.Texts())
+	}
+}
+
+// Filtering, sorting, pagination, four fixed views, aggregate statistics, and app restart work consistently across 25+ job applications.
+func TestJobFilterSearchSortPaginationViewsAndRestart(t *testing.T) {
+	nowVal := time.Date(2026, 11, 1, 9, 0, 0, 0, time.Local)
+	nowFn := func() time.Time { return nowVal }
+	dataDir := t.TempDir()
+	app, wb, tt := openTestWorkbenchAt(t, dataDir, nowFn, Host{})
+	ctx := context.Background()
+
+	// Seed 25 non-deleted applications plus 1 soft-deleted application across views and outcomes.
+	for i := 1; i <= 25; i++ {
+		nowVal = time.Date(2026, 11, 1, 9, i, 0, 0, time.Local)
+		applied := fmt.Sprintf("2026-10-%02d", i)
+		stage := model.JobStageApplied
+		channel := "官网"
+		notes := fmt.Sprintf("记录-%02d", i)
+		company := fmt.Sprintf("公司-%02d", i)
+		pos := fmt.Sprintf("岗位-%02d", i)
+		if i == 1 {
+			stage = model.JobStageAssessment
+			company = "云巅数据"
+			pos = "Rust系统工程师"
+			channel = "内推码VIP"
+			notes = "含Rust备注"
+		} else if i == 2 {
+			stage = model.JobStageOffer
+		} else if i == 3 || i == 4 || i == 5 {
+			stage = model.JobStageInterview2
+		}
+		created, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:  company,
+			PositionName: pos,
+			AppliedDate:  applied,
+			Stage:        stage,
+			Channel:      channel,
+			Notes:        notes,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch i {
+		case 3:
+			nowVal = nowVal.Add(time.Hour)
+			if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{
+				ID:            created.ID,
+				Outcome:       model.JobOutcomeOfferAccepted,
+				StageOverride: model.JobStageOffer,
+				Reason:        "接收 Offer",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		case 4:
+			nowVal = nowVal.Add(2 * time.Hour)
+			if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{
+				ID:      created.ID,
+				Outcome: model.JobOutcomeRejected,
+				Reason:  "二面结束",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		case 5:
+			nowVal = nowVal.Add(3 * time.Hour)
+			if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{
+				ID:            created.ID,
+				Outcome:       model.JobOutcomeRejected,
+				StageOverride: model.JobStageOffer,
+				Reason:        "Offer 后取消 hc",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	deletedApp, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:  "已删除公司",
+		PositionName: "已删除岗位",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.JobApplications.Delete(ctx, deletedApp.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	wb.SwitchModule("job_applications")
+	tt.Frame()
+
+	// Verify global stats invariants over 25 non-deleted applications (22 active, 3 closed, 3 reached offer: i=2 active Offer, i=3 accepted, i=5 reached Offer before rejection).
+	if wb.jobStats.Total != 25 || wb.jobStats.Active != 22 || wb.jobStats.Closed != 3 || wb.jobStats.Offered != 3 {
+		t.Fatalf("unexpected stats across 25 rows: %+v", wb.jobStats)
+	}
+	if len(wb.filteredJobApps) != 25 || wb.jobPage != 0 {
+		t.Fatalf("expected 25 filtered apps on page 0, got %d page=%d", len(wb.filteredJobApps), wb.jobPage)
+	}
+	if err := tt.Click("下一页"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.jobPage != 1 {
+		t.Fatalf("expected page 1 after 下一页, got %d", wb.jobPage)
+	}
+	paged, _, totalPages := wb.pagedJobApps()
+	if totalPages != 2 || len(paged) != 5 {
+		t.Fatalf("expected 5 rows on page 2 of 2, got len=%d totalPages=%d", len(paged), totalPages)
+	}
+
+	// Filtering clamps page back to 0 when results shrink below current page offset.
+	typeIntoJobField(t, tt, "搜索投递记录", "Rust")
+	if wb.jobPage != 0 || len(wb.filteredJobApps) != 1 || wb.filteredJobApps[0].CompanyName != "云巅数据" {
+		t.Fatalf("expected page clamped to 0 with 1 Rust match, got page=%d matches=%+v", wb.jobPage, wb.filteredJobApps)
+	}
+	// Combined AND filter: search Rust + stage 笔试 / 测评 matches 1; changing outcome to 未通过 narrows to 0.
+	chooseSelectOption(t, tt, "筛选阶段", "笔试 / 测评")
+	if len(wb.filteredJobApps) != 1 {
+		t.Fatalf("expected AND match of query+stage, got %d", len(wb.filteredJobApps))
+	}
+	chooseSelectOption(t, tt, "筛选结果", "未通过")
+	if len(wb.filteredJobApps) != 0 || !tt.HasText("没有符合筛选条件的记录") {
+		t.Fatalf("expected empty filtered state, len=%d", len(wb.filteredJobApps))
+	}
+	if err := tt.Click("清除筛选"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.filteredJobApps) != 25 {
+		t.Fatalf("expected ClearJobFilters to restore 25 apps, got %d", len(wb.filteredJobApps))
+	}
+
+	// Verify sort orders (applied_asc puts Company 01 / 2026-10-01 first; updated_desc puts Company-05 last closed first).
+	chooseSelectOption(t, tt, "排序方式", "投递日期 ↑")
+	if wb.filteredJobApps[0].AppliedDate != "2026-10-01" {
+		t.Fatalf("expected earliest applied date first under SortAppliedAsc, got %+v", wb.filteredJobApps[0])
+	}
+	chooseSelectOption(t, tt, "排序方式", "最近更新 ↓")
+	if wb.filteredJobApps[0].CompanyName != "公司-05" {
+		t.Fatalf("expected latest updated app 公司-05 first under SortUpdatedDesc, got %+v", wb.filteredJobApps[0])
+	}
+
+	// Verify 4 built-in views preserve global stats while filtering view membership cleanly.
+	if err := tt.Click("进行中"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.filteredJobApps) != 22 {
+		t.Fatalf("expected 22 rows in 进行中, got %d", len(wb.filteredJobApps))
+	}
+	if err := tt.Click("已获 Offer"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.filteredJobApps) != 3 {
+		t.Fatalf("expected 3 rows in 已获 Offer (Offer active + historical ReachedOffer closed), got %d", len(wb.filteredJobApps))
+	}
+	for _, a := range wb.filteredJobApps {
+		if a.CompanyName == "公司-04" {
+			t.Fatalf("non-offer rejected row 公司-04 must not appear in 已获 Offer")
+		}
+	}
+	if err := tt.Click("已结束"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(wb.filteredJobApps) != 3 || wb.jobStats.Total != 25 {
+		t.Fatalf("expected 3 rows in 已结束 with global stats Total=25, got rows=%d stats=%+v", len(wb.filteredJobApps), wb.jobStats)
+	}
+
+	// Reopening backend/Workbench on same DataDir preserves all records and stats across restarts.
+	_ = app.Close()
+	_, wb2, tt2 := openTestWorkbenchAt(t, dataDir, nowFn, Host{})
+	wb2.SwitchModule("job_applications")
+	tt2.Frame()
+	if wb2.jobStats.Total != 25 || wb2.jobStats.Offered != 3 || len(wb2.jobApps) != 25 {
+		t.Fatalf("expected restarted Workbench to reload all 25 apps, got stats=%+v len=%d", wb2.jobStats, len(wb2.jobApps))
+	}
+}
+
+// Closing requires Offer confirmation for offer outcomes, closed rows allow stage correction and reopening with preserved events, timeline notes/backfill leave current state intact, and empty/narrow states render cleanly.
+func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
+	nowVal := time.Date(2026, 11, 15, 11, 0, 0, 0, time.Local)
+	nowFn := func() time.Time { return nowVal }
+	app, wb, tt := openTestWorkbenchAt(t, t.TempDir(), nowFn, Host{})
+	wb.SwitchModule("job_applications")
+	tt.Frame()
+
+	// Empty state offers CTA to create directly.
+	if !tt.HasText("暂无投递记录") {
+		t.Fatalf("expected initial empty state message, texts=%q", tt.Texts())
+	}
+	if err := tt.Click("立即新增投递"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !wb.jobCreateOpen {
+		t.Fatal("expected empty state CTA to open create modal")
+	}
+	if err := tt.Click("关闭新增投递弹窗"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	created, err := app.JobApplications.Create(context.Background(), jobapplications.CreateInput{
+		CompanyName:  "蓝海智算",
+		PositionName: "存储研发",
+		AppliedDate:  "2026-11-10",
+		Stage:        model.JobStageAssessment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadJobApplications()
+	tt.Frame()
+
+	// Open Detail Modal and test Closing with Offer outcome requirement.
+	if err := tt.Click("查看详情 蓝海智算 存储研发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !wb.jobDetailOpen || wb.detailJob == nil {
+		t.Fatal("expected detail modal open")
+	}
+	if err := tt.Click("结束流程"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	chooseSelectOption(t, tt, "选择结束结果", "接受 Offer")
+	if err := tt.Click("确认结束流程"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !wb.jobCloseOpen || !strings.Contains(wb.jobCloseErr, "要求阶段为 Offer") {
+		t.Fatalf("expected Offer confirmation error before checkbox checked, open=%v err=%q", wb.jobCloseOpen, wb.jobCloseErr)
+	}
+
+	if err := tt.Click("确认同步将当前阶段调整为 Offer"); err != nil {
+		t.Fatal(err)
+	}
+	typeIntoJobField(t, tt, "输入结束原因", "团队技术栈匹配")
+	if err := tt.Click("确认结束流程"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.jobCloseOpen || wb.detailJob.Lifecycle != model.JobLifecycleClosed || wb.detailJob.Stage != model.JobStageOffer || !wb.detailJob.ReachedOffer {
+		t.Fatalf("expected closed Offer app, open=%v detail=%+v", wb.jobCloseOpen, wb.detailJob)
+	}
+
+	// Stage correction while closed keeps Lifecycle == closed; editing closure reason saves via detail draft.
+	chooseSelectOption(t, tt, "详情阶段", "HR 面")
+	if wb.detailJob.Lifecycle != model.JobLifecycleClosed || wb.detailJob.Stage != model.JobStageHR {
+		t.Fatalf("expected closed stage correction without reopening, detail=%+v", wb.detailJob)
+	}
+	typeIntoJobField(t, tt, "详情结束原因", "更正后的结束说明")
+	persisted, err := app.JobApplications.Get(context.Background(), created.ID)
+	if err != nil || persisted.ClosureReason != "更正后的结束说明" || persisted.Lifecycle != model.JobLifecycleClosed {
+		t.Fatalf("expected updated closure reason on closed row, got %+v err=%v", persisted, err)
+	}
+
+	// Reopening clears current outcome/closure reason while keeping historical closed + reopened events.
+	if err := tt.Click("重新开启"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.detailJob.Lifecycle != model.JobLifecycleActive || wb.detailJob.Outcome != "" || wb.detailJob.ClosureReason != "" {
+		t.Fatalf("expected reopened active state with cleared current closure fields, got %+v", wb.detailJob)
+	}
+
+	// Scroll inside Detail Modal body so timeline note and historical backfill controls enter viewport cleanly.
+	tt.Scroll(720, 450, 0, 5000)
+	tt.Advance(time.Second)
+	tt.Frame()
+
+	// Manual note event and historical backfill leave current stage & lifecycle untouched.
+	stageBefore := wb.detailJob.Stage
+	typeIntoJobField(t, tt, "时间线备注输入", "HR 告知下周发正式书面材料")
+	if err := tt.Click("添加备注"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Scroll(720, 450, 0, 5000)
+	tt.Advance(time.Second)
+	tt.Frame()
+	chooseSelectOption(t, tt, "补录阶段", "二面")
+	typeIntoJobField(t, tt, "补录说明", "系统架构深挖表现较好")
+	if err := tt.Click("补录历史事件"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.detailJob.Stage != stageBefore || wb.detailJob.Lifecycle != model.JobLifecycleActive {
+		t.Fatalf("backfill/note mutated current workflow state: before=%q after=%+v", stageBefore, wb.detailJob)
+	}
+	var sawClosed, sawReopened, sawNote, sawBackfill bool
+	for _, ev := range wb.detailJobEvents {
+		switch ev.EventType {
+		case model.JobEventClosed:
+			sawClosed = ev.Outcome == model.JobOutcomeOfferAccepted
+		case model.JobEventReopened:
+			sawReopened = true
+		case model.JobEventNoteAdded:
+			sawNote = strings.Contains(ev.Note, "书面材料")
+		case model.JobEventStageBackfilled:
+			sawBackfill = ev.ToStage == model.JobStageInterview2
+		}
+	}
+	if !sawClosed || !sawReopened || !sawNote || !sawBackfill {
+		t.Fatalf("missing expected timeline events: closed=%v reopened=%v note=%v backfill=%v events=%+v", sawClosed, sawReopened, sawNote, sawBackfill, wb.detailJobEvents)
+	}
+	if err := tt.Click("关闭投递详情"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	// Narrow viewport renders horizontal scroll table + pagination controls cleanly without panicking.
+	ttNarrow := ui.NewTesterWith(wb.View, 900, 620, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
+	ttNarrow.Frame()
+	if !ttNarrow.HasText("蓝海智算") {
+		t.Fatalf("expected job row visible under narrow viewport, texts=%q", ttNarrow.Texts())
+	}
+}
+
+// Job applications integrate with the global Recycle Bin (filter, restore with events, permanent cascade delete) and older v1 backups upgrade cleanly upon restore.
+func TestJobGlobalRecycleBinAndRestoreCompatibility(t *testing.T) {
+	nowVal := time.Date(2026, 11, 15, 12, 0, 0, 0, time.Local)
+	nowFn := func() time.Time { return nowVal }
+	app, wb, tt := openTestWorkbenchAt(t, t.TempDir(), nowFn, Host{})
+	ctx := context.Background()
+
+	// Create a project + deleted task AND a job + stage change event, then delete both to Recycle Bin.
+	proj, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "核心引擎"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := app.Projects.CreateTask(ctx, proj.ID, projects.TaskInput{Title: "待删任务"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Projects.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:  "光年科技",
+		PositionName: "基础设施开发",
+		Stage:        model.JobStageApplied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.JobApplications.ChangeStage(ctx, jobapplications.ChangeStageInput{
+		ID:      job.ID,
+		ToStage: model.JobStageInterview1,
+		Note:    "约一面",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadJobApplications()
+	wb.SwitchModule("job_applications")
+	tt.Frame()
+
+	// Delete job from its Detail Modal and navigate to global Recycle Bin.
+	if err := tt.Click("查看详情 光年科技 基础设施开发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("移入回收站"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.jobDetailOpen || len(wb.jobApps) != 0 {
+		t.Fatalf("expected deleted job closed and removed from active list, open=%v len=%d", wb.jobDetailOpen, len(wb.jobApps))
+	}
+
+	wb.NavigateTo(NavTrash)
+	tt.Frame()
+	chooseSelectOption(t, tt, "回收站类型筛选", "仅看求职投递")
+	if !tt.HasText("光年科技 / 基础设施开发") || tt.HasText("待删任务") {
+		t.Fatalf("expected trash filter 仅看求职投递 to show only job item, texts=%q", tt.Texts())
+	}
+
+	// Restore job from Recycle Bin and confirm timeline events returned with it.
+	if err := tt.Click("恢复 光年科技 / 基础设施开发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	events, err := app.JobApplications.ListEvents(ctx, job.ID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("expected restored job to keep all 2 events, err=%v events=%+v", err, events)
+	}
+	wb.SwitchModule("job_applications")
+	tt.Frame()
+	if len(wb.jobApps) != 1 || wb.jobApps[0].ID != job.ID {
+		t.Fatalf("expected restored job visible again in 求职 list, got %+v", wb.jobApps)
+	}
+
+	// Delete again and permanently delete from Recycle Bin; verify cascade removal of events.
+	wb.DeleteJobApplication(job.ID)
+	wb.NavigateTo(NavTrash)
+	tt.Frame()
+	if err := tt.Click("彻底删除 光年科技 / 基础设施开发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("确认彻底删除"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	var eventCount int
+	db, err := sql.Open("sqlite", filepath.Join(app.DataDir(), "aion.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM job_application_events WHERE application_id = ?`, job.ID).Scan(&eventCount); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+	if eventCount != 0 {
+		t.Fatalf("expected permanent delete to cascade job_application_events, got %d", eventCount)
+	}
+
+	// Seed a new live job, then restore an older v1 backup zip (no job tables); expect schema upgraded to v2, old live jobs cleared, safety backup retained.
+	if _, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:  "恢复前投递",
+		PositionName: "会被旧备份覆盖",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wb.ReloadJobApplications()
+	v1Zip := buildFrontendV1BackupZip(t, nowVal.Add(-24*time.Hour), nil)
+	wb.RequestRestoreBackup(v1Zip)
+	wb.TriggerRestoreBackup()
+	tt.Frame()
+	if wb.jobStats.Total != 0 || len(wb.jobApps) != 0 {
+		t.Fatalf("expected restoring v1 backup to clear pre-restore live jobs, got len=%d stats=%+v", len(wb.jobApps), wb.jobStats)
+	}
+	if len(wb.activeProjects) != 1 || wb.activeProjects[0].Name != "旧版项目" {
+		t.Fatalf("expected v1 project restored after upgrade, got %+v", wb.activeProjects)
+	}
+	if wb.lastRestoreResult == nil || wb.lastRestoreResult.SafetyBackupPath == "" {
+		t.Fatalf("expected safety backup recorded before restoring v1 archive, result=%+v", wb.lastRestoreResult)
+	}
+	if _, err := os.Stat(wb.lastRestoreResult.SafetyBackupPath); err != nil {
+		t.Fatalf("expected safety backup archive on disk: %v", err)
+	}
+}
+

@@ -19,6 +19,7 @@ var (
 	projectIconLookup map[string]*ui.SVG
 	defaultIconSVG    *ui.SVG
 	projectsModSVG    *ui.SVG
+	jobsModSVG        *ui.SVG
 )
 
 // AionSymbolSVG returns the Aion symbol SVG.
@@ -37,6 +38,7 @@ func ensureIconCache() {
 		}
 		defaultIconSVG = lucide.Folder()
 		projectsModSVG = lucide.FolderKanban()
+		jobsModSVG = lucide.Briefcase()
 	})
 }
 
@@ -80,6 +82,8 @@ func ModuleIconSVG(mod backend.ModuleDescriptor) *ui.SVG {
 	switch mod.ID {
 	case "projects":
 		return projectsModSVG
+	case "job_applications":
+		return jobsModSVG
 	default:
 		return defaultIconSVG
 	}

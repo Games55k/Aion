@@ -552,7 +552,7 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 	if err = decodeJSON(b, &m); err != nil {
 		return "", invalid("invalid manifest: %v", err)
 	}
-	if m.Version != FormatVersion || m.SchemaVersion != store.SchemaVersion || m.CreatedAt.IsZero() || (m.Kind != "manual" && m.Kind != "auto" && m.Kind != "safety") {
+	if m.Version != FormatVersion || m.SchemaVersion < store.MinSchemaVersion || m.SchemaVersion > store.SchemaVersion || m.CreatedAt.IsZero() || (m.Kind != "manual" && m.Kind != "auto" && m.Kind != "safety") {
 		return "", invalid("unsupported manifest")
 	}
 	if len(m.Files)+1 != len(entries) {
@@ -605,9 +605,26 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 	if _, ok := records["database.sqlite"]; !ok {
 		return "", invalid("missing database")
 	}
-	refs, err := validateDB(ctx, filepath.Join(dir, "database.sqlite"), expected)
+	dbPath := filepath.Join(dir, "database.sqlite")
+	stageExpected := expected
+	if m.SchemaVersion != store.SchemaVersion {
+		stageExpected, err = expectedSchemaForVersion(ctx, m.SchemaVersion)
+		if err != nil {
+			return "", invalid("build expected schema for version %d: %v", m.SchemaVersion, err)
+		}
+	}
+	refs, err := validateDBAtVersion(ctx, dbPath, m.SchemaVersion, stageExpected)
 	if err != nil {
 		return "", err
+	}
+	if m.SchemaVersion < store.SchemaVersion {
+		if err = store.MigrateDatabaseFile(ctx, dbPath); err != nil {
+			return "", invalid("upgrade backup database: %v", err)
+		}
+		refs, err = validateDBAtVersion(ctx, dbPath, store.SchemaVersion, expected)
+		if err != nil {
+			return "", err
+		}
 	}
 	if len(refs)+1 != len(records) {
 		return "", invalid("unreferenced or missing attachment")
@@ -622,7 +639,19 @@ func (s *Service) stage(ctx context.Context, source string, expected []schemaObj
 	return dir, nil
 }
 
-func validateDB(ctx context.Context, path string, expected []schemaObject) ([]attachment, error) {
+func expectedSchemaForVersion(ctx context.Context, version int) ([]schemaObject, error) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	if err = store.ApplySchemaUpTo(ctx, db, version); err != nil {
+		return nil, err
+	}
+	return schema(ctx, db)
+}
+
+func validateDBAtVersion(ctx context.Context, path string, expectedVersion int, expected []schemaObject) ([]attachment, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	u := url.URL{Scheme: "file", Path: path}
@@ -641,7 +670,7 @@ func validateDB(ctx context.Context, path string, expected []schemaObject) ([]at
 	if err = db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return nil, invalid("invalid SQLite: %v", err)
 	}
-	if version != store.SchemaVersion {
+	if version != expectedVersion {
 		return nil, invalid("unsupported database schema %d", version)
 	}
 	actual, err := schema(ctx, db)
@@ -667,7 +696,7 @@ func validateDB(ctx context.Context, path string, expected []schemaObject) ([]at
 	if bad {
 		return nil, invalid("broken foreign key reference")
 	}
-	if err = validateValues(ctx, db); err != nil {
+	if err = validateValues(ctx, db, expectedVersion); err != nil {
 		return nil, err
 	}
 	return readAttachments(ctx, db)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"aion/backend/jobapplications"
 	"aion/backend/model"
 	"aion/backend/projects"
 
@@ -20,6 +21,7 @@ var trashKindOptions = []field.SelectOption{
 	{Value: "", Label: "全部类型"},
 	{Value: projects.TrashProject, Label: "仅看项目"},
 	{Value: projects.TrashTask, Label: "仅看任务"},
+	{Value: jobapplications.TrashKind, Label: "仅看求职投递"},
 }
 
 func (w *Workbench) filterTrashItems() []model.TrashItem {
@@ -72,7 +74,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 						Variant: display.TagFilled,
 					})
 				})
-				ui.Text(c, "已删除的项目与任务可在此恢复或彻底清除。").
+				ui.Text(c, "已删除的项目、任务与投递记录可在此恢复或彻底清除。").
 					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
 			})
 
@@ -94,7 +96,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 
 			ui.Box(c).Width(280).Children(func() {
 				field.SearchBar(c, &w.trashSearch, field.SearchBarProps{
-					Placeholder: "搜索已删除的项目或任务...",
+					Placeholder: "搜索已删除的项目、任务或投递...",
 					Size:        theme.Small,
 				}).Label("搜索回收站")
 			})
@@ -142,7 +144,7 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *theme.Tokens) {
 					ui.Box(c).Padding(48, 24).Radius(tk.BorderRadiusLG).Background(tk.BgContainer).
 						Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 						emptyTitle := "回收站为空"
-						emptyDesc := "当前没有任何已删除的项目或任务。"
+						emptyDesc := "当前没有任何已删除的项目、任务或投递记录。"
 						if len(w.trashItems) > 0 {
 							emptyTitle = "没有匹配的回收站条目"
 							emptyDesc = "请尝试调整搜索词或切换类型筛选条件。"
@@ -174,10 +176,15 @@ func (w *Workbench) renderTrashRow(c *ui.Context, tk *theme.Tokens, item model.T
 			iconSVG := lucide.Folder()
 			tagText := "项目"
 			tagColor := display.TagPurple
-			if item.Kind == projects.TrashTask {
+			switch item.Kind {
+			case projects.TrashTask:
 				iconSVG = lucide.CheckCheck()
 				tagText = "任务"
 				tagColor = display.TagBlue
+			case jobapplications.TrashKind:
+				iconSVG = lucide.Briefcase()
+				tagText = "求职投递"
+				tagColor = display.TagCyan
 			}
 
 			ui.Box(c).Size(36, 36).Radius(tk.BorderRadiusSM).Background(tk.FillTertiary).Center().Shrink(0).Children(func() {
@@ -207,6 +214,8 @@ func (w *Workbench) renderTrashRow(c *ui.Context, tk *theme.Tokens, item model.T
 					metaParts = append([]string{"所属项目: " + projName}, metaParts...)
 				} else if item.Kind == projects.TrashProject {
 					metaParts = append([]string{"恢复项目将同时恢复随该项目一起删除的任务"}, metaParts...)
+				} else if item.Kind == jobapplications.TrashKind {
+					metaParts = append([]string{"恢复后将保留该投递的完整时间线历史"}, metaParts...)
 				}
 				ui.Text(c, strings.Join(metaParts, " · ")).FontSize(12).TextColor(tk.TextTertiary).SingleLine()
 			})
@@ -273,11 +282,14 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 	}, func() {
 		desc := "即将永久删除所选条目及其本地附件，此操作无法恢复。"
 		if w.confirmPermDeleteItem != nil {
-			kindLabel := "任务"
-			if w.confirmPermDeleteItem.Kind == projects.TrashProject {
-				kindLabel = "项目及其下属所有任务"
+			switch w.confirmPermDeleteItem.Kind {
+			case projects.TrashProject:
+				desc = fmt.Sprintf("即将永久删除项目及其下属所有任务「%s」与本地附件，此操作无法恢复。", w.confirmPermDeleteItem.Name)
+			case jobapplications.TrashKind:
+				desc = fmt.Sprintf("即将永久删除投递记录「%s」及其全部流程时间线，此操作无法恢复。", w.confirmPermDeleteItem.Name)
+			default:
+				desc = fmt.Sprintf("即将永久删除任务「%s」及其本地附件，此操作无法恢复。", w.confirmPermDeleteItem.Name)
 			}
-			desc = fmt.Sprintf("即将永久删除%s「%s」及其本地附件，此操作无法恢复。", kindLabel, w.confirmPermDeleteItem.Name)
 		}
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			feedback.Alert(c, "此操作不可撤销", feedback.AlertProps{
@@ -301,7 +313,7 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *theme.Tokens) {
 			feedback.Alert(c, "清空后无法恢复", feedback.AlertProps{
 				Type:        feedback.Error,
 				Variant:     feedback.Soft,
-				Description: fmt.Sprintf("即将永久删除回收站中的全部 %d 项内容（包括项目、任务及其关联附件）。", len(w.trashItems)),
+				Description: fmt.Sprintf("即将永久删除回收站中的全部 %d 项内容（包括项目、任务、求职投递及关联数据）。", len(w.trashItems)),
 			})
 		})
 	}) {

@@ -3,11 +3,13 @@ package frontend
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"aion/backend/attachments"
 	"aion/backend/backup"
+	"aion/backend/jobapplications"
 	"aion/backend/model"
 	"aion/backend/projects"
 	"aion/backend/store"
@@ -22,7 +24,7 @@ func asyncTestWorkbench(t *testing.T) (*store.Store, *Workbench, *ui.Tester, cha
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	app.Projects, app.Attachments, app.Backups = projects.New(s), attachments.New(s), backup.New(s)
+	app.Projects, app.JobApplications, app.Attachments, app.Backups = projects.New(s), jobapplications.New(s), attachments.New(s), backup.New(s)
 	var ps []model.Project
 	for _, name := range []string{"First project", "Second project", "Last project"} {
 		p, err := app.Projects.CreateProject(context.Background(), projects.ProjectInput{Name: name})
@@ -266,3 +268,233 @@ func TestAsyncStatusSaveThenCloseRefreshesBoard(t *testing.T) {
 		t.Fatal("closed details left board in old column")
 	}
 }
+
+func asyncJobTestWorkbench(t *testing.T) (*store.Store, *Workbench, *ui.Tester, chan func(), model.JobApplication, model.JobApplication) {
+	t.Helper()
+	s, w, tt, queue, _, _ := asyncTestWorkbench(t)
+	w.ClearSelectedTask()
+	ctx := context.Background()
+	first, err := w.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:    "初始公司A",
+		PositionName:   "后端工程师",
+		Stage:          model.JobStageApplied,
+		ApplicationURL: "https://example.com/a",
+		Notes:          "初始备注",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := w.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:  "初始公司B",
+		PositionName: "架构师",
+		Stage:        model.JobStageInterview1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SwitchModule("job_applications")
+	drainTestUI(w, queue)
+	w.SelectJobApplication(first.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	return s, w, tt, queue, first, second
+}
+
+func typeJobDetailField(t *testing.T, tt *ui.Tester, label, value string) {
+	t.Helper()
+	if err := tt.Click(label); err != nil {
+		t.Fatalf("click %q: %v", label, err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type(value)
+	tt.Frame()
+}
+
+// Job detail edits coalesce to the latest draft under held Store locks while deferring module switching and detail closing until saved.
+func TestJobAsyncLatestDraftCoalescingAndSwitchModuleDeferral(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "第一次修改")
+	typeJobDetailField(t, tt, "详情公司名称", "最终公司名称")
+	if w.editJobCompany != "最终公司名称" || !w.jobSaving || !w.jobDirty {
+		t.Fatalf("expected coalesced local draft while saving, company=%q saving=%v dirty=%v", w.editJobCompany, w.jobSaving, w.jobDirty)
+	}
+	if w.PrepareClose() {
+		t.Fatal("PrepareClose must return false while job auto-save is pending")
+	}
+
+	// Switching module and closing details wait for the in-flight + coalesced save to settle.
+	w.SwitchModule("projects")
+	if w.activeModule != "job_applications" {
+		t.Fatalf("SwitchModule jumped ahead of pending job save: module=%q", w.activeModule)
+	}
+	w.CloseJobDetail()
+	unlock()
+	w.WaitForTasks()
+	if w.PrepareClose() {
+		t.Fatal("PrepareClose must wait until UI dispatch drains final save confirmation")
+	}
+	drainTestUI(w, queue)
+
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "最终公司名称" {
+		t.Fatalf("expected coalesced job draft saved, got %+v err=%v", saved, err)
+	}
+	if w.jobDetailOpen || w.jobSaving || w.jobDirty || !w.PrepareClose() {
+		t.Fatalf("expected closed detail and clean PrepareClose after drain, open=%v saving=%v dirty=%v", w.jobDetailOpen, w.jobSaving, w.jobDirty)
+	}
+}
+
+// Invalid job detail drafts block detail close, module switching, navigation, and app close until fixed or discarded.
+func TestJobAsyncInvalidDraftBlocksCloseSwitchAndPrepareClose(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "合法新公司")
+	typeJobDetailField(t, tt, "详情投递链接", "ftp://invalid.example.com")
+	unlock()
+	drainTestUI(w, queue)
+
+	if w.jobSaveState != "validation_error" || !w.jobDirty || w.editJobURL != "ftp://invalid.example.com" {
+		t.Fatalf("expected validation error preserving newer invalid URL draft, state=%q dirty=%v url=%q", w.jobSaveState, w.jobDirty, w.editJobURL)
+	}
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "合法新公司" {
+		t.Fatalf("expected prior valid draft persisted before invalid edit, got %+v err=%v", saved, err)
+	}
+
+	w.CloseJobDetail()
+	w.SwitchModule("projects")
+	w.NavigateTo(NavSettings)
+	if !w.jobDetailOpen || w.activeModule != "job_applications" || w.navPage != NavJobAll || w.PrepareClose() {
+		t.Fatalf("invalid job draft failed to block close/switch/nav/PrepareClose: open=%v mod=%q page=%v", w.jobDetailOpen, w.activeModule, w.navPage)
+	}
+
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if w.jobDirty || w.editJobURL != "https://example.com/a" || !w.PrepareClose() {
+		t.Fatalf("discard failed to revert to acknowledged state: dirty=%v url=%q", w.jobDirty, w.editJobURL)
+	}
+}
+
+// Failed background saves preserve the job draft for Retry and Discard during an in-flight write reverts to the persisted baseline.
+func TestJobAsyncSaveErrorRetryAndDiscardDuringFlight(t *testing.T) {
+	// Part 1: failed DB write retains dirty state until 重试保存 writes cleanly after reopening store.
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	typeJobDetailField(t, tt, "详情公司名称", "失败重试公司")
+	w.SwitchModule("projects")
+	drainTestUI(w, queue)
+	if w.jobSaveState != "error" || !w.jobDirty || w.editJobCompany != "失败重试公司" || w.activeModule != "job_applications" {
+		t.Fatalf("expected save error preserving draft and canceling switch, state=%q dirty=%v company=%q mod=%q", w.jobSaveState, w.jobDirty, w.editJobCompany, w.activeModule)
+	}
+	reopened, err := store.Open(s.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	w.app.JobApplications = jobapplications.New(reopened)
+	tt.Frame()
+	if err := tt.Click("重试保存"); err != nil {
+		t.Fatal(err)
+	}
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "失败重试公司" || w.jobDirty || w.activeModule != "job_applications" {
+		t.Fatalf("expected retry to save cleanly without replaying canceled module switch, saved=%+v err=%v dirty=%v mod=%q", saved, err, w.jobDirty, w.activeModule)
+	}
+
+	// Part 2: discarding while an in-flight write is blocked drops queued edits and reverts cleanly once store unlocks.
+	s2, w2, tt2, queue2, jobA, _ := asyncJobTestWorkbench(t)
+	unlock := holdTestStore(t, s2)
+	typeJobDetailField(t, tt2, "详情公司名称", "在途写入")
+	typeJobDetailField(t, tt2, "详情公司名称", "排队写入")
+	typeJobDetailField(t, tt2, "详情公司名称", "   ")
+	if err := tt2.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if !w2.discardJobAfterSave {
+		t.Fatal("expected discardJobAfterSave flagged while worker still saving")
+	}
+	unlock()
+	drainTestUI(w2, queue2)
+	persistedA, err := w2.app.JobApplications.Get(context.Background(), jobA.ID)
+	if err != nil || persistedA.CompanyName != "在途写入" {
+		t.Fatalf("expected discarded queued draft ignored, got %+v err=%v", persistedA, err)
+	}
+	if w2.jobDirty || w2.editJobCompany != "在途写入" {
+		t.Fatalf("expected local detail reverted to persisted baseline, dirty=%v company=%q", w2.jobDirty, w2.editJobCompany)
+	}
+}
+
+// Stale background loads cannot overwrite newer job selection or filter views, and inline workflow transitions do not clobber unsaved detail text edits.
+func TestJobAsyncStaleLoadAndInlineVsDetailIsolation(t *testing.T) {
+	s, w, tt, queue, job1, job2 := asyncJobTestWorkbench(t)
+
+	// Hold store during inline workflow stage transition while detail modal holds an unsaved validation-blocked draft.
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情投递链接", "ftp://unsaved.invalid")
+	w.editJobNotes = "尚未保存的详情手写备注"
+	w.TouchJobDetailField()
+	w.ChangeJobStage(job1.ID, model.JobStageInterview1)
+	unlock()
+	drainTestUI(w, queue)
+	tt.Frame()
+
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.Stage != model.JobStageInterview1 || saved.Notes != "初始备注" {
+		t.Fatalf("expected inline stage transition without flushing invalid unsaved draft, got %+v err=%v", saved, err)
+	}
+	if w.editJobNotes != "尚未保存的详情手写备注" || w.detailJob.Stage != model.JobStageInterview1 || len(w.detailJobEvents) < 2 {
+		t.Fatalf("expected inline stage update without clobbering unsaved detail notes, notes=%q stage=%q events=%d", w.editJobNotes, w.detailJob.Stage, len(w.detailJobEvents))
+	}
+
+	// Discard invalid draft, then stale load from opening job1 cannot replace newer job2 selection/navigation.
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.CloseJobDetail()
+	drainTestUI(w, queue)
+	unlock2 := holdTestStore(t, s)
+	w.SelectJobApplication(job1.ID)
+	w.SwitchModule("projects")
+	w.SwitchModule("job_applications")
+	w.SelectJobApplication(job2.ID)
+	unlock2()
+	drainTestUI(w, queue)
+	if w.selectedJobID != job2.ID || w.detailJob == nil || w.detailJob.ID != job2.ID {
+		t.Fatalf("expected newer job2 selection to win over stale load, selected=%q detail=%+v", w.selectedJobID, w.detailJob)
+	}
+}
+
+// Restoring a backup is blocked while a job detail draft is actively saving and succeeds once saving drains.
+func TestJobAsyncRestoreBackupGuardWhileSaving(t *testing.T) {
+	s, w, tt, queue, _, _ := asyncJobTestWorkbench(t)
+	zipPath := filepath.Join(t.TempDir(), "manual-backup.zip")
+	if err := w.app.Backups.Export(context.Background(), zipPath); err != nil {
+		t.Fatal(err)
+	}
+
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "保存中阻断恢复")
+	w.RequestRestoreBackup(zipPath)
+	w.TriggerRestoreBackup()
+	if w.IsRestoring() || !w.confirmRestoreOpen {
+		t.Fatalf("expected TriggerRestoreBackup blocked while jobSaving is true, restoring=%v confirm=%v", w.IsRestoring(), w.confirmRestoreOpen)
+	}
+
+	unlock()
+	drainTestUI(w, queue)
+	w.TriggerRestoreBackup()
+	if !w.IsRestoring() {
+		t.Fatal("expected restore to start once job save drained")
+	}
+	drainTestUI(w, queue)
+	if w.IsRestoring() || w.jobDetailOpen {
+		t.Fatalf("expected completed restore to reset restoring & job detail state, restoring=%v open=%v", w.IsRestoring(), w.jobDetailOpen)
+	}
+}
+

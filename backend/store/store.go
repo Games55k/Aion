@@ -20,7 +20,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 1
+const (
+	MinSchemaVersion = 1
+	SchemaVersion    = 2
+)
 
 type Store struct {
 	// All backup Service instances share this gate; ordinary transactions do not.
@@ -109,39 +112,82 @@ func (s *Store) DBPath() string         { return filepath.Join(s.root, "aion.sql
 func (s *Store) AttachmentsDir() string { return filepath.Join(s.root, "attachments") }
 
 func (s *Store) migrate() error {
-	var version int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+	return migrateDB(context.Background(), s.db, SchemaVersion, true)
+}
+
+// ApplySchemaUpTo initializes an empty or older database connection up to targetVersion.
+func ApplySchemaUpTo(ctx context.Context, db *sql.DB, targetVersion int) error {
+	return migrateDB(ctx, db, targetVersion, true)
+}
+
+// MigrateDatabaseFile upgrades an isolated SQLite file from an older supported schema version to SchemaVersion.
+func MigrateDatabaseFile(ctx context.Context, path string) error {
+	db, err := openDB(path)
+	if err != nil {
 		return err
 	}
-	if version > SchemaVersion {
+	defer db.Close()
+	return migrateDB(ctx, db, SchemaVersion, false)
+}
+
+func migrateDB(ctx context.Context, db *sql.DB, targetVersion int, allowEmpty bool) error {
+	if targetVersion < MinSchemaVersion || targetVersion > SchemaVersion {
+		return fmt.Errorf("unsupported target schema version %d", targetVersion)
+	}
+	var version int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version < 0 || version > SchemaVersion {
 		return fmt.Errorf("unsupported database version %d", version)
 	}
-	if version == SchemaVersion {
+	if !allowEmpty && version < MinSchemaVersion {
+		return fmt.Errorf("unsupported database version %d", version)
+	}
+	if version == targetVersion {
 		return nil
 	}
-	tx, err := s.db.Begin()
+	if version > targetVersion {
+		return fmt.Errorf("cannot downgrade database version %d to %d", version, targetVersion)
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, statement := range schema {
-		if _, err = tx.Exec(statement); err != nil {
-			return err
+	for v := version; v < targetVersion; v++ {
+		for _, statement := range schemaSteps[v] {
+			if _, err = tx.ExecContext(ctx, statement); err != nil {
+				return err
+			}
 		}
 	}
-	if _, err = tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", targetVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-var schema = []string{
+var schemaSteps = [][]string{
+	schemaV1,
+	schemaV2,
+}
+
+var schemaV1 = []string{
 	`CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,icon TEXT NOT NULL,description TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT)`,
 	`CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,title TEXT NOT NULL,description TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('planned','in_progress','done')),priority TEXT NOT NULL CHECK(priority IN('none','low','medium','high','urgent')),tags TEXT NOT NULL DEFAULT '[]',subtasks TEXT NOT NULL DEFAULT '[]',due_date TEXT NOT NULL DEFAULT '',position INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,completed_at TEXT,deleted_at TEXT)`,
 	`CREATE INDEX tasks_board ON tasks(project_id,status,position)`,
 	`CREATE TABLE attachments(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,name TEXT NOT NULL,storage_name TEXT NOT NULL UNIQUE,media_type TEXT NOT NULL,size INTEGER NOT NULL CHECK(size>=0),sha256 TEXT NOT NULL,created_at TEXT NOT NULL)`,
 	`CREATE INDEX attachments_task ON attachments(task_id)`,
 	`CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`,
+}
+
+var schemaV2 = []string{
+	`CREATE TABLE job_applications(id TEXT PRIMARY KEY,company_name TEXT NOT NULL,position_name TEXT NOT NULL,applied_date TEXT NOT NULL,stage TEXT NOT NULL CHECK(stage IN('applied','screening','assessment','interview_1','interview_2','interview_3','hr','offer')),lifecycle TEXT NOT NULL CHECK(lifecycle IN('active','closed')),outcome TEXT NOT NULL DEFAULT '' CHECK(outcome IN('','rejected','offer_accepted','offer_declined','withdrawn','position_cancelled','other')),closure_reason TEXT NOT NULL DEFAULT '',closed_at TEXT,application_url TEXT NOT NULL DEFAULT '',channel TEXT NOT NULL DEFAULT '',next_follow_up_date TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,CHECK((lifecycle='active' AND outcome='' AND closure_reason='' AND closed_at IS NULL) OR (lifecycle='closed' AND outcome IN('rejected','offer_accepted','offer_declined','withdrawn','position_cancelled','other') AND closed_at IS NOT NULL)))`,
+	`CREATE INDEX job_applications_active_list ON job_applications(deleted_at,lifecycle,applied_date,updated_at,id)`,
+	`CREATE INDEX job_applications_stage ON job_applications(deleted_at,stage)`,
+	`CREATE TABLE job_application_events(id TEXT PRIMARY KEY,application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,event_type TEXT NOT NULL CHECK(event_type IN('created','stage_changed','stage_backfilled','closed','reopened','note_added')),from_stage TEXT NOT NULL DEFAULT '' CHECK(from_stage IN('','applied','screening','assessment','interview_1','interview_2','interview_3','hr','offer')),to_stage TEXT NOT NULL DEFAULT '' CHECK(to_stage IN('','applied','screening','assessment','interview_1','interview_2','interview_3','hr','offer')),outcome TEXT NOT NULL DEFAULT '' CHECK(outcome IN('','rejected','offer_accepted','offer_declined','withdrawn','position_cancelled','other')),reason TEXT NOT NULL DEFAULT '',note TEXT NOT NULL DEFAULT '',occurred_at TEXT NOT NULL,created_at TEXT NOT NULL)`,
+	`CREATE INDEX job_application_events_app ON job_application_events(application_id,occurred_at,created_at,id)`,
 }
 
 func (s *Store) Read(ctx context.Context, fn func(*sql.Tx) error) error {
