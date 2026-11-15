@@ -35,7 +35,7 @@ func jobViewSubtitle(page NavPage) string {
 	case NavJobActive:
 		return "展示当前处于进行中流程的所有投递记录"
 	case NavJobOffer:
-		return "展示当前处于 Offer 阶段或历史上曾获 Offer 的投递记录"
+		return "展示当前处于 Offer 阶段或以 Offer 结果结束的投递记录"
 	case NavJobClosed:
 		return "展示已结束流程的投递记录，保留阶段与结束原因记录"
 	default:
@@ -123,13 +123,6 @@ func (w *Workbench) renderJobStatPill(c *ui.Context, tk *theme.Tokens, label str
 	ui.Row(c).Padding(8, 14).Gap(10).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgElevated).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, label).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 		ui.Text(c, fmt.Sprint(count)).FontSize(16).FontWeight(700).TextColor(tk.Text).SingleLine()
-		if color == display.TagSuccess && count > 0 {
-			display.Tag(c, "含历史 Offer", display.TagProps{
-				Color:   display.TagSuccess,
-				Variant: display.TagBorderless,
-				Size:    theme.Small,
-			})
-		}
 	})
 }
 
@@ -273,9 +266,9 @@ func (w *Workbench) renderJobEmptyState(c *ui.Context, tk *theme.Tokens) {
 
 const (
 	jobColCompanyWidth  float32 = 170
-	jobColPositionWidth float32 = 175
+	jobColPositionWidth float32 = 210
 	jobColStageWidth    float32 = 148
-	jobColStatusWidth   float32 = 155
+	jobColStatusWidth   float32 = 110
 	jobColDateWidth     float32 = 110
 	jobColFollowWidth   float32 = 146
 	jobColLinkWidth     float32 = 110
@@ -316,7 +309,7 @@ func (w *Workbench) renderJobTable(c *ui.Context, tk *theme.Tokens) {
 }
 
 func tableHeaderCell(c *ui.Context, tk *theme.Tokens, title string, width float32) {
-	ui.Box(c).Width(width).Shrink(0).Children(func() {
+	ui.Row(c).Width(width).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(12).FontWeight(600).TextColor(tk.TextSecondary).SingleLine()
 	})
 }
@@ -330,10 +323,10 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 	row.Children(func() {
 		// 1. Company (clickable to open detail modal)
 		compBtn := ui.ButtonBase(c.Key("open-comp-"+app.ID)).Width(jobColCompanyWidth).Shrink(0).
-			Justify(ui.Start).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("查看详情 " + app.CompanyName + " " + app.PositionName)
 		compBtn.Children(func() {
-			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Start).Gap(2).Children(func() {
+			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
 				ui.Text(c, app.CompanyName).FontSize(13).FontWeight(600).TextColor(tk.Text).SingleLine()
 				if app.Channel != "" {
 					ui.Text(c, app.Channel).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
@@ -346,10 +339,10 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 
 		// 2. Position + brief 1-line summary (closure reason / notes never expand row height)
 		posBtn := ui.ButtonBase(c.Key("open-pos-"+app.ID)).Width(jobColPositionWidth).Shrink(0).
-			Justify(ui.Start).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("打开投递详情 " + app.PositionName)
 		posBtn.Children(func() {
-			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Start).Gap(2).Children(func() {
+			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
 				ui.Text(c, app.PositionName).FontSize(13).TextColor(tk.Text).SingleLine()
 				if summary := briefSingleLineSummary(app); summary != "" {
 					ui.Text(c, summary).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
@@ -378,32 +371,23 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 			}
 		})
 
-		// 4. Lifecycle + Outcome Tags (separated from stage)
-		ui.Box(c).Width(jobColStatusWidth).Shrink(0).Children(func() {
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				if app.Lifecycle == model.JobLifecycleActive {
-					display.Tag(c, app.Lifecycle.Label(), display.TagProps{
-						Color: display.TagProcessing,
-						Size:  theme.Small,
-					})
-				} else {
-					display.Tag(c, app.Outcome.Label(), display.TagProps{
-						Color: jobOutcomeTagColor(app.Outcome),
-						Size:  theme.Small,
-					})
-				}
-				if app.ReachedOffer && app.Stage != model.JobStageOffer {
-					display.Tag(c, "曾获 Offer", display.TagProps{
-						Color:   display.TagSuccess,
-						Variant: display.TagOutlined,
-						Size:    theme.Small,
-					})
-				}
-			})
+		// 4. Lifecycle / Outcome Tag (separated from stage)
+		ui.Row(c).Width(jobColStatusWidth).Shrink(0).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			if app.Lifecycle == model.JobLifecycleActive {
+				display.Tag(c, app.Lifecycle.Label(), display.TagProps{
+					Color: display.TagProcessing,
+					Size:  theme.Small,
+				})
+			} else {
+				display.Tag(c, app.Outcome.Label(), display.TagProps{
+					Color: jobOutcomeTagColor(app.Outcome),
+					Size:  theme.Small,
+				})
+			}
 		})
 
 		// 5. Applied Date
-		ui.Box(c).Width(jobColDateWidth).Shrink(0).Children(func() {
+		ui.Row(c).Width(jobColDateWidth).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, app.AppliedDate).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 		})
 
@@ -423,7 +407,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 		})
 
 		// 7. Application URL Copy / Open & Detail Trigger
-		ui.Row(c).Width(jobColLinkWidth).Shrink(0).Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Width(jobColLinkWidth).Shrink(0).Gap(4).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			if app.ApplicationURL != "" {
 				if action.ActionIcon(c.Key("copy-url-"+app.ID), lucide.Copy(), action.ActionIconProps{
 					Size:  theme.Small,

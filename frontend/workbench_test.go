@@ -3454,9 +3454,19 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 		t.Fatalf("expected 3 jobs after multi-role create, got %d", len(wb.jobApps))
 	}
 
-	// Inline stage selector and follow-up DatePicker mutate table row and persist stage event in chronological order.
+	// Selecting Offer and then changing stage back away from Offer clears Offer stats cleanly without sticky Offer tags.
+	nowVal = nowVal.Add(time.Minute)
+	chooseSelectOption(t, tt, "阶段 星河云 前端工程师", "Offer")
+	if wb.jobStats.Offered != 1 {
+		t.Fatalf("expected Offered=1 while stage is Offer, got %+v", wb.jobStats)
+	}
 	nowVal = nowVal.Add(time.Minute)
 	chooseSelectOption(t, tt, "阶段 星河云 前端工程师", "一面")
+	if wb.jobStats.Offered != 0 || strings.Contains(strings.Join(tt.Texts(), "\n"), "曾获 Offer") {
+		t.Fatalf("expected moving away from Offer to clear Offer count & tags, stats=%+v texts=%q", wb.jobStats, tt.Texts())
+	}
+
+	// Inline stage selector and follow-up DatePicker mutate table row and persist stage event in chronological order.
 	pickDatePickerDay(t, tt, "下次跟进 星河云 前端工程师", time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local))
 	var frontendApp model.JobApplication
 	for _, a := range wb.jobApps {
@@ -3465,12 +3475,12 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 			break
 		}
 	}
-	if frontendApp.Stage != model.JobStageInterview1 || frontendApp.NextFollowUpDate != "2026-11-25" {
+	if frontendApp.Stage != model.JobStageInterview1 || frontendApp.NextFollowUpDate != "2026-11-25" || frontendApp.ReachedOffer {
 		t.Fatalf("inline edits not persisted cleanly: %+v", frontendApp)
 	}
 	events, err := app.JobApplications.ListEvents(context.Background(), frontendApp.ID)
-	if err != nil || len(events) != 2 || events[0].EventType != model.JobEventCreated || events[1].EventType != model.JobEventStageChanged || events[1].ToStage != model.JobStageInterview1 {
-		t.Fatalf("expected [created, stage_changed] timeline events, err=%v events=%+v", err, events)
+	if err != nil || len(events) != 3 || events[0].EventType != model.JobEventCreated || events[2].EventType != model.JobEventStageChanged || events[2].ToStage != model.JobStageInterview1 {
+		t.Fatalf("expected [created, stage_changed(offer), stage_changed(interview_1)] timeline events, err=%v events=%+v", err, events)
 	}
 
 	// Closing a job removes it from active duplicate warnings so re-applying is clean.

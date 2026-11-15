@@ -527,6 +527,7 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 			w.detailJob.Outcome = updated.Outcome
 			w.detailJob.ClosureReason = updated.ClosureReason
 			w.detailJob.ClosedAt = updated.ClosedAt
+			w.detailJob.ReachedOffer = updated.ReachedOffer
 			w.detailJob.UpdatedAt = updated.UpdatedAt
 			w.editJobClosureReason = ""
 			w.editJobReasonDirty = false

@@ -158,13 +158,24 @@ func TestStageLifecycleSeparationCloseReopenAndOfferRules(t *testing.T) {
 		t.Fatalf("closing as offer_accepted from interview_2 got err=%v, want ErrInvalid", err)
 	}
 
-	// Reaching Offer keeps lifecycle active.
+	// Reaching Offer marks ReachedOffer, and changing stage back away from Offer on an active row clears ReachedOffer.
 	app, err = svc.ChangeStage(ctx, jobapplications.ChangeStageInput{ID: app.ID, ToStage: model.JobStageOffer})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if app.Lifecycle != model.JobLifecycleActive || !app.ReachedOffer {
 		t.Fatalf("reaching Offer must keep lifecycle active and mark ReachedOffer: %+v", app)
+	}
+	app, err = svc.ChangeStage(ctx, jobapplications.ChangeStageInput{ID: app.ID, ToStage: model.JobStageScreening})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.ReachedOffer {
+		t.Fatalf("moving an active row away from Offer must clear ReachedOffer: %+v", app)
+	}
+	app, err = svc.ChangeStage(ctx, jobapplications.ChangeStageInput{ID: app.ID, ToStage: model.JobStageOffer})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Close at Offer stage with offer_declined + reason.
@@ -180,13 +191,13 @@ func TestStageLifecycleSeparationCloseReopenAndOfferRules(t *testing.T) {
 		t.Fatalf("unexpected closed state: %+v", app)
 	}
 
-	// Adjusting stage on a closed record acts as a correction without auto-reopening.
+	// Adjusting stage on a closed offer_declined record acts as a correction without auto-reopening and keeps Offer outcome status.
 	app, err = svc.ChangeStage(ctx, jobapplications.ChangeStageInput{ID: app.ID, ToStage: model.JobStageHR})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if app.Stage != model.JobStageHR || app.Lifecycle != model.JobLifecycleClosed || !app.ReachedOffer {
-		t.Fatalf("closed stage correction must stay closed and retain ReachedOffer history: %+v", app)
+		t.Fatalf("closed stage correction must stay closed and retain Offer outcome status: %+v", app)
 	}
 
 	// Updating ClosureReason on closed record succeeds without adding events, but non-empty reason on active record is rejected.
@@ -202,13 +213,13 @@ func TestStageLifecycleSeparationCloseReopenAndOfferRules(t *testing.T) {
 		t.Fatalf("update closure reason on closed record failed: %+v, err=%v", app, err)
 	}
 
-	// Explicit Reopen clears current outcome, closure_reason, and closed_at, preserving prior snapshots in timeline events.
+	// Explicit Reopen clears current outcome, closure_reason, closed_at, and ReachedOffer when stage is not Offer, preserving historical events.
 	app, err = svc.Reopen(ctx, jobapplications.ReopenInput{ID: app.ID, Note: "团队加预算重新联系"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.Lifecycle != model.JobLifecycleActive || app.Outcome != "" || app.ClosureReason != "" || app.ClosedAt != nil || app.Stage != model.JobStageHR {
-		t.Fatalf("reopen did not clear current closure fields properly: %+v", app)
+	if app.Lifecycle != model.JobLifecycleActive || app.Outcome != "" || app.ClosureReason != "" || app.ClosedAt != nil || app.Stage != model.JobStageHR || app.ReachedOffer {
+		t.Fatalf("reopen did not clear current closure/Offer fields properly: %+v", app)
 	}
 	if _, err := svc.UpdateDetails(ctx, jobapplications.UpdateDetailsInput{
 		ID:            app.ID,

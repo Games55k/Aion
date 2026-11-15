@@ -158,9 +158,6 @@ func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *theme.Tokens, ap
 					display.Tag(c, app.Lifecycle.Label(), display.TagProps{Color: display.TagGray, Size: theme.Small})
 					display.Tag(c, app.Outcome.Label(), display.TagProps{Color: jobOutcomeTagColor(app.Outcome), Size: theme.Small})
 				}
-				if app.ReachedOffer {
-					display.Tag(c, "曾获 Offer", display.TagProps{Color: display.TagSuccess, Variant: display.TagOutlined, Size: theme.Small})
-				}
 			})
 
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {

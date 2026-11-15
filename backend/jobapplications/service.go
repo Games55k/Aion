@@ -167,11 +167,7 @@ const selectApplicationColumns = `SELECT
 	id, company_name, position_name, applied_date,
 	stage, lifecycle, outcome, closure_reason, closed_at,
 	application_url, channel, next_follow_up_date, notes,
-	CASE WHEN stage = 'offer' OR EXISTS(
-		SELECT 1 FROM job_application_events e
-		WHERE e.application_id = job_applications.id
-		  AND (e.to_stage = 'offer' OR e.from_stage = 'offer')
-	) THEN 1 ELSE 0 END AS reached_offer,
+	CASE WHEN stage = 'offer' OR outcome IN ('offer_accepted', 'offer_declined') THEN 1 ELSE 0 END AS reached_offer,
 	created_at, updated_at, deleted_at
 FROM job_applications`
 
