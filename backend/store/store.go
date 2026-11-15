@@ -23,11 +23,13 @@ import (
 const SchemaVersion = 1
 
 type Store struct {
-	mu     sync.Mutex
-	db     *sql.DB
-	root   string
-	lock   *os.File
-	closed bool
+	// All backup Service instances share this gate; ordinary transactions do not.
+	backupMu sync.Mutex
+	mu       sync.Mutex
+	db       *sql.DB
+	root     string
+	lock     *os.File
+	closed   bool
 }
 
 func Open(root string) (*Store, error) {
@@ -162,6 +164,17 @@ func (s *Store) transaction(ctx context.Context, fn func(*sql.Tx) error) error {
 	})
 }
 
+// BackupOperation serializes exports, restores and ownership rotation without
+// excluding business transactions. Always acquire it before Exclusive, never inside it.
+func (s *Store) BackupOperation(ctx context.Context, fn func() error) error {
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn()
+}
+
 // Exclusive serializes database AND managed-file operations. Callbacks must not
 // reenter Store methods which acquire the lock.
 func (s *Store) Exclusive(ctx context.Context, fn func(*sql.DB) error) error {
@@ -179,6 +192,8 @@ func (s *Store) Exclusive(ctx context.Context, fn func(*sql.DB) error) error {
 	return fn(s.db)
 }
 func (s *Store) Close() error {
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {

@@ -66,6 +66,8 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 				// Save status indicator
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
 					switch w.saveState {
+					case "saving":
+						ui.Text(c, "正在保存…").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 					case "validation_error":
 						ui.Icon(c, lucide.TriangleAlert()).FontSize(14).TextColor(tk.Warning)
 						ui.Text(c, w.saveErr).FontSize(12).TextColor(tk.Warning).SingleLine()

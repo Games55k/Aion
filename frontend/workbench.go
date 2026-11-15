@@ -67,9 +67,9 @@ type Host struct {
 	CheckForUpdates func()
 	// Now supplies the clock for save timestamps and default export names. Defaults to time.Now.
 	Now func() time.Time
-	// Dispatch, when set (e.g. win.Update in a desktop window), runs dialog blocking calls
-	// off the UI build pass and dispatches the state update back on the UI thread.
-	// When nil (e.g. in headless ui.Tester tests), dialog callbacks run synchronously.
+	// Dispatch, when set (e.g. win.Update in a desktop window), applies worker results
+	// on the UI thread. File operations, task saves, and navigation reads run in workers.
+	// When nil (e.g. in headless ui.Tester tests), these operations run synchronously.
 	Dispatch func(fn func())
 }
 
@@ -153,10 +153,19 @@ type Workbench struct {
 	newSubtaskTitle     string
 	editingSubtaskID    string
 	editingSubtaskTitle string
-	saveState           string // "saved", "validation_error", "error"
+	saveState           string // "saved", "saving", "validation_error", "error"
 	saveErr             string
 	lastSavedAt         time.Time
 	dirty               bool
+	// UI-thread owned generations and one coalesced autosave behind the active write.
+	saveRevision      uint64
+	saving            bool
+	pendingSave       *taskSave
+	afterSave         func()
+	discardAfterSave  bool
+	loadVersions      map[string]uint64
+	navigationVersion uint64
+	boardNeedsReload  bool
 
 	// Preview caches are owned by the UI thread; workers publish through Host.Dispatch.
 	attachmentPaths   map[string]string
@@ -233,10 +242,12 @@ func New(app *backend.App, host Host) *Workbench {
 		themeSetting:      ThemeSystem,
 		updateInfo:        host.UpdateInfo,
 	}
+	w.host.Dispatch = nil
 	w.ReloadAll()
 	if len(w.activeProjects) > 0 {
 		w.SelectProject(w.activeProjects[0].ID)
 	}
+	w.host = host
 	return w
 }
 
@@ -517,7 +528,8 @@ func (w *Workbench) hasUnsavedChangesFromDetailTask() bool {
 	return false
 }
 
-// FlushPending flushes any unsaved edits on the currently selected task to SQLite.
+// FlushPending requests persistence of any unsaved draft. With Host.Dispatch it
+// returns errSavePending until the worker result has been applied on the UI thread.
 func (w *Workbench) FlushPending() error {
 	if w.IsRestoring() || (w.detailTask != nil && w.detailTaskEpoch != w.currentDataEpoch()) {
 		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
@@ -525,16 +537,29 @@ func (w *Workbench) FlushPending() error {
 	if w.selectedTaskID == "" || w.detailTask == nil {
 		return nil
 	}
+	if w.saving {
+		return errSavePending
+	}
 	if !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
 		return nil
 	}
-	return w.SaveSelectedTask()
+	if err := w.SaveSelectedTask(); err != nil {
+		return err
+	}
+	if w.saving {
+		return errSavePending
+	}
+	return nil
 }
 
 // PrepareClose verifies whether the window can safely close.
 // If there are unsaved task edits that fail validation/persistence, or a background task is running,
 // PrepareClose keeps the draft/task visible, notifies the user, and returns false.
 func (w *Workbench) PrepareClose() bool {
+	if w.saving {
+		w.EnqueueToast(feedback.ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: feedback.ToastInfo})
+		return false
+	}
 	if w.IsBusy() {
 		w.EnqueueToast(feedback.ToastProps{
 			Title:       "后台任务正在执行",
@@ -585,60 +610,64 @@ func (w *Workbench) rebuildProjectNames() {
 }
 
 // ReloadProjects reloads active and archived projects and their task summaries.
-func (w *Workbench) ReloadProjects() {
-	ctx := context.Background()
-	all, err := w.app.Projects.ListProjects(ctx, projects.ProjectFilter{})
-	if err != nil {
-		w.enqueueErrorToast("加载项目失败", err)
-		return
-	}
+func (w *Workbench) ReloadProjects() { w.reloadProjects(false) }
 
-	counts, err := w.app.Projects.CountTasks(ctx)
-	if err != nil {
-		w.enqueueErrorToast("加载项目失败", err)
-		return
-	}
-
-	var active, archived []model.Project
-	summaries := make(map[string]ProjectSummary, len(all))
-	for _, p := range all {
-		if !p.Archived {
-			active = append(active, p)
-		} else {
-			archived = append(archived, p)
+func (w *Workbench) reloadProjects(async bool) {
+	service := w.app.Projects
+	w.loadUI("projects", async, func() func() {
+		ctx := context.Background()
+		all, err := service.ListProjects(ctx, projects.ProjectFilter{})
+		var counts map[string]map[model.Status]int
+		if err == nil {
+			counts, err = service.CountTasks(ctx)
 		}
-		c := counts[p.ID]
-		sum := ProjectSummary{Planned: c[model.Planned], InProgress: c[model.InProgress], Done: c[model.Done]}
-		sum.Total = sum.Planned + sum.InProgress + sum.Done
-		summaries[p.ID] = sum
-	}
-	w.activeProjects = active
-	w.archivedProjects = archived
-	w.projectSummaries = summaries
-	w.rebuildProjectNames()
+		return func() {
+			if err != nil {
+				w.enqueueErrorToast("加载项目失败", err)
+				return
+			}
+			var active, archived []model.Project
+			summaries := make(map[string]ProjectSummary, len(all))
+			for _, p := range all {
+				if !p.Archived {
+					active = append(active, p)
+				} else {
+					archived = append(archived, p)
+				}
+				c := counts[p.ID]
+				sum := ProjectSummary{Planned: c[model.Planned], InProgress: c[model.InProgress], Done: c[model.Done]}
+				sum.Total = sum.Planned + sum.InProgress + sum.Done
+				summaries[p.ID] = sum
+			}
+			w.activeProjects = active
+			w.archivedProjects = archived
+			w.projectSummaries = summaries
+			w.rebuildProjectNames()
 
-	if w.activeProjectID != "" {
-		found := false
-		for _, p := range all {
-			if p.ID == w.activeProjectID {
-				found = true
-				break
+			if w.activeProjectID != "" {
+				found := false
+				for _, p := range all {
+					if p.ID == w.activeProjectID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					w.activeProjectID = ""
+					w.boardTasks = nil
+					w.filteredTasks = nil
+					w.allBoardTags = nil
+					w.taskAttachments = make(map[string][]model.Attachment)
+					w.resetSelectedTaskState()
+					if w.navPage == NavProjectBoard {
+						w.navPage = NavAllProjects
+					}
+				} else {
+					w.reloadBoardTasks(async)
+				}
 			}
 		}
-		if !found {
-			w.activeProjectID = ""
-			w.boardTasks = nil
-			w.filteredTasks = nil
-			w.allBoardTags = nil
-			w.taskAttachments = make(map[string][]model.Attachment)
-			w.resetSelectedTaskState()
-			if w.navPage == NavProjectBoard {
-				w.navPage = NavAllProjects
-			}
-		} else {
-			w.ReloadBoardTasks()
-		}
-	}
+	})
 }
 
 // ActiveProject returns the currently selected project (active or archived), or nil.
@@ -661,18 +690,24 @@ func (w *Workbench) SelectProject(projectID string) {
 	if w.IsRestoring() {
 		return
 	}
-	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再切换项目"); err != nil {
+	if !w.afterPendingSave(func() { w.SelectProject(projectID) }, "当前任务存在未保存修改", "，请先修正保存或放弃修改后再切换项目") {
 		return
 	}
 	if w.activeProjectID != projectID {
+		w.boardNeedsReload = false
+		w.boardTasks = nil
+		w.filteredTasks = nil
+		w.allBoardTags = nil
+		w.taskAttachments = make(map[string][]model.Attachment)
 		w.activeProjectID = projectID
 		w.searchQuery = ""
 		w.priorityFilter = ""
 		w.tagFilters = nil
 		w.resetSelectedTaskState()
 	}
+	w.navigationVersion++
 	w.navPage = NavProjectBoard
-	w.ReloadBoardTasks()
+	w.reloadBoardTasks(true)
 }
 
 // NavigateTo switches the top-level page after flushing any pending task edits.
@@ -680,22 +715,23 @@ func (w *Workbench) NavigateTo(page NavPage) {
 	if w.IsRestoring() {
 		return
 	}
-	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再离开当前看板"); err != nil {
+	if !w.afterPendingSave(func() { w.NavigateTo(page) }, "当前任务存在未保存修改", "，请先修正保存或放弃修改后再离开当前看板") {
 		return
 	}
+	w.navigationVersion++
 	w.navPage = page
 	if w.IsBusy() {
 		return
 	}
 	switch page {
 	case NavAllProjects, NavArchivedProjects:
-		w.ReloadProjects()
+		w.reloadProjects(true)
 	case NavTrash:
-		w.ReloadTrash()
+		w.reloadTrash(true)
 	case NavSettings:
-		w.ReloadSettings()
+		w.reloadSettings(true)
 	case NavProjectBoard:
-		w.ReloadBoardTasks()
+		w.reloadBoardTasks(true)
 	}
 }
 
@@ -723,7 +759,9 @@ func (w *Workbench) OpenSettings() {
 }
 
 // ReloadBoardTasks reloads the tasks for the active project and applies any active filters.
-func (w *Workbench) ReloadBoardTasks() {
+func (w *Workbench) ReloadBoardTasks() { w.reloadBoardTasks(false) }
+
+func (w *Workbench) reloadBoardTasks(async bool) {
 	if w.activeProjectID == "" {
 		w.boardTasks = nil
 		w.filteredTasks = nil
@@ -732,53 +770,56 @@ func (w *Workbench) ReloadBoardTasks() {
 		w.pruneAttachmentCaches()
 		return
 	}
-	ctx := context.Background()
-	unfiltered, err := w.app.Projects.ListTasks(ctx, w.activeProjectID, projects.TaskFilter{})
-	if err != nil {
-		w.EnqueueToast(feedback.ToastProps{
-			Title:       "加载任务失败",
-			Description: err.Error(),
-			Type:        feedback.ToastError,
-		})
-		return
-	}
-	w.boardTasks = unfiltered
 
-	// One query for the whole board. Every task gets an entry so the detail
-	// panel never has to fall back to a per-task lookup.
-	attMap := w.taskAttachments
-	if byTask, err := w.app.Attachments.ListByProject(ctx, w.activeProjectID); err != nil {
-		// Keep the attachments already shown rather than blanking them.
-		w.enqueueErrorToast("加载附件失败", err)
-	} else {
-		attMap = make(map[string][]model.Attachment, len(unfiltered))
-		for _, t := range unfiltered {
-			attMap[t.ID] = byTask[t.ID]
+	projectID := w.activeProjectID
+	service, attachments := w.app.Projects, w.app.Attachments
+	w.loadUI("board", async, func() func() {
+		ctx := context.Background()
+		unfiltered, err := service.ListTasks(ctx, projectID, projects.TaskFilter{})
+		var attMap map[string][]model.Attachment
+		if err == nil {
+			attMap, err = attachments.ListByProject(ctx, projectID)
 		}
-		w.taskAttachments = attMap
-	}
-	w.rebuildBoardDerived()
+		return func() {
+			if projectID != w.activeProjectID {
+				return
+			}
+			if err != nil {
+				w.enqueueErrorToast("加载任务失败", err)
+				return
+			}
+			w.boardTasks = unfiltered
+			w.boardNeedsReload = false
+			for _, t := range unfiltered {
+				if _, ok := attMap[t.ID]; !ok {
+					attMap[t.ID] = nil
+				}
+			}
+			w.taskAttachments = attMap
+			w.rebuildBoardDerived()
 
-	// Keep selected task in sync if still present
-	if w.selectedTaskID != "" {
-		idx := slices.IndexFunc(unfiltered, func(t model.Task) bool {
-			return t.ID == w.selectedTaskID
-		})
-		if idx < 0 {
-			w.resetSelectedTaskState()
-		} else {
-			t := unfiltered[idx]
-			if !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
-				w.syncDetailFromTask(t)
+			// Keep selected task in sync if still present
+			if w.selectedTaskID != "" {
+				idx := slices.IndexFunc(unfiltered, func(t model.Task) bool {
+					return t.ID == w.selectedTaskID
+				})
+				if idx < 0 {
+					w.resetSelectedTaskState()
+				} else {
+					t := unfiltered[idx]
+					if !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
+						w.syncDetailFromTask(t)
+					} else {
+						w.detailTask = &t
+						w.detailAttachments = slices.Clone(attMap[t.ID])
+						w.cacheAttachments(w.detailAttachments)
+					}
+				}
 			} else {
-				w.detailTask = &t
-				w.detailAttachments = slices.Clone(attMap[t.ID])
-				w.cacheAttachments(w.detailAttachments)
+				w.pruneAttachmentCaches()
 			}
 		}
-	} else {
-		w.pruneAttachmentCaches()
-	}
+	})
 }
 
 // rebuildBoardDerived recomputes everything derived from boardTasks (project
@@ -894,16 +935,25 @@ func (w *Workbench) SelectTask(taskID string) {
 		w.detailExpanded = true
 		return
 	}
-	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再切换任务"); err != nil {
+	if !w.afterPendingSave(func() { w.SelectTask(taskID) }, "当前任务存在未保存修改", "，请先修正保存或放弃修改后再切换任务") {
 		return
 	}
-	ctx := context.Background()
-	t, err := w.app.Projects.GetTask(ctx, taskID)
-	if err != nil {
-		w.enqueueErrorToast("无法打开任务详情", err)
-		return
-	}
-	w.selectLoadedTask(t)
+	projectsService, attachmentsService := w.app.Projects, w.app.Attachments
+	w.loadUI("selection", true, func() func() {
+		t, err := projectsService.GetTask(context.Background(), taskID)
+		var atts []model.Attachment
+		if err == nil {
+			atts, err = attachmentsService.List(context.Background(), taskID)
+		}
+		return func() {
+			if err != nil {
+				w.enqueueErrorToast("无法打开任务详情", err)
+				return
+			}
+			w.taskAttachments[t.ID] = atts
+			w.selectLoadedTask(t)
+		}
+	})
 }
 
 func (w *Workbench) selectLoadedTask(t model.Task) {
@@ -922,6 +972,7 @@ func (w *Workbench) clearDetailTransientInputs() {
 }
 
 func (w *Workbench) resetSelectedTaskState() {
+	w.navigationVersion++
 	w.selectedTaskID = ""
 	w.detailTask = nil
 	w.detailTaskEpoch = w.currentDataEpoch()
@@ -949,6 +1000,12 @@ func (w *Workbench) resetSelectedTaskState() {
 // DiscardSelectedTaskDraft explicitly discards unsaved edits on the currently selected task
 // and restores its fields from the last saved version.
 func (w *Workbench) DiscardSelectedTaskDraft() {
+	w.afterSave = nil
+	if w.saving {
+		w.pendingSave = nil
+		w.discardAfterSave = true
+		return
+	}
 	if w.IsRestoring() {
 		return
 	}
@@ -971,7 +1028,7 @@ func (w *Workbench) ClearSelectedTask() {
 	if w.IsRestoring() {
 		return
 	}
-	if err := w.flushPendingOrToast("无法关闭详情：存在未保存修改", "（请修正后重试保存，或点击“放弃修改”）"); err != nil {
+	if !w.afterPendingSave(func() { w.ClearSelectedTask() }, "无法关闭详情：存在未保存修改", "（请修正后重试保存，或点击“放弃修改”）") {
 		return
 	}
 	w.resetSelectedTaskState()
@@ -1008,7 +1065,9 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 	w.saveErr = ""
 }
 
-// SaveSelectedTask persists the current task detail fields to SQLite via UpdateTask.
+// SaveSelectedTask validates a draft and queues an ordered background save when
+// Host.Dispatch is configured. A nil error means accepted, not yet persisted;
+// FlushPending and PrepareClose prevent losing work before the UI acknowledgement.
 func (w *Workbench) SaveSelectedTask() error {
 	if w.IsRestoring() || w.detailTaskEpoch != w.currentDataEpoch() {
 		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
@@ -1016,6 +1075,9 @@ func (w *Workbench) SaveSelectedTask() error {
 	if w.selectedTaskID == "" || w.detailTask == nil {
 		return nil
 	}
+	w.saveRevision++
+	w.pendingSave = nil
+	w.discardAfterSave = false
 	title := strings.TrimSpace(w.editTitle)
 	if title == "" {
 		w.dirty = true
@@ -1039,33 +1101,15 @@ func (w *Workbench) SaveSelectedTask() error {
 		DueDate:     dueStr,
 	}
 
-	ctx := context.Background()
-	updated, err := w.app.Projects.UpdateTask(ctx, w.selectedTaskID, input)
-	if err != nil {
-		w.dirty = true
-		w.saveState = "error"
-		w.saveErr = err.Error()
-		return err
-	}
-
-	w.detailTask = &updated
-	w.detailTaskEpoch = w.currentDataEpoch()
-	w.editTags = slices.Clone(updated.Tags)
-	w.editSubtasks = slices.Clone(updated.Subtasks)
-	w.dirty = false
-	w.saveState = "saved"
+	request := taskSave{taskID: w.selectedTaskID, revision: w.saveRevision, epoch: w.currentDataEpoch(), input: input}
+	w.dirty = true
+	w.saveState = "saving"
 	w.saveErr = ""
-	w.lastSavedAt = w.now()
-	// A content-only edit changes no other row, so patch the loaded board in
-	// place. A status change renumbers two columns and needs a real reload.
-	idx := slices.IndexFunc(w.boardTasks, func(t model.Task) bool { return t.ID == updated.ID })
-	if idx < 0 || w.boardTasks[idx].Status != updated.Status {
-		w.ReloadBoardTasks()
+	if w.saving {
+		w.pendingSave = &request
 		return nil
 	}
-	w.boardTasks[idx] = updated
-	w.rebuildBoardDerived()
-	return nil
+	return w.startTaskSave(request)
 }
 
 // SetTaskPriority updates a task's priority directly from a board card and refreshes board filters in place.
@@ -1834,15 +1878,21 @@ func (w *Workbench) AttachmentManagedPath(att model.Attachment) string {
 }
 
 // ReloadTrash reloads deleted projects and tasks from the backend.
-func (w *Workbench) ReloadTrash() {
-	ctx := context.Background()
-	items, err := w.app.Projects.ListTrash(ctx)
-	if err != nil {
-		w.enqueueErrorToast("加载回收站失败", err)
-		return
-	}
-	w.trashItems = items
-	w.rebuildProjectNames()
+func (w *Workbench) ReloadTrash() { w.reloadTrash(false) }
+
+func (w *Workbench) reloadTrash(async bool) {
+	service := w.app.Projects
+	w.loadUI("trash", async, func() func() {
+		items, err := service.ListTrash(context.Background())
+		return func() {
+			if err != nil {
+				w.enqueueErrorToast("加载回收站失败", err)
+				return
+			}
+			w.trashItems = items
+			w.rebuildProjectNames()
+		}
+	})
 }
 
 // RestoreTrashItem restores a deleted project or task from the Recycle Bin.
@@ -2035,26 +2085,45 @@ func themeSegmentForSetting(th string) int {
 }
 
 // ReloadSettings reloads the theme preference and automatic backup policy/status.
-func (w *Workbench) ReloadSettings() {
-	ctx := context.Background()
-	th, err := w.app.Settings.Theme(ctx)
-	if err == nil {
-		w.themeSetting = th
-	} else if w.themeSetting == "" {
-		w.themeSetting = ThemeSystem
-	}
-	w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
+func (w *Workbench) ReloadSettings() { w.reloadSettings(false) }
 
-	pol, err := w.app.Backups.GetPolicy(ctx)
-	if err == nil {
-		w.backupEnabled = pol.Enabled
-		w.backupIntervalSelect = formatIntervalOption(pol.Interval)
-		w.backupKeepSelect = fmt.Sprint(pol.Keep)
-		w.backupDirInput = pol.Directory
-	}
-	if st, err := w.app.Backups.Status(ctx); err == nil {
-		w.backupStatus = st
-	}
+func (w *Workbench) reloadSettings(async bool) {
+	settings, backups := w.app.Settings, w.app.Backups
+	initialTheme := w.themeSetting
+	initialPolicy := w.backupPolicyDraft()
+	w.loadUI("settings", async, func() func() {
+		ctx := context.Background()
+		th, themeErr := settings.Theme(ctx)
+		pol, policyErr := backups.GetPolicy(ctx)
+		st, statusErr := backups.Status(ctx)
+		return func() {
+			if themeErr == nil && w.themeSetting == initialTheme {
+				w.themeSetting = th
+			}
+			w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
+			if policyErr == nil && w.backupPolicyDraft() == initialPolicy {
+				w.backupEnabled = pol.Enabled
+				w.backupIntervalSelect = formatIntervalOption(pol.Interval)
+				w.backupKeepSelect = fmt.Sprint(pol.Keep)
+				w.backupDirInput = pol.Directory
+			}
+			if statusErr == nil {
+				w.backupStatus = st
+			}
+		}
+	})
+}
+
+// backupPolicyDraft compares the raw controls so an in-flight Settings load
+// cannot replace edits made after navigation started.
+func (w *Workbench) backupPolicyDraft() struct {
+	enabled             bool
+	interval, keep, dir string
+} {
+	return struct {
+		enabled             bool
+		interval, keep, dir string
+	}{w.backupEnabled, w.backupIntervalSelect, w.backupKeepSelect, w.backupDirInput}
 }
 
 // formatIntervalOption returns the select value for d: a preset key when one
@@ -2343,6 +2412,10 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 
 // TriggerRestoreBackup executes app.Backups.Restore off the UI thread via runAsyncTask.
 func (w *Workbench) TriggerRestoreBackup() {
+	if w.saving {
+		w.EnqueueToast(feedback.ToastProps{Title: "正在保存任务", Description: "保存完成后再恢复备份", Type: feedback.ToastInfo})
+		return
+	}
 	if w.IsBusy() || w.IsRestoring() {
 		return
 	}

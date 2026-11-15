@@ -1481,7 +1481,15 @@ func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
 	wb.SelectTask(task.ID)
+	wb.WaitForTasks()
+	for len(dispatched) > 0 {
+		(<-dispatched)()
+	}
 
 	// Start real async attachment pick & import.
 	wb.PickAndImportAttachmentsToSelectedTask()

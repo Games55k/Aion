@@ -205,50 +205,117 @@ func schema(ctx context.Context, db *sql.DB) ([]schemaObject, error) {
 }
 
 func (s *Service) Export(ctx context.Context, destination string) error {
-	return s.store.Exclusive(ctx, func(db *sql.DB) error {
-		_, err := s.exportLocked(ctx, db, destination, "manual", false)
-		return err
-	})
+	return s.export(ctx, destination, false)
 }
 
-// ExportOverwrite exports a validated full backup archive to destination using a temporary staging
-// file in the destination directory and atomically replaces an existing user regular file only after
-// archive creation and verification succeed. Protected store paths, symlinks, and directories are rejected.
+// ExportOverwrite publishes a complete archive atomically, protecting managed paths.
 func (s *Service) ExportOverwrite(ctx context.Context, destination string) error {
-	return s.store.Exclusive(ctx, func(db *sql.DB) error {
-		_, err := s.exportLocked(ctx, db, destination, "manual", true)
+	return s.export(ctx, destination, true)
+}
+
+func (s *Service) export(ctx context.Context, destination string, overwrite bool) error {
+	return s.store.BackupOperation(ctx, func() error {
+		_, err := s.exportSnapshot(ctx, destination, "manual", overwrite)
 		return err
 	})
 }
 
-// exportLocked never reenters the store mutex. The snapshot and every referenced
-// attachment (including trash) are read while all business writes are excluded.
-func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kind string, allowOverwrite bool) (string, error) {
+type exportSnapshot struct {
+	dir  string
+	refs []attachment
+}
+
+// snapshotLocked freezes SQL and pins immutable managed attachments with hard
+// links on the same filesystem. GC may unlink live files after this returns;
+// the snapshot remains readable. External in-place edits still fail hash checks.
+func (s *Service) snapshotLocked(ctx context.Context, db *sql.DB) (*exportSnapshot, error) {
+	dir, err := os.MkdirTemp(s.store.Root(), ".backup-export-*")
+	if err != nil {
+		return nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	snapshot := filepath.Join(dir, "database.sqlite")
+	if _, err = db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
+		return nil, err
+	}
+	if err = os.Chmod(snapshot, 0600); err != nil {
+		return nil, err
+	}
+	refs, err := readAttachments(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if err = os.Mkdir(filepath.Join(dir, "attachments"), 0700); err != nil {
+		return nil, err
+	}
+	for _, a := range refs {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		source := filepath.Join(s.store.AttachmentsDir(), a.name)
+		info, err := regular(source)
+		if err != nil {
+			return nil, err
+		}
+		target := filepath.Join(dir, "attachments", a.name)
+		if err = os.Link(source, target); err != nil {
+			return nil, err
+		}
+		pinned, err := regular(target)
+		if err != nil {
+			return nil, err
+		}
+		if !os.SameFile(info, pinned) {
+			return nil, invalid("attachment changed while pinning")
+		}
+	}
+	ok = true
+	return &exportSnapshot{dir: dir, refs: refs}, nil
+}
+
+// exportSnapshot releases Store before compression, hashing, and publication.
+// The caller holds BackupOperation, so restores and ownership rotation cannot race.
+func (s *Service) exportSnapshot(ctx context.Context, destination, kind string, overwrite bool) (string, error) {
+	var snapshot *exportSnapshot
+	err := s.store.Exclusive(ctx, func(db *sql.DB) error {
+		if _, err := s.store.ValidateExportTarget(destination, overwrite); err != nil {
+			return err
+		}
+		var err error
+		snapshot, err = s.snapshotLocked(ctx, db)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(snapshot.dir)
+	return s.writeArchive(ctx, snapshot, destination, kind, overwrite)
+}
+
+// Restore's safety snapshot stays under Store so no intervening write is lost.
+func (s *Service) exportLocked(ctx context.Context, db *sql.DB, destination, kind string, overwrite bool) (string, error) {
+	snapshot, err := s.snapshotLocked(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(snapshot.dir)
+	return s.writeArchive(ctx, snapshot, destination, kind, overwrite)
+}
+
+func (s *Service) writeArchive(ctx context.Context, snap *exportSnapshot, destination, kind string, allowOverwrite bool) (string, error) {
 	resolvedDest, err := s.store.ValidateExportTarget(destination, allowOverwrite)
 	if err != nil {
 		return "", err
 	}
 	parent := filepath.Dir(resolvedDest)
-	managed, err := filepath.EvalSymlinks(s.store.AttachmentsDir())
-	if err != nil {
-		return "", err
-	}
-	tmpdir, err := os.MkdirTemp(s.store.Root(), ".backup-export-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tmpdir)
-	snapshot := filepath.Join(tmpdir, "database.sqlite")
-	if _, err = db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
-		return "", err
-	}
-	if err = os.Chmod(snapshot, 0600); err != nil {
-		return "", err
-	}
-	refs, err := readAttachments(ctx, db)
-	if err != nil {
-		return "", err
-	}
+	snapshot := filepath.Join(snap.dir, "database.sqlite")
+	managed := filepath.Join(snap.dir, "attachments")
+	refs := snap.refs
 	f, err := os.CreateTemp(parent, ".aion-backup-*.tmp")
 	if err != nil {
 		return "", err
@@ -607,6 +674,16 @@ func validateDB(ctx context.Context, path string, expected []schemaObject) ([]at
 }
 
 func (s *Service) Restore(ctx context.Context, source string) (RestoreResult, error) {
+	var result RestoreResult
+	err := s.store.BackupOperation(ctx, func() error {
+		var err error
+		result, err = s.restore(ctx, source)
+		return err
+	})
+	return result, err
+}
+
+func (s *Service) restore(ctx context.Context, source string) (RestoreResult, error) {
 	var result RestoreResult
 	var expected []schemaObject
 	err := s.store.Exclusive(ctx, func(db *sql.DB) error { var e error; expected, e = schema(ctx, db); return e })

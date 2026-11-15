@@ -183,9 +183,12 @@ func (s *Service) saveState(st autoState) error {
 	return nil
 }
 func (s *Service) Status(ctx context.Context) (AutoStatus, error) {
-	var status AutoStatus
-	err := s.store.Exclusive(ctx, func(_ *sql.DB) error { st, err := s.loadState(); status = st.AutoStatus; return err })
-	return status, err
+	if err := ctx.Err(); err != nil {
+		return AutoStatus{}, err
+	}
+	// State is published by atomic rename; readers need neither operation nor Store locks.
+	st, err := s.loadState()
+	return st.AutoStatus, err
 }
 
 func archiveHash(ctx context.Context, path string) (string, error) {
@@ -265,7 +268,7 @@ func (s *Service) recordSafetyBackup(ctx context.Context, path, hash string, res
 // stop it before Store.Close. Last-success/error never come from restored SQL.
 func (s *Service) RunDue(ctx context.Context) (string, error) {
 	var created string
-	err := s.store.Exclusive(ctx, func(db *sql.DB) error {
+	err := s.store.BackupOperation(ctx, func() error {
 		st, err := s.loadState()
 		if err != nil {
 			return err
@@ -274,7 +277,7 @@ func (s *Service) RunDue(ctx context.Context) (string, error) {
 			st.LastError = truncateUTF8(cause.Error(), maxLastErrorBytes)
 			return errors.Join(cause, s.saveState(st))
 		}
-		p, err := s.policyLocked(ctx, db)
+		p, err := s.GetPolicy(ctx)
 		if err != nil {
 			return fail(err)
 		}
@@ -286,7 +289,7 @@ func (s *Service) RunDue(ctx context.Context) (string, error) {
 			return fail(err)
 		}
 		path := filepath.Join(p.Directory, "auto-"+model.NewID()+".zip")
-		h, err := s.exportLocked(ctx, db, path, "auto", false)
+		h, err := s.exportSnapshot(ctx, path, "auto", false)
 		if err != nil {
 			return fail(err)
 		}

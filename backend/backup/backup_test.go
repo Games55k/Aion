@@ -586,7 +586,7 @@ func TestRotationPreservesReplacedFile(t *testing.T) {
 	}
 }
 
-// Concurrent RunDue calls serialize through the Store lock so only a single due archive is created.
+// Concurrent RunDue calls share the Store backup-operation gate so only a single due archive is created.
 func TestConcurrentRunDueCreatesOnce(t *testing.T) {
 	s := testStore(t)
 	var wg sync.WaitGroup
@@ -969,5 +969,88 @@ func TestRestoreKeepsLocalBackupDirectory(t *testing.T) {
 			}
 			assertSeed(t, target, "live", "payload")
 		})
+	}
+}
+
+// Regression: compression used to hold Store; pinned snapshots must survive concurrent edits and attachment GC.
+func TestExportReleasesStoreAndPinsSnapshot(t *testing.T) {
+	s := testStore(t)
+	seed(t, s, "before", "original attachment")
+	packing, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	service := New(s, Options{Now: func() time.Time {
+		close(packing)
+		<-release
+		return time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	}})
+	destination := filepath.Join(t.TempDir(), "snapshot.zip")
+	done := make(chan error, 1)
+	go func() { done <- service.Export(testCtx, destination) }()
+	<-packing
+	// The archive is paused before compression; business writes must still finish.
+	err := s.Exclusive(testCtx, func(db *sql.DB) error {
+		if _, err := db.Exec("DELETE FROM projects WHERE id='before'"); err != nil {
+			return err
+		}
+		return os.Remove(filepath.Join(s.AttachmentsDir(), "before-file"))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Status(testCtx); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	restored := testStore(t)
+	if _, err := New(restored).Restore(testCtx, destination); err != nil {
+		t.Fatal(err)
+	}
+	assertSeed(t, restored, "before", "original attachment")
+	entries, err := filepath.Glob(filepath.Join(s.Root(), ".backup-export-*"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("snapshot pins leaked: %v, %v", entries, err)
+	}
+}
+
+// Regression: automatic exports must free Store during packing and clean snapshot pins on cancellation.
+func TestRunDueCancellationReleasesSnapshot(t *testing.T) {
+	s := testStore(t)
+	seed(t, s, "cancel", "contents")
+	packing, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	calls := 0
+	service := New(s, Options{Now: func() time.Time {
+		calls++
+		if calls == 2 {
+			close(packing)
+			<-release
+		}
+		return time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	}})
+	ctx, cancel := context.WithCancel(testCtx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := service.RunDue(ctx); done <- err }()
+	<-packing
+	if err := s.Write(testCtx, func(tx *sql.Tx) error { _, err := tx.Exec("UPDATE tasks SET title='edited during backup'"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	unblock()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: %v", err)
+	}
+	for _, pattern := range []string{".backup-export-*", "backups/*.zip", "backups/.aion-backup-*"} {
+		files, err := filepath.Glob(filepath.Join(s.Root(), pattern))
+		if err != nil || len(files) != 0 {
+			t.Fatalf("cancel leaked %s: %v, %v", pattern, files, err)
+		}
 	}
 }
