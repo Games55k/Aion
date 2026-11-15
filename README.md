@@ -102,6 +102,8 @@ AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestV
 
 ## 开发
 
+待实现功能的设计与交接文档见 [求职插件：投递记录实施方案](docs/job-applications-plan.md)。该文档描述规划，不代表当前版本已支持该功能。
+
 | 命令 | 用途 |
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
@@ -118,6 +120,8 @@ Aion/
 ├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
+├── docs/                                   # 功能设计与实施交接文档
+│   └── job-applications-plan.md             # 求职投递记录插件方案（待实现）
 ├── .github/
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
