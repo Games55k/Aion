@@ -503,7 +503,8 @@ func (w *Workbench) hasUnsavedChangesFromDetailTask() bool {
 	if !w.editDueDate.IsZero() {
 		dueStr = w.editDueDate.Format("2006-01-02")
 	}
-	if w.editTitle != t.Title ||
+	// Compare the persisted title while preserving whitespace in the active input.
+	if strings.TrimSpace(w.editTitle) != t.Title ||
 		w.editDescription != t.Description ||
 		w.editStatus != string(t.Status) ||
 		w.editPriority != string(t.Priority) ||
@@ -1128,69 +1129,6 @@ func (w *Workbench) MoveTaskToColumn(taskID string, targetStatus model.Status, u
 		return
 	}
 	w.ReloadBoardTasks()
-}
-
-// MoveOrReorderTaskOnto handles dropping draggedTaskID onto targetTaskID (either within the same column or across columns).
-func (w *Workbench) MoveOrReorderTaskOnto(draggedTaskID, targetTaskID string, placeAfter bool) {
-	if w.IsRestoring() || draggedTaskID == "" || targetTaskID == "" || draggedTaskID == targetTaskID {
-		return
-	}
-	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再移动任务"); err != nil {
-		return
-	}
-	ctx := context.Background()
-
-	var draggedTask, targetTask *model.Task
-	for i := range w.boardTasks {
-		if w.boardTasks[i].ID == draggedTaskID {
-			draggedTask = &w.boardTasks[i]
-		}
-		if w.boardTasks[i].ID == targetTaskID {
-			targetTask = &w.boardTasks[i]
-		}
-	}
-	if draggedTask == nil || targetTask == nil {
-		return
-	}
-
-	if draggedTask.Status == targetTask.Status {
-		// Same column: use ReorderTasks on the visible tasks in this column so filtered views work cleanly.
-		visible := w.TasksInColumn(targetTask.Status)
-		ids := make([]string, 0, len(visible))
-		for _, t := range visible {
-			if t.ID != draggedTaskID {
-				ids = append(ids, t.ID)
-			}
-		}
-		targetIdx := slices.Index(ids, targetTaskID)
-		if targetIdx < 0 {
-			return
-		}
-		if placeAfter {
-			targetIdx++
-		}
-		ids = slices.Insert(ids, targetIdx, draggedTaskID)
-		if err := w.app.Projects.ReorderTasks(ctx, w.activeProjectID, targetTask.Status, ids); err != nil {
-			w.enqueueErrorToast("排序失败", err)
-			return
-		}
-		w.ReloadBoardTasks()
-		return
-	}
-
-	// Cross-column move: compute destination index in the unfiltered destination column after removing draggedTaskID.
-	destTasks := w.UnfilteredTasksInColumn(targetTask.Status)
-	destIdx := 0
-	for i, t := range destTasks {
-		if t.ID == targetTaskID {
-			destIdx = i
-			if placeAfter {
-				destIdx++
-			}
-			break
-		}
-	}
-	w.MoveTaskToColumn(draggedTaskID, targetTask.Status, destIdx)
 }
 
 // MoveOrReorderTaskToSlot moves draggedTaskID to the insertion gap visibleSlot
@@ -2004,7 +1942,8 @@ func (w *Workbench) ConfirmPermanentDelete() {
 	started := w.runAsyncTask("正在彻底删除并清理未引用附件...", func(ctx context.Context) func() {
 		err := w.app.PermanentlyDelete(ctx, item.Kind, item.ID)
 		return func() {
-			if err != nil {
+			var cleanupErr *backend.AttachmentCleanupError
+			if err != nil && !errors.As(err, &cleanupErr) {
 				w.enqueueErrorToast("彻底删除失败", err)
 				return
 			}
@@ -2016,6 +1955,10 @@ func (w *Workbench) ConfirmPermanentDelete() {
 			w.ReloadProjects()
 			w.ReloadTrash()
 			w.pruneAttachmentCaches()
+			if cleanupErr != nil {
+				w.reportTrashCleanupError(cleanupErr)
+				return
+			}
 			w.EnqueueToast(feedback.ToastProps{
 				Title:       "已彻底删除",
 				Description: item.Name,
@@ -2043,7 +1986,8 @@ func (w *Workbench) ConfirmClearTrash() {
 	started := w.runAsyncTask("正在清空回收站并清理未引用附件...", func(ctx context.Context) func() {
 		err := w.app.ClearTrash(ctx)
 		return func() {
-			if err != nil {
+			var cleanupErr *backend.AttachmentCleanupError
+			if err != nil && !errors.As(err, &cleanupErr) {
 				w.enqueueErrorToast("清空回收站失败", err)
 				return
 			}
@@ -2055,6 +1999,10 @@ func (w *Workbench) ConfirmClearTrash() {
 			w.ReloadProjects()
 			w.ReloadTrash()
 			w.pruneAttachmentCaches()
+			if cleanupErr != nil {
+				w.reportTrashCleanupError(cleanupErr)
+				return
+			}
 			w.EnqueueToast(feedback.ToastProps{
 				Title:       "回收站已清空",
 				Description: "所有回收站项目、任务与未引用附件均已彻底清理",
@@ -2065,6 +2013,14 @@ func (w *Workbench) ConfirmClearTrash() {
 	if !started {
 		w.confirmClearTrashOpen = true
 	}
+}
+
+func (w *Workbench) reportTrashCleanupError(err error) {
+	w.EnqueueToast(feedback.ToastProps{
+		Title:       "条目已删除，但清理附件失败",
+		Description: err.Error(),
+		Type:        feedback.ToastWarning,
+	})
 }
 
 func themeSegmentForSetting(th string) int {

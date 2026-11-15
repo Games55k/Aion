@@ -76,6 +76,14 @@ func Open(ctx context.Context, options Options) (*App, error) {
 }
 func (a *App) DataDir() string { return a.s.Root() }
 
+// AttachmentCleanupError means metadata deletion committed, but orphaned files
+// could not be collected. Callers should refresh their data and report a warning;
+// retrying Attachments.GC is safe and does not repeat the deletion.
+type AttachmentCleanupError struct{ Err error }
+
+func (e *AttachmentCleanupError) Error() string { return e.Err.Error() }
+func (e *AttachmentCleanupError) Unwrap() error { return e.Err }
+
 // PermanentlyDelete purges a recycled item and then reclaims files that no
 // module references. A cleanup error does not undo the database deletion; GC
 // can be retried safely. The host owns the user confirmation interaction.
@@ -84,7 +92,7 @@ func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
 		return err
 	}
 	if _, err := a.Attachments.GC(ctx); err != nil {
-		return fmt.Errorf("item deleted; attachment cleanup: %w", err)
+		return &AttachmentCleanupError{Err: fmt.Errorf("item deleted; attachment cleanup: %w", err)}
 	}
 	return nil
 }
@@ -95,7 +103,7 @@ func (a *App) ClearTrash(ctx context.Context) error {
 		return err
 	}
 	if _, err := a.Attachments.GC(ctx); err != nil {
-		return fmt.Errorf("trash cleared; attachment cleanup: %w", err)
+		return &AttachmentCleanupError{Err: fmt.Errorf("trash cleared; attachment cleanup: %w", err)}
 	}
 	return nil
 }

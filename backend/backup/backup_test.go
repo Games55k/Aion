@@ -867,6 +867,26 @@ func TestDefaultPolicyDirectoryFollowsRestoredStore(t *testing.T) {
 	}
 }
 
+// Regression: an unset policy bypassed directory validation and followed a symlink for automatic backups.
+func TestDefaultPolicyRejectsSymlinkDirectory(t *testing.T) {
+	s := testStore(t)
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(s.Root(), "backups")); err != nil {
+		t.Fatal(err)
+	}
+	b := New(s)
+	if _, err := b.GetPolicy(testCtx); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("default policy accepted symlink: %v", err)
+	}
+	if path, err := b.RunDue(testCtx); path != "" || !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("automatic backup followed symlink: %q, %v", path, err)
+	}
+	entries, err := os.ReadDir(external)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("external directory changed: %v, %v", entries, err)
+	}
+}
+
 // Regression: every restore left a safety archive behind forever; only the newest MaxSafetyBackups owned archives are kept, and the archive being restored is never pruned.
 func TestRestoreRotatesOwnedSafetyBackups(t *testing.T) {
 	s := testStore(t)

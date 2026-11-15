@@ -153,11 +153,14 @@ func (f TaskFilter) Matches(t model.Task) bool {
 	return matchesTextAndTags(t, wanted, strings.ToLower(strings.TrimSpace(f.Query)))
 }
 
-// CountTasks returns live task counts per project and status in one query.
+// CountTasks returns live task counts per visible project and status in one query.
+// Archived projects remain visible; soft-deleted projects and their tasks do not.
 func (s *Service) CountTasks(ctx context.Context) (map[string]map[model.Status]int, error) {
 	counts := make(map[string]map[model.Status]int)
 	err := s.store.Read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT project_id,status,COUNT(*) FROM tasks WHERE deleted_at IS NULL GROUP BY project_id,status`)
+		rows, err := tx.QueryContext(ctx, `SELECT t.project_id,t.status,COUNT(*) FROM tasks t
+			JOIN projects p ON p.id=t.project_id
+			WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL GROUP BY t.project_id,t.status`)
 		if err != nil {
 			return err
 		}

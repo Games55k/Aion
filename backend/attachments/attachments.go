@@ -25,8 +25,8 @@ import (
 
 type Service struct{ store *store.Store }
 
-// MaxFileBytes matches the V1 per-file backup limit so every successful import
-// can be included in a full backup.
+// MaxFileBytes matches the V1 per-file backup limit. Full backups also impose
+// independent limits on the total size and number of attachments.
 const MaxFileBytes int64 = 256 << 20
 
 func New(s *store.Store) *Service { return &Service{store: s} }

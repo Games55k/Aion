@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"image/png"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"aion/assets/icon"
 	"aion/backend"
@@ -56,7 +59,7 @@ func run(dataDir, snapshotPath string) error {
 
 	// Headless snapshot rendering mode for verification
 	if snapshotPath != "" {
-		return writeSnapshot(snapshotPath, wb.View)
+		return writeSnapshot(snapshotPath, app.DataDir(), wb.View)
 	}
 
 	// Sync initial saved theme before starting the native desktop window
@@ -228,20 +231,66 @@ func run(dataDir, snapshotPath string) error {
 	return nil
 }
 
-func writeSnapshot(path string, view func(*ui.Context)) error {
-	img := ui.Render(view, 1360, 860, 1.0)
-	f, err := os.Create(path)
+// writeSnapshot keeps diagnostic output outside managed data and publishes only
+// a complete PNG, so an invalid target or encoding failure cannot truncate data.
+func writeSnapshot(path, dataDir string, view func(*ui.Context)) error {
+	if strings.HasSuffix(path, string(os.PathSeparator)) {
+		return errors.New("snapshot destination must name a file")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absPath))
+	if err != nil {
+		return err
+	}
+	root, err := filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		return err
+	}
+	path = filepath.Join(parent, filepath.Base(absPath))
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	// Compare directory identity as well as resolving symlinks: macOS commonly
+	// permits multiple spellings of the same path on a case-insensitive volume.
+	for dir := parent; ; dir = filepath.Dir(dir) {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return err
+		}
+		if os.SameFile(info, rootInfo) {
+			return errors.New("snapshot destination must be outside the Aion data directory")
+		}
+		if dir == filepath.Dir(dir) {
+			break
+		}
+	}
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+		return errors.New("snapshot destination must be a regular file")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	f, err := os.CreateTemp(parent, ".aion-snapshot-*.png")
 	if err != nil {
 		return fmt.Errorf("create snapshot file: %w", err)
 	}
+	defer os.Remove(f.Name())
+	img := ui.Render(view, 1360, 860, 1.0)
 	if err := png.Encode(f, img); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("encode snapshot png: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync snapshot file: %w", err)
+	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close snapshot file: %w", err)
 	}
-	return nil
+	return os.Rename(f.Name(), path)
 }
 
 func buildAppMenu(onOpenSettings func()) *mygo.Menu {

@@ -13,6 +13,8 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 - Inspect visual changes with `TestVisualSnapshotRender`: `AION_SAVE_SNAPSHOT` renders the board, `AION_SAVE_SETTINGS_SNAPSHOT` renders Settings.
 - Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
 - Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
+- The local `third_party/lobe-mygo` copy is a separate Go module, excluded from root `./...` checks. Run `go -C third_party/lobe-mygo test ./...` and `go -C third_party/lobe-mygo vet ./...` when auditing dependencies, changing that copy, or preparing a release; record local patches in its `README.Aion.md`.
+- Cover partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
 
 ## Documentation
 

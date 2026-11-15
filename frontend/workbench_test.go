@@ -1364,7 +1364,7 @@ func TestRunDueBackupNowClearsLastAsyncError(t *testing.T) {
 	}
 }
 
-// Regression: MoveOrReorderTaskOnto and StepTaskInColumn previously failed silently on invalid drafts, and FlushPending errors without saveErr produced empty messages.
+// Regression: MoveOrReorderTaskToSlot and StepTaskInColumn previously failed silently on invalid drafts, and FlushPending errors without saveErr produced empty messages.
 func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
 	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 	wb.OpenCreateProjectModal()
@@ -1399,20 +1399,20 @@ func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
 	}
 
 	wb.detailExpanded = false
-	wb.MoveOrReorderTaskOnto(t2.ID, t1.ID, false)
+	wb.MoveOrReorderTaskToSlot(t2.ID, model.Planned, 0)
 	if !wb.detailExpanded {
-		t.Fatalf("expected MoveOrReorderTaskOnto flush failure to expand detail panel")
+		t.Fatalf("expected MoveOrReorderTaskToSlot flush failure to expand detail panel")
 	}
 	planned = wb.TasksInColumn(model.Planned)
 	if planned[0].ID != t1.ID || planned[1].ID != t2.ID {
-		t.Fatalf("expected MoveOrReorderTaskOnto not to reorder while draft is invalid")
+		t.Fatalf("expected MoveOrReorderTaskToSlot not to reorder while draft is invalid")
 	}
 
 	// Verify FlushPending ErrConflict without saveErr surfaces a non-empty conflict message.
 	wb.editTitle = "有效标题"
 	wb.saveErr = ""
 	wb.bumpDataEpoch()
-	wb.MoveOrReorderTaskOnto(t2.ID, t1.ID, false)
+	wb.MoveOrReorderTaskToSlot(t2.ID, model.Planned, 0)
 	tt.Frame()
 	if !tt.HasText("backup restore in progress") {
 		t.Fatalf("expected FlushPending ErrConflict fallback description instead of empty saveErr")
@@ -2928,5 +2928,122 @@ func TestCardPriorityBadgeQuickSwitch(t *testing.T) {
 	}
 	if len(wb.filteredTasks) != 0 {
 		t.Fatalf("expected task filtered out of Urgent view after switching to Low, got %d", len(wb.filteredTasks))
+	}
+}
+
+// Regression: a saved title with surrounding whitespace was treated as dirty again and unnecessarily retried on close.
+func TestSavedTitleWhitespaceDoesNotRetryOnClose(t *testing.T) {
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "Whitespace"
+	wb.SubmitProjectModal()
+	task, err := wb.QuickCreateTask(model.Planned, "Initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb.SelectTask(task.ID)
+	tt.Frame()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("  Saved title  ")
+	saved, err := app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || saved.Title != "Saved title" {
+		t.Fatalf("normalized title not persisted: %+v, %v", saved, err)
+	}
+	if wb.editTitle != "  Saved title  " {
+		t.Fatalf("saving changed the text being edited: %q", wb.editTitle)
+	}
+	// A closed replacement service proves closing a saved draft needs no write.
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app.Projects = projects.New(s)
+	if err := tt.Click("关闭详情弹窗"); err != nil {
+		t.Fatal(err)
+	}
+	if wb.selectedTaskID != "" || wb.detailExpanded {
+		t.Fatalf("saved draft retried a database write on close: %s", wb.saveErr)
+	}
+}
+
+// Regression: successful trash deletion followed by GC failure left nonexistent entries in the workbench and reported the deletion itself as failed.
+func TestTrashCleanupFailureRefreshesDeletedItems(t *testing.T) {
+	for _, clearAll := range []bool{false, true} {
+		name := "single"
+		if clearAll {
+			name = "all"
+		}
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			app, wb, tt := openTestWorkbench(t, dataDir, Host{})
+			ctx := context.Background()
+			p, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Delete me"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err := app.Projects.CreateTask(ctx, p.ID, projects.TaskInput{Title: "File task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := filepath.Join(t.TempDir(), "notes.txt")
+			if err := os.WriteFile(source, []byte("uncollected"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			att, err := app.Attachments.Import(ctx, task.ID, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := app.Projects.DeleteProject(ctx, p.ID); err != nil {
+				t.Fatal(err)
+			}
+			wb.ReloadAll()
+			wb.NavigateTo(NavTrash)
+			tt.Frame()
+			// Moving storage makes GC fail deterministically without depending on user permissions.
+			managed, moved := filepath.Join(dataDir, "attachments"), filepath.Join(dataDir, "moved-attachments")
+			if err := os.Rename(managed, moved); err != nil {
+				t.Fatal(err)
+			}
+			dispatched := make(chan func(), 1)
+			wb.host.Dispatch = func(fn func()) { dispatched <- fn }
+			start, confirm := "彻底删除 Delete me", "确认彻底删除"
+			if clearAll {
+				start, confirm = "清空回收站", "确认清空回收站"
+			}
+			if err := tt.Click(start); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.Click(confirm); err != nil {
+				t.Fatal(err)
+			}
+			wb.WaitForTasks()
+			(<-dispatched)()
+			tt.Frame()
+			items, err := app.Projects.ListTrash(ctx)
+			if err != nil || len(items) != 0 {
+				t.Fatalf("database deletion failed: %v, %v", items, err)
+			}
+			if len(wb.trashItems) != 0 {
+				t.Fatalf("workbench retained deleted items: %v", wb.trashItems)
+			}
+			if !tt.HasText("条目已删除，但清理附件失败") {
+				t.Fatal("missing partial-success warning")
+			}
+			if _, err := os.Stat(filepath.Join(moved, att.StorageName)); err != nil {
+				t.Fatalf("uncollected file lost: %v", err)
+			}
+			if err := os.Rename(moved, managed); err != nil {
+				t.Fatal(err)
+			}
+			if removed, err := app.Attachments.GC(ctx); err != nil || removed != 1 {
+				t.Fatalf("cleanup retry failed: %d, %v", removed, err)
+			}
+		})
 	}
 }

@@ -668,3 +668,26 @@ func TestCountTasksGroupsLiveTasksByProjectAndStatus(t *testing.T) {
 		t.Fatalf("CountTasks = %v, want %v (project %s has no tasks)", got, want, empty.ID)
 	}
 }
+
+// Regression: counts included tasks hidden by deleted projects; archived projects must still count and restoration must recover the counts.
+func TestCountTasksRespectsProjectVisibility(t *testing.T) {
+	s, _ := setup(t)
+	deleted := project(t, s, "Deleted")
+	archived := project(t, s, "Archived")
+	task(t, s, deleted, "Hidden")
+	task(t, s, archived, "Visible")
+	_, err := s.ArchiveProject(ctx, archived.ID, true)
+	check(t, err)
+	check(t, s.DeleteProject(ctx, deleted.ID))
+	got, err := s.CountTasks(ctx)
+	check(t, err)
+	if _, present := got[deleted.ID]; present || got[archived.ID][model.Planned] != 1 {
+		t.Fatalf("counts include deleted project or exclude archived project: %v", got)
+	}
+	check(t, s.RestoreProject(ctx, deleted.ID))
+	got, err = s.CountTasks(ctx)
+	check(t, err)
+	if got[deleted.ID][model.Planned] != 1 || got[archived.ID][model.Planned] != 1 {
+		t.Fatalf("restored counts: %v", got)
+	}
+}

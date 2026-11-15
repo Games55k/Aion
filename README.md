@@ -73,6 +73,8 @@ AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnap
 AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestVisualSnapshotRender
 ```
 
+`-snapshot` 的输出路径必须位于当前数据目录之外（包括经符号链接访问的路径）。快照 PNG 完整写入后才会原子替换已有的普通文件，避免误覆盖数据库、附件或备份。
+
 ## 数据与备份
 
 默认数据目录位于 macOS 标准应用支持路径：
@@ -90,19 +92,26 @@ AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestV
 - **手动导出**：随时将当前 SQLite 快照、全部受管附件及 `manifest.json` 校验清单打包导出为 `.zip`
 - **完整恢复**：恢复前先校验清单、文件 SHA-256 摘要与数据库结构；若备份包损坏则立即中止且不改动现有数据。正式替换前会自动将当前数据打包为一份 `safety-*.zip` 安全备份以便随时回滚
 
+自动备份目录（含默认目录）不能是符号链接，也不能位于受管附件存储内。V1 备份上限为 10,000 个附件、单文件（含数据库快照）256 MiB、解压后总计 2 GiB（导出时预留 2 MiB 清单空间）、ZIP 文件 3 GiB；导入时只检查单附件大小，数据累计超过整包限制后需要另行处理。
+
+彻底删除或清空回收站时，数据库删除与附件文件清理分步完成。若文件清理失败，条目仍会从回收站移除并显示警告；未引用文件会在后续清理操作中重试删除。
+
 ## 开发
 
 | 命令 | 用途 |
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
-| `go test ./...` | 运行全部后端与无头 UI 交互测试 |
+| `go test ./...` | 运行入口、后端与无头 UI 交互测试 |
+| `go -C third_party/lobe-mygo test ./...` | 单独运行本地 Lobe MyGo 副本的测试（根模块测试不包含它） |
 | `go test -race ./...` | 运行竞态检测测试 |
 | `go vet ./...` | Go 静态分析检查 |
+| `go -C third_party/lobe-mygo vet ./...` | 本地 Lobe MyGo 副本的静态分析检查 |
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
 
 ```text
 Aion/
 ├── main.go                                 # 原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
+├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
 ├── .github/
@@ -118,6 +127,7 @@ Aion/
 │   ├── projects/                           # 项目、任务、三列移动/排序、搜索筛选与回收站服务
 │   ├── attachments/                        # 本地受管文件导入、导出、路径解析与孤儿文件 GC
 │   └── backup/                             # 全量 ZIP 导出、完整性校验、安全备份与自动轮转
+├── third_party/lobe-mygo/                   # 通过 go.mod replace 使用的本地 UI 库副本，修改记录见 README.Aion.md
 └── assets/
     ├── icon/                               # Aion 品牌图标源文件（SVG）、打包用 PNG 与 Go 嵌入封装（icon.go）
     ├── badges/                             # README 徽章图标（Lobe MyGo SVG）
@@ -125,3 +135,5 @@ Aion/
 ```
 
 基于 [MyGo](https://github.com/egoist/mygo)、[Lobe MyGo UI](https://github.com/lobehub/lobe-mygo) 构建。
+
+Release 工作流同时运行根模块与本地 UI 库测试。Apple 公证优先使用完整的 API Key 三项凭据，否则使用已通过校验的 Apple ID 凭据；临时签名钥匙串从创建前即登记清理路径，后续导入或公证失败时也会清理。

@@ -69,7 +69,7 @@ func (s *Service) policyLocked(ctx context.Context, db *sql.DB) (Policy, error) 
 	var raw string
 	err := db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=?", policyKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
-		return s.defaultPolicy(), nil
+		return s.normalizePolicy(s.defaultPolicy())
 	}
 	if err != nil {
 		return Policy{}, err
