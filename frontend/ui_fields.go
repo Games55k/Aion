@@ -260,10 +260,10 @@ func uiSelect(c *ui.Context, selected *string, p selectProps) ui.Element {
 
 	width := tr.Bounds().W
 	sel.Popup(func(panel ui.Element) {
-		panel.Margin(4, 0, 0, 0).Padding(4).Radius(tk.BorderRadius).MinWidth(width).MaxHeight(256).
+		panel.Margin(4, 0, 0, 0).Radius(tk.BorderRadius).MinWidth(width).Clip().
 			Background(tk.BgElevated).Transition(popupTransition()).AttachedOrigin()
 		tk.Elevate(panel, boxShadowSecondary)
-		panel.Children(func() {
+		ui.Scroll(c).MaxHeight(384).Padding(4).Children(func() {
 			for _, o := range p.Options {
 				renderSelectOption(c.Key(o.Value), tk, sel, o, o.Value == *selected)
 			}
