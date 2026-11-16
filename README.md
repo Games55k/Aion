@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white" alt="macOS" />
   <img src="https://img.shields.io/badge/Go-1.27.3+-4B5563?style=flat&logo=go&logoColor=00ADD8&labelColor=18181B" alt="Go 1.27.3+" />
-  <a href="https://mygo.lobehub.com"><img src="assets/badges/lobe-mygo.svg" alt="Lobe MyGo" /></a>
+  <a href="https://mygo.run"><img src="https://img.shields.io/badge/MyGo-Native_UI-2563EB?style=flat&labelColor=18181B" alt="MyGo Native UI" /></a>
 </p>
 
 <p align="center">
@@ -115,10 +115,8 @@ go test ./frontend -run TestVisualSnapshotRender
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
 | `go test ./...` | 运行入口、后端与无头 UI 交互测试 |
-| `go -C third_party/lobe-mygo test ./...` | 单独运行本地 Lobe MyGo 副本的测试（根模块测试不包含它） |
 | `go test -race ./...` | 运行竞态检测测试 |
 | `go vet ./...` | Go 静态分析检查 |
-| `go -C third_party/lobe-mygo vet ./...` | 本地 Lobe MyGo 副本的静态分析检查 |
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
 
 ```text
@@ -131,6 +129,7 @@ Aion/
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
 ├── frontend/                               # 原生界面层：工作台状态、模块切换侧栏、项目看板、求职投递、回收站、设置与附件预览
+│   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的设计令牌、控件、弹窗、Markdown 与 Lucide SVG 图标
 │   ├── sidebar.go                          # 展开/折叠双形态模块切换器与各模块导航侧栏
 │   ├── task_save.go                        # 任务草稿串行保存、合并输入与保存后的导航
 │   ├── job_save.go                         # 求职投递详情草稿校验、串行保存与撤销恢复
@@ -149,13 +148,11 @@ Aion/
 │   ├── jobapplications/                    # 求职投递记录、事件去重、筛选排序统计、补录与回收站服务
 │   ├── attachments/                        # 本地受管文件导入、导出、路径解析与孤儿文件 GC
 │   └── backup/                             # 全量 ZIP 导出、v1/v2 完整性校验、安全备份与自动轮转
-├── third_party/lobe-mygo/                   # 通过 go.mod replace 使用的本地 UI 库副本，修改记录见 README.Aion.md
 └── assets/
     ├── icon/                               # Aion 品牌图标源文件（SVG）、打包用 PNG 与 Go 嵌入封装（icon.go）
-    ├── badges/                             # README 徽章图标（Lobe MyGo SVG）
     └── screenshot.png                      # 无头渲染的界面预览截图（1440×900）
 ```
 
-基于 [MyGo](https://github.com/egoist/mygo)、[Lobe MyGo UI](https://github.com/lobehub/lobe-mygo) 构建。
+基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建。
 
-Release 工作流同时运行根模块与本地 UI 库测试。Apple 公证优先使用完整的 API Key 三项凭据，否则使用已通过校验的 Apple ID 凭据；临时签名钥匙串从创建前即登记清理路径，后续导入或公证失败时也会清理。
+Apple 公证优先使用完整的 API Key 三项凭据，否则使用已通过校验的 Apple ID 凭据；临时签名钥匙串从创建前即登记清理路径，后续导入或公证失败时也会清理。

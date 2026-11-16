@@ -4,27 +4,22 @@ import (
 	"fmt"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/display"
-	"github.com/lobehub/lobe-mygo/pkg/layout"
-	"github.com/lobehub/lobe-mygo/pkg/lucide"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 	bar := c.TitleBar()
 	topPad := float32(14)
 	if bar.Height > 0 {
 		topPad = max(bar.Height+8, 42)
 	}
 
-	layout.DraggableSideNav(c, &w.sideWidth, &w.sideExpanded, layout.DraggableSideNavProps{
+	uiDraggableSideNav(c, &w.sideWidth, &w.sideExpanded, draggableSideNavProps{
 		MinWidth:                78,
 		MaxWidth:                340,
 		ShowHandleWhenCollapsed: true,
 		HighlightHandle:         true,
 		Background:              tk.BgContainer,
-		Header: func(nav layout.SideNavState) {
+		Header: func(nav sideNavState) {
 			ui.Column(c).Padding(topPad, 12, 10, 12).Gap(12).AlignSelf(ui.Stretch).DragWindow().Children(func() {
 				// Brand Row
 				brandRow := ui.Row(c).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch)
@@ -85,7 +80,7 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 				}
 			})
 		},
-		Footer: func(nav layout.SideNavState) {
+		Footer: func(nav sideNavState) {
 			ui.Column(c).Padding(8).Gap(4).AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
 				trashExtra := ""
 				if len(w.trashItems) > 0 {
@@ -98,21 +93,21 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 				case NavSettings:
 					footerActive = "nav:settings"
 				}
-				chosen := display.List(c, display.ListProps{
+				chosen := uiList(c, listProps{
 					Active:    footerActive,
 					Collapse:  nav.Collapse,
 					RailWidth: nav.RailWidth,
-					Items: []display.ListItem{
+					Items: []listItem{
 						{
 							Key:   "nav:trash",
 							Label: "回收站",
-							Icon:  lucide.Trash2(),
+							Icon:  iconTrash2(),
 							Extra: trashExtra,
 						},
 						{
 							Key:   "nav:settings",
 							Label: "设置",
-							Icon:  lucide.Settings(),
+							Icon:  iconSettings(),
 							Extra: "⌘,",
 						},
 					},
@@ -125,7 +120,7 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 				}
 			})
 		},
-	}, func(nav layout.SideNavState) {
+	}, func(nav sideNavState) {
 		ui.Column(c).Padding(4, 8, 12, 8).Gap(8).AlignSelf(ui.Stretch).Children(func() {
 			if w.activeModule == "job_applications" {
 				w.renderJobSidebar(c, tk, nav)
@@ -136,12 +131,12 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *theme.Tokens) {
 	})
 }
 
-func (w *Workbench) renderJobSidebar(c *ui.Context, tk *theme.Tokens, nav layout.SideNavState) {
+func (w *Workbench) renderJobSidebar(c *ui.Context, tk *uiTokens, nav sideNavState) {
 	if nav.Expanded {
 		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "投递记录").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
-			if action.ActionIcon(c, lucide.Plus(), action.ActionIconProps{
-				Size:  theme.Small,
+			if uiActionIcon(c, iconPlus(), actionIconProps{
+				Size:  sizeSmall,
 				Title: "快速新增投递",
 			}).Clicked() {
 				w.OpenJobCreateModal()
@@ -165,33 +160,33 @@ func (w *Workbench) renderJobSidebar(c *ui.Context, tk *theme.Tokens, nav layout
 	case NavJobClosed:
 		activeKey = "nav:job_closed"
 	}
-	chosen := display.List(c.Key("job-nav"), display.ListProps{
+	chosen := uiList(c.Key("job-nav"), listProps{
 		Active:    activeKey,
 		Collapse:  nav.Collapse,
 		RailWidth: nav.RailWidth,
-		Items: []display.ListItem{
+		Items: []listItem{
 			{
 				Key:   "nav:job_all",
 				Label: "全部投递",
-				Icon:  lucide.Briefcase(),
+				Icon:  iconBriefcase(),
 				Extra: countStr(w.jobStats.Total),
 			},
 			{
 				Key:   "nav:job_active",
 				Label: "进行中",
-				Icon:  lucide.Clock(),
+				Icon:  iconClock(),
 				Extra: countStr(w.jobStats.Active),
 			},
 			{
 				Key:   "nav:job_offer",
 				Label: "已获 Offer",
-				Icon:  lucide.Award(),
+				Icon:  iconAward(),
 				Extra: countStr(w.jobStats.Offered),
 			},
 			{
 				Key:   "nav:job_closed",
 				Label: "已结束",
-				Icon:  lucide.FolderCheck(),
+				Icon:  iconFolderCheck(),
 				Extra: countStr(w.jobStats.Closed),
 			},
 		},
@@ -208,7 +203,7 @@ func (w *Workbench) renderJobSidebar(c *ui.Context, tk *theme.Tokens, nav layout
 	}
 }
 
-func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav layout.SideNavState) {
+func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *uiTokens, nav sideNavState) {
 	// Top Overview & Archived Navigation
 	topActive := ""
 	switch w.navPage {
@@ -225,21 +220,21 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 	if len(w.archivedProjects) > 0 {
 		archivedExtra = fmt.Sprint(len(w.archivedProjects))
 	}
-	topChosen := display.List(c.Key("top-nav"), display.ListProps{
+	topChosen := uiList(c.Key("top-nav"), listProps{
 		Active:    topActive,
 		Collapse:  nav.Collapse,
 		RailWidth: nav.RailWidth,
-		Items: []display.ListItem{
+		Items: []listItem{
 			{
 				Key:   "nav:all_projects",
 				Label: "所有项目",
-				Icon:  lucide.LayoutGrid(),
+				Icon:  iconLayoutGrid(),
 				Extra: activeExtra,
 			},
 			{
 				Key:   "nav:archived_projects",
 				Label: "已归档项目",
-				Icon:  lucide.Archive(),
+				Icon:  iconArchive(),
 				Extra: archivedExtra,
 			},
 		},
@@ -260,8 +255,8 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 	if nav.Expanded {
 		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "项目列表").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
-			if action.ActionIcon(c, lucide.FolderPlus(), action.ActionIconProps{
-				Size:  theme.Small,
+			if uiActionIcon(c, iconFolderPlus(), actionIconProps{
+				Size:  sizeSmall,
 				Title: "创建项目",
 			}).Clicked() {
 				w.OpenCreateProjectModal()
@@ -275,7 +270,7 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 			ui.Text(c, "暂无进行中的项目").FontSize(12).TextColor(tk.TextTertiary)
 		})
 	} else {
-		projItems := make([]display.ListItem, 0, len(w.activeProjects))
+		projItems := make([]listItem, 0, len(w.activeProjects))
 		for _, proj := range w.activeProjects {
 			p := proj
 			sum := w.projectSummaries[p.ID]
@@ -292,14 +287,14 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 						bg = tk.FillSecondary.Over(tk.BgContainer)
 					}
 					ui.Row(c).Height(28).Background(bg).PaddingX(2).Radius(tk.BorderRadiusSM).Gap(2).AlignItems(ui.Center).Children(func() {
-						if action.ActionIcon(c.Key("edit-"+p.ID), lucide.Pencil(), action.ActionIconProps{
-							Size:  theme.Small,
+						if uiActionIcon(c.Key("edit-"+p.ID), iconPencil(), actionIconProps{
+							Size:  sizeSmall,
 							Title: "编辑项目: " + p.Name,
 						}).Clicked() {
 							w.OpenEditProjectModal(p)
 						}
-						if action.ActionIcon(c.Key("archive-"+p.ID), lucide.Archive(), action.ActionIconProps{
-							Size:  theme.Small,
+						if uiActionIcon(c.Key("archive-"+p.ID), iconArchive(), actionIconProps{
+							Size:  sizeSmall,
 							Title: "归档项目: " + p.Name,
 						}).Clicked() {
 							w.ArchiveProject(p.ID)
@@ -307,7 +302,7 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 					})
 				}
 			}
-			projItems = append(projItems, display.ListItem{
+			projItems = append(projItems, listItem{
 				Key:     "proj:" + p.ID,
 				Label:   p.Name,
 				Icon:    ProjectIconSVG(p.Icon),
@@ -319,7 +314,7 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *theme.Tokens, nav la
 		if w.navPage == NavProjectBoard && w.activeProjectID != "" {
 			activeProjKey = "proj:" + w.activeProjectID
 		}
-		chosenProj := display.List(c.Key("active-projects-list"), display.ListProps{
+		chosenProj := uiList(c.Key("active-projects-list"), listProps{
 			Active:    activeProjKey,
 			Collapse:  nav.Collapse,
 			RailWidth: nav.RailWidth,

@@ -8,17 +8,9 @@ import (
 	"aion/backend/model"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/choice"
-	"github.com/lobehub/lobe-mygo/pkg/display"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
-	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/layout"
-	"github.com/lobehub/lobe-mygo/pkg/lucide"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 	if !w.jobDetailModalOpen() {
 		return
 	}
@@ -31,7 +23,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
 		panel.Width(960).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
 			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("投递详情弹窗")
-		tk.Elevate(panel, theme.BoxShadow)
+		tk.Elevate(panel, boxShadow)
 
 		if panel.Dismissed() {
 			panelDismissed = true
@@ -51,16 +43,16 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
 					})
 				})
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-					delBtn := action.Button(c, "移入回收站", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					delBtn := uiButton(c, "移入回收站", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 						Danger:  true,
 					})
 					if delBtn.Clicked() {
 						w.DeleteJobApplication(app.ID)
 					}
-					if action.ActionIcon(c, lucide.X(), action.ActionIconProps{
-						Size:  theme.Small,
+					if uiActionIcon(c, iconX(), actionIconProps{
+						Size:  sizeSmall,
 						Title: "关闭投递详情",
 					}).Clicked() {
 						w.CloseJobDetail()
@@ -72,26 +64,26 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
 			if w.jobSaveErr != "" && (w.jobSaveState == "validation_error" || w.jobSaveState == "error") {
 				ui.Box(c).Padding(10, 22, 0, 22).AlignSelf(ui.Stretch).Children(func() {
 					ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-						alertType := feedback.Error
+						alertType := alertError
 						if w.jobSaveState == "validation_error" {
-							alertType = feedback.Warning
+							alertType = alertWarning
 						}
-						feedback.Alert(c, w.jobSaveErr, feedback.AlertProps{
+						uiAlert(c, w.jobSaveErr, alertProps{
 							Type:    alertType,
-							Variant: feedback.Soft,
+							Variant: alertSoft,
 						})
 						ui.Row(c).Gap(8).Justify(ui.End).AlignSelf(ui.Stretch).Children(func() {
 							if w.jobSaveState == "error" {
-								if action.Button(c, "重试保存", action.ButtonProps{
-									Variant: action.Primary,
-									Size:    theme.Small,
+								if uiButton(c, "重试保存", buttonProps{
+									Variant: buttonPrimary,
+									Size:    sizeSmall,
 								}).Clicked() {
 									_ = w.SaveSelectedJob()
 								}
 							}
-							if action.Button(c, "放弃修改", action.ButtonProps{
-								Variant: action.Default,
-								Size:    theme.Small,
+							if uiButton(c, "放弃修改", buttonProps{
+								Variant: buttonDefault,
+								Size:    sizeSmall,
 							}).Clicked() {
 								w.DiscardJobChanges()
 							}
@@ -101,7 +93,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
 			}
 
 			// Scrollable Detail Content Body: full-width workflow stepper + two-column details & timeline
-			layout.ScrollArea(c, layout.ScrollAreaProps{Direction: layout.Vertical}, func() {
+			uiScrollArea(c, scrollAreaProps{Direction: scrollVertical}, func() {
 				ui.Column(c).Padding(18, 22, 22, 22).Gap(16).AlignSelf(ui.Stretch).Children(func() {
 					w.renderJobWorkflowSection(c, tk, app)
 					ui.Row(c).Gap(20).AlignItems(ui.Start).AlignSelf(ui.Stretch).Wrap().Children(func() {
@@ -122,66 +114,66 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *theme.Tokens) {
 	}
 }
 
-func (w *Workbench) renderJobSaveStatusBadge(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderJobSaveStatusBadge(c *ui.Context, tk *uiTokens) {
 	switch w.jobSaveState {
 	case "saving":
-		display.Tag(c, "正在保存…", display.TagProps{Color: display.TagProcessing, Size: theme.Small})
+		uiTag(c, "正在保存…", tagProps{Color: tagProcessing, Size: sizeSmall})
 	case "validation_error":
-		display.Tag(c, "校验未通过", display.TagProps{Color: display.TagWarning, Size: theme.Small})
+		uiTag(c, "校验未通过", tagProps{Color: tagWarning, Size: sizeSmall})
 	case "error":
-		display.Tag(c, "保存失败", display.TagProps{Color: display.TagError, Size: theme.Small})
+		uiTag(c, "保存失败", tagProps{Color: tagError, Size: sizeSmall})
 	default:
 		label := "已自动保存"
 		if !w.jobLastSavedAt.IsZero() {
 			label = "已保存 " + w.jobLastSavedAt.In(time.Local).Format("15:04:05")
 		}
-		display.Tag(c, label, display.TagProps{Color: display.TagSuccess, Variant: display.TagBorderless, Size: theme.Small})
+		uiTag(c, label, tagProps{Color: tagSuccess, Variant: tagBorderless, Size: sizeSmall})
 	}
 }
 
-func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *theme.Tokens, app model.JobApplication) {
+func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
 	ui.Column(c).Padding(14).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).Wrap().AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
 				ui.Text(c, "当前阶段").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-				stageOpts := make([]field.SelectOption, 0, len(model.AllJobStages()))
+				stageOpts := make([]selectOption, 0, len(model.AllJobStages()))
 				for _, st := range model.AllJobStages() {
-					stageOpts = append(stageOpts, field.SelectOption{Value: string(st), Label: st.Label()})
+					stageOpts = append(stageOpts, selectOption{Value: string(st), Label: st.Label()})
 				}
 				ui.Box(c).Width(155).Children(func() {
 					stageVal := string(app.Stage)
-					field.Select(c.Key("detail-stage"), &stageVal, field.SelectProps{
+					uiSelect(c.Key("detail-stage"), &stageVal, selectProps{
 						Options: stageOpts,
-						Size:    theme.Small,
+						Size:    sizeSmall,
 					}).Label("详情阶段")
 					if stageVal != string(app.Stage) {
 						w.ChangeJobStage(app.ID, model.JobStage(stageVal))
 					}
 				})
 				if app.Lifecycle == model.JobLifecycleActive {
-					display.Tag(c, app.Lifecycle.Label(), display.TagProps{Color: display.TagProcessing, Size: theme.Small})
+					uiTag(c, app.Lifecycle.Label(), tagProps{Color: tagProcessing, Size: sizeSmall})
 				} else {
-					display.Tag(c, app.Lifecycle.Label(), display.TagProps{Color: display.TagGray, Size: theme.Small})
-					display.Tag(c, app.Outcome.Label(), display.TagProps{Color: jobOutcomeTagColor(app.Outcome), Size: theme.Small})
+					uiTag(c, app.Lifecycle.Label(), tagProps{Color: tagGray, Size: sizeSmall})
+					uiTag(c, app.Outcome.Label(), tagProps{Color: jobOutcomeTagColor(app.Outcome), Size: sizeSmall})
 				}
 			})
 
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				if app.Lifecycle == model.JobLifecycleActive {
-					rejBtn := action.Button(c, "标为未通过", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					rejBtn := uiButton(c, "标为未通过", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 						Danger:  true,
 					}).Label("快速标为未通过")
 					if rejBtn.Clicked() {
 						w.QuickCloseJobApplication(app.ID, model.JobOutcomeRejected)
 					}
-					closeBtn := action.Button(c, "结束流程", action.ButtonProps{Variant: action.Default, Size: theme.Small})
+					closeBtn := uiButton(c, "结束流程", buttonProps{Variant: buttonDefault, Size: sizeSmall})
 					if closeBtn.Clicked() {
 						w.OpenJobCloseModal(app.ID)
 					}
 				} else {
-					reopenBtn := action.Button(c, "重新开启", action.ButtonProps{Variant: action.Primary, Size: theme.Small})
+					reopenBtn := uiButton(c, "重新开启", buttonProps{Variant: buttonPrimary, Size: sizeSmall})
 					if reopenBtn.Clicked() {
 						w.ReopenJobApplication(app.ID)
 					}
@@ -201,7 +193,7 @@ func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *theme.Tokens, ap
 
 			ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "结束原因").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-				area := field.TextArea(c.Key("detail-closure-reason"), &w.editJobClosureReason, field.TextAreaProps{
+				area := uiTextArea(c.Key("detail-closure-reason"), &w.editJobClosureReason, textAreaProps{
 					Placeholder: "补充或编辑结束原因（重新开启后会保留在历史事件中）...",
 					MinRows:     2,
 					MaxRows:     4,
@@ -216,7 +208,7 @@ func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *theme.Tokens, ap
 	})
 }
 
-func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *theme.Tokens, app model.JobApplication) {
+func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *uiTokens, app model.JobApplication) {
 	stages := model.AllJobStages()
 	currentIdx := -1
 	for i, st := range stages {
@@ -267,7 +259,7 @@ func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *theme.Tokens, app m
 
 			node.Children(func() {
 				if isPast {
-					ui.Icon(c, lucide.Check()).FontSize(11).TextColor(fg)
+					ui.Icon(c, iconCheck()).FontSize(11).TextColor(fg)
 				}
 				ui.Text(c, st.Label()).FontSize(12).FontWeight(fontWeight).TextColor(fg).SingleLine()
 			})
@@ -286,13 +278,13 @@ func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *theme.Tokens, app m
 	})
 }
 
-func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, app model.JobApplication) {
+func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
 	ui.Column(c).Padding(16).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
 		ui.Text(c, "基本信息与备注").FontSize(13).FontWeight(600).TextColor(tk.Text)
 
 		ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "公司名称 *").FontSize(12).TextColor(tk.TextSecondary)
-			in := field.Input(c.Key("detail-company"), &w.editJobCompany, field.InputProps{
+			in := uiInput(c.Key("detail-company"), &w.editJobCompany, inputProps{
 				Placeholder: "公司名称",
 				Invalid:     strings.TrimSpace(w.editJobCompany) == "",
 			})
@@ -304,7 +296,7 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 
 		ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "岗位名称 *").FontSize(12).TextColor(tk.TextSecondary)
-			in := field.Input(c.Key("detail-position"), &w.editJobPosition, field.InputProps{
+			in := uiInput(c.Key("detail-position"), &w.editJobPosition, inputProps{
 				Placeholder: "岗位名称",
 				Invalid:     strings.TrimSpace(w.editJobPosition) == "",
 			})
@@ -318,7 +310,7 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
 				ui.Text(c, "投递日期 *").FontSize(12).TextColor(tk.TextSecondary)
 				prev := formatCalendarDate(w.editJobAppliedDate)
-				dp := field.DatePicker(c.Key("detail-applied-date"), &w.editJobAppliedDate, field.DatePickerProps{
+				dp := uiDatePicker(c.Key("detail-applied-date"), &w.editJobAppliedDate, datePickerProps{
 					Placeholder: "选择投递日期",
 				})
 				dp.Label("详情投递日期")
@@ -328,7 +320,7 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
 				ui.Text(c, "投递渠道").FontSize(12).TextColor(tk.TextSecondary)
-				in := field.Input(c.Key("detail-channel"), &w.editJobChannel, field.InputProps{
+				in := uiInput(c.Key("detail-channel"), &w.editJobChannel, inputProps{
 					Placeholder: "官网 / 内推 / 招聘平台",
 				})
 				in.Label("详情投递渠道")
@@ -343,7 +335,7 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 			ui.Row(c).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 					_, urlErr := model.ValidateJobURL(w.editJobURL)
-					in := field.Input(c.Key("detail-url"), &w.editJobURL, field.InputProps{
+					in := uiInput(c.Key("detail-url"), &w.editJobURL, inputProps{
 						Placeholder: "https://...",
 						Invalid:     urlErr != nil,
 					})
@@ -352,14 +344,14 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 						w.TouchJobDetailField()
 					}
 				})
-				copyBtn := action.Button(c, "复制链接", action.ButtonProps{Variant: action.Default, Size: theme.Small})
+				copyBtn := uiButton(c, "复制链接", buttonProps{Variant: buttonDefault, Size: sizeSmall})
 				if strings.TrimSpace(w.editJobURL) == "" {
 					copyBtn.Disabled(true)
 				} else if copyBtn.Clicked() {
 					c.Services().WriteClipboard(strings.TrimSpace(w.editJobURL))
-					w.EnqueueToast(feedback.ToastProps{Title: "已复制投递链接", Type: feedback.ToastSuccess})
+					w.EnqueueToast(ToastProps{Title: "已复制投递链接", Type: ToastSuccess})
 				}
-				openBtn := action.Button(c, "打开链接", action.ButtonProps{Variant: action.Default, Size: theme.Small})
+				openBtn := uiButton(c, "打开链接", buttonProps{Variant: buttonDefault, Size: sizeSmall})
 				if strings.TrimSpace(w.editJobURL) == "" {
 					openBtn.Disabled(true)
 				} else if openBtn.Clicked() {
@@ -370,7 +362,7 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *theme.Tokens, ap
 
 		ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "通用备注").FontSize(12).TextColor(tk.TextSecondary)
-			area := field.TextArea(c.Key("detail-notes"), &w.editJobNotes, field.TextAreaProps{
+			area := uiTextArea(c.Key("detail-notes"), &w.editJobNotes, textAreaProps{
 				Placeholder: "记录岗位详情、面试题目或谈薪信息（自动保存，不产生冗余时间线事件）...",
 				MinRows:     3,
 				MaxRows:     8,
@@ -428,7 +420,7 @@ func formatTimelineSummary(ev model.JobApplicationEvent, app model.JobApplicatio
 	}
 }
 
-func timelineEventDot(c *ui.Context, tk *theme.Tokens, ev model.JobApplicationEvent) {
+func timelineEventDot(c *ui.Context, tk *uiTokens, ev model.JobApplicationEvent) {
 	dot := ui.Box(c).Size(10, 10).Radius(5).Margin(5, 0, 0, 0).Shrink(0)
 	switch ev.EventType {
 	case model.JobEventStageBackfilled:
@@ -459,16 +451,16 @@ func canDeleteTimelineEvent(ev model.JobApplicationEvent) bool {
 	return ev.EventType != model.JobEventCreated
 }
 
-func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, app model.JobApplication) {
+func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
 	showBackfill := w.jobBackfillExpanded || w.jobBackfillErr != ""
 	ui.Column(c).Padding(16).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
 		// Timeline Header & Toolbar (Sort Order + Collapsible Backfill)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).Wrap().AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "流程时间线").FontSize(13).FontWeight(600).TextColor(tk.Text)
-				display.Tag(c, fmt.Sprintf("共 %d 条", len(w.detailJobEvents)), display.TagProps{
-					Variant: display.TagOutlined,
-					Size:    theme.Small,
+				uiTag(c, fmt.Sprintf("共 %d 条", len(w.detailJobEvents)), tagProps{
+					Variant: tagOutlined,
+					Size:    sizeSmall,
 				})
 			})
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -476,12 +468,12 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 				if !w.jobTimelineDesc {
 					orderLabel = "排序：时间正序 ↑"
 				}
-				orderBtn := action.Button(c.Key("toggle-timeline-order"), "", action.ButtonProps{
-					Variant: action.Text,
-					Size:    theme.Small,
+				orderBtn := uiButton(c.Key("toggle-timeline-order"), "", buttonProps{
+					Variant: buttonText,
+					Size:    sizeSmall,
 				}).AlignItems(ui.Center).Label("切换时间线排序")
 				orderBtn.Children(func() {
-					ui.Icon(c, lucide.ArrowUpDown()).FontSize(12)
+					ui.Icon(c, iconArrowUpDown()).FontSize(12)
 					ui.Text(c, orderLabel).SingleLine()
 				})
 				if orderBtn.Clicked() {
@@ -492,9 +484,9 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 				if showBackfill {
 					backfillLabel = "收起补录"
 				}
-				backfillBtn := action.Button(c.Key("toggle-backfill-panel"), backfillLabel, action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				backfillBtn := uiButton(c.Key("toggle-backfill-panel"), backfillLabel, buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 				}).Label("切换补录历史节点")
 				if backfillBtn.Clicked() {
 					w.jobBackfillExpanded = !w.jobBackfillExpanded
@@ -505,23 +497,23 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 		// Compact Top Quick-Note Bar
 		ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 			if w.jobNoteErr != "" {
-				feedback.Alert(c, w.jobNoteErr, feedback.AlertProps{Type: feedback.Error, Variant: feedback.Soft})
+				uiAlert(c, w.jobNoteErr, alertProps{Type: alertError, Variant: alertSoft})
 			}
 			ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 				ui.Box(c).Grow(1).MinWidth(150).Children(func() {
-					field.Input(c.Key("timeline-note-input"), &w.jobNoteInput, field.InputProps{
+					uiInput(c.Key("timeline-note-input"), &w.jobNoteInput, inputProps{
 						Placeholder: "记录沟通结果或面试反馈...",
-						Size:        theme.Small,
+						Size:        sizeSmall,
 					}).Label("时间线备注输入")
 				})
 				ui.Box(c).Width(128).Shrink(0).Children(func() {
-					field.DatePicker(c.Key("timeline-note-date"), &w.jobNoteDate, field.DatePickerProps{
-						Size: theme.Small,
+					uiDatePicker(c.Key("timeline-note-date"), &w.jobNoteDate, datePickerProps{
+						Size: sizeSmall,
 					}).Label("时间线备注日期")
 				})
-				if action.Button(c.Key("add-timeline-note"), "添加备注", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				if uiButton(c.Key("add-timeline-note"), "添加备注", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 				}).Clicked() {
 					w.AddJobTimelineNote(app.ID)
 				}
@@ -536,33 +528,33 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 					ui.Text(c, "仅记录过去经历，不会更改当前阶段与流程状态").FontSize(11).TextColor(tk.TextTertiary)
 				})
 				if w.jobBackfillErr != "" {
-					feedback.Alert(c, w.jobBackfillErr, feedback.AlertProps{Type: feedback.Error, Variant: feedback.Soft})
+					uiAlert(c, w.jobBackfillErr, alertProps{Type: alertError, Variant: alertSoft})
 				}
-				stageOpts := make([]field.SelectOption, 0, len(model.AllJobStages()))
+				stageOpts := make([]selectOption, 0, len(model.AllJobStages()))
 				for _, st := range model.AllJobStages() {
-					stageOpts = append(stageOpts, field.SelectOption{Value: string(st), Label: st.Label()})
+					stageOpts = append(stageOpts, selectOption{Value: string(st), Label: st.Label()})
 				}
 				ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 					ui.Box(c).Width(130).Children(func() {
-						field.Select(c.Key("backfill-stage"), &w.jobBackfillStage, field.SelectProps{
+						uiSelect(c.Key("backfill-stage"), &w.jobBackfillStage, selectProps{
 							Options: stageOpts,
-							Size:    theme.Small,
+							Size:    sizeSmall,
 						}).Label("补录阶段")
 					})
 					ui.Box(c).Width(132).Children(func() {
-						field.DatePicker(c.Key("backfill-date"), &w.jobBackfillDate, field.DatePickerProps{
-							Size: theme.Small,
+						uiDatePicker(c.Key("backfill-date"), &w.jobBackfillDate, datePickerProps{
+							Size: sizeSmall,
 						}).Label("补录发生日期")
 					})
 					ui.Box(c).Grow(1).MinWidth(130).Children(func() {
-						field.Input(c.Key("backfill-note"), &w.jobBackfillNote, field.InputProps{
+						uiInput(c.Key("backfill-note"), &w.jobBackfillNote, inputProps{
 							Placeholder: "可选说明...",
-							Size:        theme.Small,
+							Size:        sizeSmall,
 						}).Label("补录说明")
 					})
-					if action.Button(c.Key("submit-backfill"), "补录历史事件", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c.Key("submit-backfill"), "补录历史事件", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 					}).Clicked() {
 						w.BackfillJobStageEvent(app.ID)
 					}
@@ -601,20 +593,20 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 									FontSize(12).TextColor(tk.TextTertiary).Shrink(0)
 								ui.Text(c, headline).FontSize(13).FontWeight(500).TextColor(tk.Text)
 								if ev.EventType == model.JobEventStageBackfilled {
-									display.Tag(c, "补录", display.TagProps{Size: theme.Small, Variant: display.TagOutlined})
+									uiTag(c, "补录", tagProps{Size: sizeSmall, Variant: tagOutlined})
 								}
 							})
 
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
-								if action.ActionIcon(c.Key("edit-ev-"+ev.ID), lucide.Pencil(), action.ActionIconProps{
-									Size:  theme.Small,
+								if uiActionIcon(c.Key("edit-ev-"+ev.ID), iconPencil(), actionIconProps{
+									Size:  sizeSmall,
 									Title: "编辑时间线备注 " + ev.ID,
 								}).Clicked() {
 									w.StartEditJobTimelineEvent(ev)
 								}
 								if canDeleteTimelineEvent(ev) {
-									if action.ActionIcon(c.Key("del-ev-"+ev.ID), lucide.Trash2(), action.ActionIconProps{
-										Size:  theme.Small,
+									if uiActionIcon(c.Key("del-ev-"+ev.ID), iconTrash2(), actionIconProps{
+										Size:  sizeSmall,
 										Title: "删除时间线节点 " + ev.ID,
 									}).Clicked() {
 										w.DeleteJobTimelineEvent(app.ID, ev.ID)
@@ -626,20 +618,20 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 						if w.editingJobEventID == ev.ID {
 							ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 								ui.Box(c).Grow(1).MinWidth(160).Children(func() {
-									field.Input(c.Key("edit-ev-input-"+ev.ID), &w.editingJobEventNote, field.InputProps{
+									uiInput(c.Key("edit-ev-input-"+ev.ID), &w.editingJobEventNote, inputProps{
 										Placeholder: "输入节点备注...",
-										Size:        theme.Small,
+										Size:        sizeSmall,
 									}).Label("编辑事件备注输入")
 								})
-								if action.Button(c.Key("save-edit-ev-"+ev.ID), "保存备注", action.ButtonProps{
-									Variant: action.Primary,
-									Size:    theme.Small,
+								if uiButton(c.Key("save-edit-ev-"+ev.ID), "保存备注", buttonProps{
+									Variant: buttonPrimary,
+									Size:    sizeSmall,
 								}).Clicked() {
 									w.SaveJobTimelineEventNote(app.ID, ev.ID)
 								}
-								if action.Button(c.Key("cancel-edit-ev-"+ev.ID), "取消", action.ButtonProps{
-									Variant: action.Default,
-									Size:    theme.Small,
+								if uiButton(c.Key("cancel-edit-ev-"+ev.ID), "取消", buttonProps{
+									Variant: buttonDefault,
+									Size:    sizeSmall,
 								}).Clicked() {
 									w.CancelEditJobTimelineEvent()
 								}
@@ -656,7 +648,7 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *theme.Tokens, ap
 	})
 }
 
-func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 	if !w.jobCloseOpen {
 		return
 	}
@@ -671,7 +663,7 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *theme.Tokens) {
 		panel.Width(480).MaxWidthPercent(100).Radius(12).Clip().
 			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("结束流程弹窗")
-		tk.Elevate(panel, theme.BoxShadow)
+		tk.Elevate(panel, boxShadow)
 
 		if panel.Dismissed() {
 			dismissed = true
@@ -680,7 +672,7 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *theme.Tokens) {
 		ui.Column(c).FillWidth().Padding(20, 24).Gap(14).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "结束求职流程").FontSize(17).FontWeight(700).TextColor(tk.Text)
-				if action.ActionIcon(c, lucide.X(), action.ActionIconProps{Size: theme.Small, Title: "关闭结束流程弹窗"}).Clicked() {
+				if uiActionIcon(c, iconX(), actionIconProps{Size: sizeSmall, Title: "关闭结束流程弹窗"}).Clicked() {
 					w.jobCloseOpen = false
 				}
 			})
@@ -689,33 +681,33 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *theme.Tokens) {
 				FontSize(12).TextColor(tk.TextSecondary)
 
 			if w.jobCloseErr != "" {
-				feedback.Alert(c, w.jobCloseErr, feedback.AlertProps{Type: feedback.Error, Variant: feedback.Soft})
+				uiAlert(c, w.jobCloseErr, alertProps{Type: alertError, Variant: alertSoft})
 			}
 
 			ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "结束结果 *").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-				opts := make([]field.SelectOption, 0, len(model.AllJobOutcomes()))
+				opts := make([]selectOption, 0, len(model.AllJobOutcomes()))
 				for _, o := range model.AllJobOutcomes() {
-					opts = append(opts, field.SelectOption{Value: string(o), Label: o.Label()})
+					opts = append(opts, selectOption{Value: string(o), Label: o.Label()})
 				}
-				field.Select(c.Key("close-outcome"), &w.jobCloseOutcome, field.SelectProps{
+				uiSelect(c.Key("close-outcome"), &w.jobCloseOutcome, selectProps{
 					Options: opts,
 				}).Label("选择结束结果")
 			})
 
 			if needsOfferConfirm {
-				feedback.Alert(c, "当前阶段尚未处于 Offer", feedback.AlertProps{
-					Type:        feedback.Warning,
-					Variant:     feedback.Soft,
+				uiAlert(c, "当前阶段尚未处于 Offer", alertProps{
+					Type:        alertWarning,
+					Variant:     alertSoft,
 					Description: fmt.Sprintf("选择「%s」要求阶段为 Offer，请勾选确认后随结果一并提交。", outcome.Label()),
 				})
-				choice.Checkbox(c, &w.jobCloseConfirmOffer, "确认同步将当前阶段调整为 Offer", choice.CheckboxProps{}).
+				uiCheckbox(c, &w.jobCloseConfirmOffer, "确认同步将当前阶段调整为 Offer", checkboxProps{}).
 					Label("确认同步将当前阶段调整为 Offer")
 			}
 
 			ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "结束原因（可选）").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-				field.TextArea(c, &w.jobCloseReason, field.TextAreaProps{
+				uiTextArea(c, &w.jobCloseReason, textAreaProps{
 					Placeholder: "记录失败复盘、放弃理由或薪资差异...",
 					MinRows:     3,
 					MaxRows:     6,
@@ -723,10 +715,10 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *theme.Tokens) {
 			})
 
 			ui.Row(c).Gap(10).Justify(ui.End).AlignSelf(ui.Stretch).Children(func() {
-				if action.Button(c, "取消", action.ButtonProps{Variant: action.Default}).Clicked() {
+				if uiButton(c, "取消", buttonProps{Variant: buttonDefault}).Clicked() {
 					w.jobCloseOpen = false
 				}
-				confirmBtn := action.Button(c, "确认结束流程", action.ButtonProps{Variant: action.Primary})
+				confirmBtn := uiButton(c, "确认结束流程", buttonProps{Variant: buttonPrimary})
 				if confirmBtn.Clicked() {
 					w.SubmitJobCloseModal()
 				}

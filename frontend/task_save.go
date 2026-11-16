@@ -7,7 +7,6 @@ import (
 
 	"aion/backend/model"
 	"aion/backend/projects"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
 )
 
 var errSavePending = errors.New("任务正在后台保存，请稍候")
@@ -36,7 +35,7 @@ func (w *Workbench) afterPendingSave(next func(), title, suffix string) bool {
 		} else {
 			w.detailExpanded = true
 		}
-		w.EnqueueToast(feedback.ToastProps{Title: title, Description: w.flushErrorDetail(err) + suffix, Type: feedback.ToastWarning})
+		w.EnqueueToast(ToastProps{Title: title, Description: w.flushErrorDetail(err) + suffix, Type: ToastWarning})
 		return false
 	}
 	w.afterSave = nil

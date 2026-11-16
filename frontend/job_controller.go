@@ -9,7 +9,6 @@ import (
 
 	"aion/backend/jobapplications"
 	"aion/backend/model"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
 )
 
 func (w *Workbench) runJobWorker(work func() error, onDone func(error)) {
@@ -245,10 +244,10 @@ func (w *Workbench) SubmitJobCreateModal() {
 	w.jobCreateErr = ""
 	w.jobPage = 0
 	w.upsertJobInCache(created)
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已新增投递记录",
 		Description: fmt.Sprintf("%s / %s", created.CompanyName, created.PositionName),
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -432,10 +431,10 @@ func (w *Workbench) QuickCloseJobApplication(appID string, outcome model.JobOutc
 		}
 		w.upsertJobInCache(updated)
 		w.applyClosedJobToDetail(appID, updated, events)
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "流程已结束",
 			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
-			Type:        feedback.ToastInfo,
+			Type:        ToastInfo,
 		})
 	})
 }
@@ -509,10 +508,10 @@ func (w *Workbench) SubmitJobCloseModal() {
 		w.jobCloseOpID = ""
 		w.upsertJobInCache(updated)
 		w.applyClosedJobToDetail(appID, updated, events)
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "流程已结束",
 			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
-			Type:        feedback.ToastInfo,
+			Type:        ToastInfo,
 		})
 	})
 }
@@ -568,10 +567,10 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 				w.detailJobEvents = events
 			}
 		}
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "已重新开启流程",
 			Description: updated.CompanyName + " / " + updated.PositionName,
-			Type:        feedback.ToastSuccess,
+			Type:        ToastSuccess,
 		})
 	})
 }
@@ -739,9 +738,9 @@ func (w *Workbench) SaveJobTimelineEventNote(appID, eventID string) {
 			w.editingJobEventID = ""
 			w.editingJobEventNote = ""
 		}
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title: "已更新节点备注",
-			Type:  feedback.ToastSuccess,
+			Type:  ToastSuccess,
 		})
 	})
 }
@@ -779,9 +778,9 @@ func (w *Workbench) DeleteJobTimelineEvent(appID, eventID string) {
 			w.editingJobEventID = ""
 			w.editingJobEventNote = ""
 		}
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title: "已删除时间线节点",
-			Type:  feedback.ToastInfo,
+			Type:  ToastInfo,
 		})
 	})
 }
@@ -792,7 +791,7 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		return
 	}
 	if w.jobSaving && w.selectedJobID == appID {
-		w.EnqueueToast(feedback.ToastProps{Title: "正在保存投递记录", Description: "保存完成后再移入回收站", Type: feedback.ToastInfo})
+		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再移入回收站", Type: ToastInfo})
 		return
 	}
 	if w.selectedJobID == appID && (w.jobDirty || w.hasUnsavedChangesFromDetailJob()) {
@@ -813,10 +812,10 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		}
 		w.removeJobFromCache(appID)
 		w.ReloadTrash()
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "已移入回收站",
 			Description: "可在全局回收站中恢复或彻底删除",
-			Type:        feedback.ToastInfo,
+			Type:        ToastInfo,
 		})
 	})
 }
@@ -829,26 +828,26 @@ func (w *Workbench) OpenJobURL(rawURL string) {
 		if err != nil {
 			desc = err.Error()
 		}
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "投递链接无效",
 			Description: desc,
-			Type:        feedback.ToastWarning,
+			Type:        ToastWarning,
 		})
 		return
 	}
 	if w.host.OpenURL == nil {
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "无法打开链接",
 			Description: "当前窗口未提供浏览器打开能力",
-			Type:        feedback.ToastError,
+			Type:        ToastError,
 		})
 		return
 	}
 	if err := w.host.OpenURL(cleaned); err != nil {
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "打开投递链接失败",
 			Description: err.Error(),
-			Type:        feedback.ToastError,
+			Type:        ToastError,
 		})
 	}
 }

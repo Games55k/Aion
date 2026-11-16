@@ -8,48 +8,41 @@ import (
 	"aion/backend/model"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/display"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
-	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/lucide"
-	"github.com/lobehub/lobe-mygo/pkg/overlay"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
 type boardColumnSpec struct {
 	Status model.Status
 	Title  string
 	Dot    ui.Color
-	Tag    display.TagColor
+	Tag    tagColor
 }
 
 var (
-	taskStatusOptions = []field.SelectOption{
+	taskStatusOptions = []selectOption{
 		{Value: string(model.Planned), Label: "计划"},
 		{Value: string(model.InProgress), Label: "进行中"},
 		{Value: string(model.Done), Label: "已完成"},
 	}
-	taskPriorityOptions = []field.SelectOption{
+	taskPriorityOptions = []selectOption{
 		{Value: string(model.Urgent), Label: "紧急"},
 		{Value: string(model.High), Label: "高"},
 		{Value: string(model.Medium), Label: "中"},
 		{Value: string(model.Low), Label: "低"},
 		{Value: string(model.NoPriority), Label: "无优先级"},
 	}
-	priorityFilterOptions = append([]field.SelectOption{{Value: "", Label: "全部优先级"}}, taskPriorityOptions...)
+	priorityFilterOptions = append([]selectOption{{Value: "", Label: "全部优先级"}}, taskPriorityOptions...)
 )
 
-func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 	proj := w.ActiveProject()
 	if proj == nil {
 		ui.Column(c).Fill().Center().Padding(32).Children(func() {
-			display.Empty(c, display.EmptyProps{
-				Icon:        lucide.FolderKanban(),
+			uiEmpty(c, emptyProps{
+				Icon:        iconFolderKanban(),
 				Title:       "未选择项目",
 				Description: "请从左侧导航选择一个项目，或创建一个新项目开始管理看板任务。",
 				Action: func() {
-					if action.Button(c, "新建项目", action.ButtonProps{Variant: action.Primary}).Clicked() {
+					if uiButton(c, "新建项目", buttonProps{Variant: buttonPrimary}).Clicked() {
 						w.OpenCreateProjectModal()
 					}
 				},
@@ -71,10 +64,10 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, p.Name).FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 						if p.Archived {
-							display.Tag(c, "已归档项目", display.TagProps{
-								Size:    theme.Small,
-								Variant: display.TagFilled,
-								Color:   display.TagOrange,
+							uiTag(c, "已归档项目", tagProps{
+								Size:    sizeSmall,
+								Variant: tagFilled,
+								Color:   tagOrange,
 							})
 						}
 					})
@@ -88,37 +81,37 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 
 			// Header Action Buttons
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if action.Button(c, "编辑项目", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				if uiButton(c, "编辑项目", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 				}).Clicked() {
 					w.OpenEditProjectModal(p)
 				}
 				if p.Archived {
-					if action.Button(c, "恢复归档", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c, "恢复归档", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 					}).Clicked() {
 						w.UnarchiveProject(p.ID)
 					}
 				} else {
-					if action.Button(c, "归档项目", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c, "归档项目", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 					}).Clicked() {
 						w.ArchiveProject(p.ID)
 					}
 				}
-				if action.Button(c, "移入回收站", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				if uiButton(c, "移入回收站", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 					Danger:  true,
 				}).Label("将项目移入回收站").Clicked() {
 					w.SoftDeleteProject(p.ID)
 				}
-				if action.Button(c, "+ 新建任务", action.ButtonProps{
-					Variant: action.Primary,
-					Size:    theme.Middle,
+				if uiButton(c, "+ 新建任务", buttonProps{
+					Variant: buttonPrimary,
+					Size:    sizeMiddle,
 				}).Clicked() {
 					w.OpenCreateTaskModal(model.Planned)
 				}
@@ -132,10 +125,10 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 				// Search Input
 				ui.Box(c).Width(240).Children(func() {
 					beforeQ := w.searchQuery
-					field.SearchBar(c, &w.searchQuery, field.SearchBarProps{
+					uiSearchBar(c, &w.searchQuery, searchBarProps{
 						Placeholder: "搜索任务标题、描述或标签...",
 						ShortKey:    "mod+k",
-						Size:        theme.Small,
+						Size:        sizeSmall,
 					}).Label("搜索任务")
 					if w.searchQuery != beforeQ {
 						w.applyBoardFilters()
@@ -147,9 +140,9 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 					ui.Text(c, "优先级:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 					ui.Box(c).Width(120).Children(func() {
 						beforeP := w.priorityFilter
-						field.Select(c.Key("priority-filter"), &w.priorityFilter, field.SelectProps{
+						uiSelect(c.Key("priority-filter"), &w.priorityFilter, selectProps{
 							Placeholder: "全部优先级",
-							Size:        theme.Small,
+							Size:        sizeSmall,
 							Options:     priorityFilterOptions,
 						}).Label("按优先级筛选")
 						if w.priorityFilter != beforeP {
@@ -189,9 +182,9 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 					if w.HasBoardFilters() {
 						ui.Text(c, fmt.Sprintf("匹配 %d / %d 项", len(w.filteredTasks), len(w.boardTasks))).
 							FontSize(12).TextColor(tk.Primary).SingleLine()
-						if action.Button(c, "清除筛选", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c, "清除筛选", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Clicked() {
 							w.ClearBoardFilters()
 						}
@@ -205,9 +198,9 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 
 		// 3. Three-Column Kanban Area
 		columns := []boardColumnSpec{
-			{Status: model.Planned, Title: "计划", Dot: tk.Blue, Tag: display.TagBlue},
-			{Status: model.InProgress, Title: "进行中", Dot: tk.Orange, Tag: display.TagOrange},
-			{Status: model.Done, Title: "已完成", Dot: tk.Green, Tag: display.TagGreen},
+			{Status: model.Planned, Title: "计划", Dot: tk.Blue, Tag: tagBlue},
+			{Status: model.InProgress, Title: "进行中", Dot: tk.Orange, Tag: tagOrange},
+			{Status: model.Done, Title: "已完成", Dot: tk.Green, Tag: tagGreen},
 		}
 
 		ui.Row(c).Grow(1).Basis(0).MinWidth(0).Padding(16, 20).Gap(16).AlignItems(ui.Stretch).
@@ -219,7 +212,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *theme.Tokens) {
 	})
 }
 
-func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col boardColumnSpec) {
+func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColumnSpec) {
 	tasks := w.TasksInColumn(col.Status)
 
 	colBox := ui.Column(c).Grow(1).Basis(0).MinWidth(180).AlignSelf(ui.Stretch).
@@ -241,16 +234,16 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Size(8, 8).Radius(4).Background(col.Dot)
 				ui.Text(c, col.Title).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
-				display.Tag(c, fmt.Sprint(len(tasks)), display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
+				uiTag(c, fmt.Sprint(len(tasks)), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
 					Color:   col.Tag,
 					Round:   true,
 				})
 			})
 
-			if action.ActionIcon(c, lucide.Plus(), action.ActionIconProps{
-				Size:  theme.Small,
+			if uiActionIcon(c, iconPlus(), actionIconProps{
+				Size:  sizeSmall,
 				Title: "在" + col.Title + "中新建任务",
 			}).Clicked() {
 				w.OpenCreateTaskModal(col.Status)
@@ -314,10 +307,10 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 			quickVal := w.quickTaskTitles[col.Status]
 			var submitted bool
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				inp := field.Input(c.Key("quick-input-"+string(col.Status)), &quickVal, field.InputProps{
+				inp := uiInput(c.Key("quick-input-"+string(col.Status)), &quickVal, inputProps{
 					Placeholder: "+ 快速添加" + col.Title + "任务...",
-					Size:        theme.Small,
-					Variant:     field.InputFilled,
+					Size:        sizeSmall,
+					Variant:     inputFilled,
 				}).Label("快速添加" + col.Title + "任务")
 				submitted = inp.Submitted()
 			})
@@ -329,9 +322,9 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 				}
 			}
 			if strings.TrimSpace(quickVal) != "" {
-				if action.Button(c.Key("quick-btn-"+string(col.Status)), "添加", action.ButtonProps{
-					Variant: action.Primary,
-					Size:    theme.Small,
+				if uiButton(c.Key("quick-btn-"+string(col.Status)), "添加", buttonProps{
+					Variant: buttonPrimary,
+					Size:    sizeSmall,
 				}).Label("确认添加" + col.Title + "任务").Clicked() {
 					_, _ = w.QuickCreateTask(col.Status, quickVal)
 				}
@@ -340,7 +333,7 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *theme.Tokens, col board
 	})
 }
 
-func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task, indexInCol, colCount int) ui.Element {
+func (w *Workbench) renderTaskCard(c *ui.Context, tk *uiTokens, t model.Task, indexInCol, colCount int) ui.Element {
 	selected := w.selectedTaskID == t.ID
 
 	card := ui.Column(c).Padding(12).Gap(8).Radius(tk.BorderRadius).
@@ -360,18 +353,18 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 	}
 
 	// Context menu for right-click / keyboard menu key
-	menuChoice := overlay.ContextMenu(c, card, overlay.DropdownMenuProps{
-		Items: []overlay.MenuItem{
-			{Key: "open", Label: "打开任务详情", Icon: lucide.SquarePen()},
+	menuChoice := uiContextMenu(c, card, dropdownMenuProps{
+		Items: []menuItem{
+			{Key: "open", Label: "打开任务详情", Icon: iconSquarePen()},
 			{Divider: true},
-			{Key: "move:planned", Label: "移至 计划", Icon: lucide.CircleDashed(), Disabled: t.Status == model.Planned},
-			{Key: "move:in_progress", Label: "移至 进行中", Icon: lucide.Timer(), Disabled: t.Status == model.InProgress},
-			{Key: "move:done", Label: "移至 已完成", Icon: lucide.CircleCheck(), Disabled: t.Status == model.Done},
+			{Key: "move:planned", Label: "移至 计划", Icon: iconCircleDashed(), Disabled: t.Status == model.Planned},
+			{Key: "move:in_progress", Label: "移至 进行中", Icon: iconTimer(), Disabled: t.Status == model.InProgress},
+			{Key: "move:done", Label: "移至 已完成", Icon: iconCircleCheck(), Disabled: t.Status == model.Done},
 			{Divider: true},
-			{Key: "step:up", Label: "在列内上移", Icon: lucide.ArrowUp(), Disabled: indexInCol <= 0},
-			{Key: "step:down", Label: "在列内下移", Icon: lucide.ArrowDown(), Disabled: indexInCol >= colCount-1},
+			{Key: "step:up", Label: "在列内上移", Icon: iconArrowUp(), Disabled: indexInCol <= 0},
+			{Key: "step:down", Label: "在列内下移", Icon: iconArrowDown(), Disabled: indexInCol >= colCount-1},
 			{Divider: true},
-			{Key: "delete", Label: "移入回收站", Icon: lucide.Trash2(), Danger: true},
+			{Key: "delete", Label: "移入回收站", Icon: iconTrash2(), Danger: true},
 		},
 	})
 	switch menuChoice {
@@ -405,7 +398,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 		ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 			prioOpen := ui.Local(card, "prioOpen", func() bool { return false })
 			pLabel, pFg, pBg, pHoverBorder := priorityPillSpec(tk, t.Priority)
-			prioChoice := overlay.DropdownMenu(c.Key("priority-menu"), prioOpen, overlay.DropdownMenuProps{
+			prioChoice := uiDropdownMenu(c.Key("priority-menu"), prioOpen, dropdownMenuProps{
 				Items: priorityQuickMenuItems(t.Priority),
 			}, func(trig ui.Element) {
 				trig.Height(20).PaddingX(6).Gap(4).Radius(4).AlignItems(ui.Center).
@@ -418,7 +411,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 				}
 				trig.Children(func() {
 					ui.Text(c, pLabel).SingleLine()
-					ui.Icon(c, lucide.ChevronDown()).FontSize(10).TextColor(pFg.Alpha(0.75))
+					ui.Icon(c, iconChevronDown()).FontSize(10).TextColor(pFg.Alpha(0.75))
 				})
 				if trig.Clicked() || trig.Pressed() || *prioOpen {
 					actionClicked = true
@@ -430,9 +423,9 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 			}
 
 			for _, tag := range t.Tags {
-				display.Tag(c.Key("tag-"+tag), "#"+tag, display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagOutlined,
+				uiTag(c.Key("tag-"+tag), "#"+tag, tagProps{
+					Size:    sizeSmall,
+					Variant: tagOutlined,
 				})
 			}
 		})
@@ -448,7 +441,7 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 				Padding(4, 0, 0, 0).Children(func() {
 				if hasDue {
 					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, lucide.Calendar()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Icon(c, iconCalendar()).FontSize(12).TextColor(tk.TextTertiary)
 						ui.Text(c, strings.TrimSpace(t.DueDate)).FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
 					})
 				}
@@ -460,14 +453,14 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 						}
 					}
 					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, lucide.SquareCheckBig()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Icon(c, iconSquareCheckBig()).FontSize(12).TextColor(tk.TextTertiary)
 						ui.Text(c, fmt.Sprintf("%d/%d", doneCount, len(t.Subtasks))).
 							FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
 					})
 				}
 				if hasAttachments {
 					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, lucide.Paperclip()).FontSize(12).TextColor(tk.TextTertiary)
+						ui.Icon(c, iconPaperclip()).FontSize(12).TextColor(tk.TextTertiary)
 						ui.Text(c, fmt.Sprint(len(atts))).
 							FontSize(11).FontFeatures("tnum").TextColor(tk.TextSecondary).SingleLine()
 					})
@@ -504,13 +497,13 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *theme.Tokens, t model.Task
 				// Reorder up/down within column
 				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
 					if indexInCol > 0 {
-						if renderStepReorderButton(c.Key("up"), tk, lucide.ChevronUp(), "上移 "+t.Title) {
+						if renderStepReorderButton(c.Key("up"), tk, iconChevronUp(), "上移 "+t.Title) {
 							actionClicked = true
 							w.StepTaskInColumn(t.ID, t.Status, -1)
 						}
 					}
 					if indexInCol < colCount-1 {
-						if renderStepReorderButton(c.Key("down"), tk, lucide.ChevronDown(), "下移 "+t.Title) {
+						if renderStepReorderButton(c.Key("down"), tk, iconChevronDown(), "下移 "+t.Title) {
 							actionClicked = true
 							w.StepTaskInColumn(t.ID, t.Status, 1)
 						}
@@ -590,7 +583,7 @@ func quickMoveIsLeft(from, to model.Status) bool {
 	return columnOrder(to) < columnOrder(from)
 }
 
-func renderQuickMoveButton(c *ui.Context, tk *theme.Tokens, t model.Task, target model.Status, textLabel, a11yLabel string, dot ui.Color) bool {
+func renderQuickMoveButton(c *ui.Context, tk *uiTokens, t model.Task, target model.Status, textLabel, a11yLabel string, dot ui.Color) bool {
 	btn := ui.ButtonBase(c).Height(22).PaddingX(7).Gap(5).Radius(6).
 		AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(a11yLabel)
 	fg := tk.TextSecondary
@@ -603,18 +596,18 @@ func renderQuickMoveButton(c *ui.Context, tk *theme.Tokens, t model.Task, target
 	isLeft := quickMoveIsLeft(t.Status, target)
 	btn.Children(func() {
 		if isLeft {
-			ui.Icon(c, lucide.ArrowLeft()).FontSize(11).TextColor(fg)
+			ui.Icon(c, iconArrowLeft()).FontSize(11).TextColor(fg)
 		}
 		ui.Box(c).Size(5, 5).Radius(2.5).Background(dot)
 		ui.Text(c, textLabel).FontSize(11).TextColor(fg).SingleLine()
 		if !isLeft {
-			ui.Icon(c, lucide.ArrowRight()).FontSize(11).TextColor(fg)
+			ui.Icon(c, iconArrowRight()).FontSize(11).TextColor(fg)
 		}
 	})
 	return btn.Clicked()
 }
 
-func renderStepReorderButton(c *ui.Context, tk *theme.Tokens, icon *ui.SVG, a11yLabel string) bool {
+func renderStepReorderButton(c *ui.Context, tk *uiTokens, icon *ui.SVG, a11yLabel string) bool {
 	btn := ui.ButtonBase(c).Size(22, 22).Radius(6).Center().
 		Cursor(ui.CursorPointer).Label(a11yLabel)
 	fg := tk.TextTertiary
@@ -628,7 +621,7 @@ func renderStepReorderButton(c *ui.Context, tk *theme.Tokens, icon *ui.SVG, a11y
 	return btn.Clicked()
 }
 
-func priorityPillSpec(tk *theme.Tokens, p model.Priority) (label string, fg, bg, hoverBorder ui.Color) {
+func priorityPillSpec(tk *uiTokens, p model.Priority) (label string, fg, bg, hoverBorder ui.Color) {
 	switch p {
 	case model.Urgent:
 		return "紧急", tk.RedActive, tk.RedFillTertiary, tk.RedActive.Alpha(0.5)
@@ -643,14 +636,14 @@ func priorityPillSpec(tk *theme.Tokens, p model.Priority) (label string, fg, bg,
 	}
 }
 
-func priorityQuickMenuItems(current model.Priority) []overlay.MenuItem {
+func priorityQuickMenuItems(current model.Priority) []menuItem {
 	extraFor := func(p model.Priority) string {
 		if current == p {
 			return "✓"
 		}
 		return ""
 	}
-	return []overlay.MenuItem{
+	return []menuItem{
 		{Key: string(model.Urgent), Label: "紧急", Extra: extraFor(model.Urgent)},
 		{Key: string(model.High), Label: "高", Extra: extraFor(model.High)},
 		{Key: string(model.Medium), Label: "中", Extra: extraFor(model.Medium)},
@@ -660,8 +653,8 @@ func priorityQuickMenuItems(current model.Priority) []overlay.MenuItem {
 	}
 }
 
-func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
-	if feedback.Modal(c, &w.taskModalOpen, feedback.ModalProps{
+func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *uiTokens) {
+	if uiModal(c, &w.taskModalOpen, modalProps{
 		Title:      "新建任务",
 		Width:      520,
 		OkText:     "创建任务",
@@ -669,9 +662,9 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 	}, func() {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			if w.taskModalErr != "" {
-				feedback.Alert(c.Key("task-modal-err"), w.taskModalErr, feedback.AlertProps{
-					Type:    feedback.Error,
-					Variant: feedback.Soft,
+				uiAlert(c.Key("task-modal-err"), w.taskModalErr, alertProps{
+					Type:    alertError,
+					Variant: alertSoft,
 				})
 			}
 
@@ -679,7 +672,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			ui.Column(c.Key("task-modal-title-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "任务标题 *").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				before := w.taskModalTitle
-				inp := field.Input(c, &w.taskModalTitle, field.InputProps{
+				inp := uiInput(c, &w.taskModalTitle, inputProps{
 					Placeholder: "输入任务标题（必填）",
 					Invalid:     w.taskModalErr != "" && strings.TrimSpace(w.taskModalTitle) == "",
 				}).Label("新建任务标题输入框")
@@ -695,14 +688,14 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			ui.Row(c.Key("task-modal-meta-row")).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "所属列 / 状态").FontSize(13).FontWeight(500).TextColor(tk.Text)
-					field.Select(c.Key("modal-task-status"), &w.taskModalStatus, field.SelectProps{
+					uiSelect(c.Key("modal-task-status"), &w.taskModalStatus, selectProps{
 						Options: taskStatusOptions,
 					}).Label("新建任务状态")
 				})
 
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "优先级").FontSize(13).FontWeight(500).TextColor(tk.Text)
-					field.Select(c.Key("modal-task-priority"), &w.taskModalPriority, field.SelectProps{
+					uiSelect(c.Key("modal-task-priority"), &w.taskModalPriority, selectProps{
 						Options: taskPriorityOptions,
 					}).Label("新建任务优先级")
 				})
@@ -712,7 +705,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			ui.Row(c.Key("task-modal-due-tags-row")).Gap(12).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "截止日期").FontSize(13).FontWeight(500).TextColor(tk.Text)
-					field.DatePicker(c.Key("modal-task-duedate"), &w.taskModalDueDate, field.DatePickerProps{
+					uiDatePicker(c.Key("modal-task-duedate"), &w.taskModalDueDate, datePickerProps{
 						Placeholder: "选择日期（可选）",
 						AllowClear:  true,
 					}).Label("新建任务截止日期")
@@ -720,7 +713,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 
 				ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 					ui.Text(c, "分类标签（逗号分隔）").FontSize(13).FontWeight(500).TextColor(tk.Text)
-					field.Input(c, &w.taskModalTags, field.InputProps{
+					uiInput(c, &w.taskModalTags, inputProps{
 						Placeholder: "例如：前端, UI, MVP",
 					}).Label("新建任务标签输入框")
 				})
@@ -729,7 +722,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *theme.Tokens) {
 			// Description
 			ui.Column(c.Key("task-modal-desc-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "Markdown 描述").FontSize(13).FontWeight(500).TextColor(tk.Text)
-				field.TextArea(c, &w.taskModalDesc, field.TextAreaProps{
+				uiTextArea(c, &w.taskModalDesc, textAreaProps{
 					Placeholder: "支持标题、列表、代码块、引用等 Markdown 语法（可选）",
 					MinRows:     3,
 					MaxRows:     6,

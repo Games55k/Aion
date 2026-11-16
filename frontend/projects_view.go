@@ -7,15 +7,9 @@ import (
 	"aion/backend/model"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/display"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
-	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/lucide"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived bool) {
+func (w *Workbench) renderProjectsView(c *ui.Context, tk *uiTokens, archived bool) {
 	list := w.activeProjects
 	title := "所有项目"
 	subtitle := fmt.Sprintf("共 %d 个活跃项目", len(w.activeProjects))
@@ -32,9 +26,9 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
 				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 					if archived {
-						ui.Icon(c, lucide.Archive()).FontSize(22).TextColor(tk.TextSecondary)
+						ui.Icon(c, iconArchive()).FontSize(22).TextColor(tk.TextSecondary)
 					} else {
-						ui.Icon(c, lucide.LayoutGrid()).FontSize(22).TextColor(tk.Primary)
+						ui.Icon(c, iconLayoutGrid()).FontSize(22).TextColor(tk.Primary)
 					}
 					ui.Text(c, title).FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
 				})
@@ -44,20 +38,20 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if !archived {
 					if len(w.archivedProjects) > 0 {
-						if action.Button(c, fmt.Sprintf("已归档 (%d)", len(w.archivedProjects)), action.ButtonProps{
-							Variant: action.Default,
+						if uiButton(c, fmt.Sprintf("已归档 (%d)", len(w.archivedProjects)), buttonProps{
+							Variant: buttonDefault,
 						}).Clicked() {
 							w.NavigateTo(NavArchivedProjects)
 						}
 					}
-					if action.Button(c, "新建项目", action.ButtonProps{
-						Variant: action.Primary,
+					if uiButton(c, "新建项目", buttonProps{
+						Variant: buttonPrimary,
 					}).Clicked() {
 						w.OpenCreateProjectModal()
 					}
 				} else {
-					if action.Button(c, "返回所有项目", action.ButtonProps{
-						Variant: action.Default,
+					if uiButton(c, "返回所有项目", buttonProps{
+						Variant: buttonDefault,
 					}).Clicked() {
 						w.NavigateTo(NavAllProjects)
 					}
@@ -72,26 +66,26 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 					ui.Box(c).Padding(48, 24).Radius(tk.BorderRadiusLG).Background(tk.BgContainer).
 						Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
 						if archived {
-							display.Empty(c, display.EmptyProps{
-								Icon:        lucide.Archive(),
+							uiEmpty(c, emptyProps{
+								Icon:        iconArchive(),
 								Title:       "暂无已归档项目",
 								Description: "归档后的项目会保存在这里，可随时查看或恢复。",
 								Action: func() {
-									if action.Button(c, "查看所有活跃项目", action.ButtonProps{
-										Variant: action.Default,
+									if uiButton(c, "查看所有活跃项目", buttonProps{
+										Variant: buttonDefault,
 									}).Clicked() {
 										w.NavigateTo(NavAllProjects)
 									}
 								},
 							})
 						} else {
-							display.Empty(c, display.EmptyProps{
-								Icon:        lucide.FolderKanban(),
+							uiEmpty(c, emptyProps{
+								Icon:        iconFolderKanban(),
 								Title:       "还没有任何项目",
 								Description: "创建一个项目即可开始管理您的任务与附件。",
 								Action: func() {
-									if action.Button(c, "创建第一个项目", action.ButtonProps{
-										Variant: action.Primary,
+									if uiButton(c, "创建第一个项目", buttonProps{
+										Variant: buttonPrimary,
 									}).Clicked() {
 										w.OpenCreateProjectModal()
 									}
@@ -113,7 +107,7 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *theme.Tokens, archived
 	})
 }
 
-func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.Project, archived bool) {
+func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Project, archived bool) {
 	sum := w.projectSummaries[p.ID]
 	pct := float32(0)
 	if sum.Total > 0 {
@@ -143,10 +137,10 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, p.Name).FontSize(16).FontWeight(600).TextColor(tk.Text).SingleLine()
 						if p.Archived {
-							display.Tag(c, "已归档", display.TagProps{
-								Size:    theme.Small,
-								Variant: display.TagFilled,
-								Color:   display.TagOrange,
+							uiTag(c, "已归档", tagProps{
+								Size:    sizeSmall,
+								Variant: tagFilled,
+								Color:   tagOrange,
 							})
 						}
 					})
@@ -160,35 +154,35 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 
 			// Card Action Buttons
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if action.Button(c.Key("edit-"+p.ID), "编辑", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				if uiButton(c.Key("edit-"+p.ID), "编辑", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 				}).Label("编辑项目 " + p.Name).Clicked() {
 					actionClicked = true
 					w.OpenEditProjectModal(p)
 				}
 
 				if archived {
-					if action.Button(c.Key("unarchive-"+p.ID), "恢复归档", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c.Key("unarchive-"+p.ID), "恢复归档", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 					}).Label("恢复归档 " + p.Name).Clicked() {
 						actionClicked = true
 						w.UnarchiveProject(p.ID)
 					}
 				} else {
-					if action.Button(c.Key("archive-"+p.ID), "归档", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c.Key("archive-"+p.ID), "归档", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 					}).Label("归档项目 " + p.Name).Clicked() {
 						actionClicked = true
 						w.ArchiveProject(p.ID)
 					}
 				}
 
-				if action.Button(c.Key("trash-"+p.ID), "移入回收站", action.ButtonProps{
-					Variant: action.Default,
-					Size:    theme.Small,
+				if uiButton(c.Key("trash-"+p.ID), "移入回收站", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
 					Danger:  true,
 				}).Label("移入回收站 " + p.Name).Clicked() {
 					actionClicked = true
@@ -201,32 +195,32 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 		ui.Row(c).Padding(10, 0, 0, 0).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
 			AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
-				display.Tag(c, fmt.Sprintf("总任务 %d", sum.Total), display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
+				uiTag(c, fmt.Sprintf("总任务 %d", sum.Total), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
 				})
-				display.Tag(c, fmt.Sprintf("计划 %d", sum.Planned), display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
-					Color:   display.TagBlue,
+				uiTag(c, fmt.Sprintf("计划 %d", sum.Planned), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
+					Color:   tagBlue,
 				})
-				display.Tag(c, fmt.Sprintf("进行中 %d", sum.InProgress), display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
-					Color:   display.TagOrange,
+				uiTag(c, fmt.Sprintf("进行中 %d", sum.InProgress), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
+					Color:   tagOrange,
 				})
-				display.Tag(c, fmt.Sprintf("已完成 %d", sum.Done), display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
-					Color:   display.TagGreen,
+				uiTag(c, fmt.Sprintf("已完成 %d", sum.Done), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
+					Color:   tagGreen,
 				})
 			})
 
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if sum.Total > 0 {
 					ui.Box(c).Width(140).Children(func() {
-						feedback.Progress(c, pct, feedback.ProgressProps{
-							Size:     theme.Small,
+						uiProgress(c, pct, progressProps{
+							Size:     sizeSmall,
 							ShowInfo: true,
 							Format:   formatProgressPercent,
 						})
@@ -243,7 +237,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *theme.Tokens, p model.P
 	}
 }
 
-func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderProjectModal(c *ui.Context, tk *uiTokens) {
 	title := "新建项目"
 	okText := "创建项目"
 	if w.projectModalEditID != "" {
@@ -251,7 +245,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 		okText = "保存修改"
 	}
 
-	if feedback.Modal(c, &w.projectModalOpen, feedback.ModalProps{
+	if uiModal(c, &w.projectModalOpen, modalProps{
 		Title:      title,
 		Width:      480,
 		OkText:     okText,
@@ -259,9 +253,9 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 	}, func() {
 		ui.Column(c).Gap(14).AlignSelf(ui.Stretch).Children(func() {
 			if w.projectModalErr != "" {
-				feedback.Alert(c.Key("project-modal-err"), w.projectModalErr, feedback.AlertProps{
-					Type:    feedback.Error,
-					Variant: feedback.Soft,
+				uiAlert(c.Key("project-modal-err"), w.projectModalErr, alertProps{
+					Type:    alertError,
+					Variant: alertSoft,
 				})
 			}
 
@@ -269,7 +263,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 			ui.Column(c.Key("project-modal-name-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "项目名称 *").FontSize(13).FontWeight(500).TextColor(tk.Text)
 				nameBefore := w.projectModalName
-				inp := field.Input(c, &w.projectModalName, field.InputProps{
+				inp := uiInput(c, &w.projectModalName, inputProps{
 					Placeholder: "输入项目名称（例如：Aion 桌面端研发）",
 					Invalid:     w.projectModalErr != "" && strings.TrimSpace(w.projectModalName) == "",
 				}).Label("项目名称输入框")
@@ -309,7 +303,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *theme.Tokens) {
 			// Project Description
 			ui.Column(c.Key("project-modal-desc-sec")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "项目简介").FontSize(13).FontWeight(500).TextColor(tk.Text)
-				field.TextArea(c, &w.projectModalDesc, field.TextAreaProps{
+				uiTextArea(c, &w.projectModalDesc, textAreaProps{
 					Placeholder: "补充项目目标、交付物或备注说明（可选）",
 					MinRows:     3,
 					MaxRows:     5,

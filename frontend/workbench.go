@@ -19,9 +19,6 @@ import (
 	"aion/backend/projects"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
-	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
 // Theme values persisted in app.Settings.
@@ -111,7 +108,7 @@ type Workbench struct {
 	host Host
 
 	mu            sync.Mutex
-	pendingToasts []feedback.ToastProps
+	pendingToasts []ToastProps
 	lastAsyncErr  string
 	busy          bool
 	busyLabel     string
@@ -483,11 +480,11 @@ func (w *Workbench) bumpDataEpoch() uint64 {
 	return w.dataEpoch
 }
 
-func busyToast() feedback.ToastProps {
-	return feedback.ToastProps{
+func busyToast() ToastProps {
+	return ToastProps{
 		Title:       "后台任务进行中",
 		Description: "请等待当前操作完成后再试，或先取消当前操作",
-		Type:        feedback.ToastWarning,
+		Type:        ToastWarning,
 	}
 }
 
@@ -499,10 +496,10 @@ func (w *Workbench) enqueueErrorToast(title string, err error) {
 	if err == nil {
 		return
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       title,
 		Description: err.Error(),
-		Type:        feedback.ToastError,
+		Type:        ToastError,
 	})
 }
 
@@ -532,10 +529,10 @@ func (w *Workbench) flushPendingOrToast(title, suffix string) error {
 	} else {
 		w.detailExpanded = true
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       title,
 		Description: w.flushErrorDetail(err) + suffix,
-		Type:        feedback.ToastWarning,
+		Type:        ToastWarning,
 	})
 	return err
 }
@@ -587,7 +584,7 @@ func (w *Workbench) runAsyncTask(label string, bg func(ctx context.Context) func
 }
 
 // EnqueueToast queues a toast notification to be displayed on the next frame.
-func (w *Workbench) EnqueueToast(t feedback.ToastProps) {
+func (w *Workbench) EnqueueToast(t ToastProps) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.pendingToasts = append(w.pendingToasts, t)
@@ -601,10 +598,10 @@ func (w *Workbench) RecordAsyncError(err error) {
 	}
 	w.mu.Lock()
 	w.lastAsyncErr = err.Error()
-	w.pendingToasts = append(w.pendingToasts, feedback.ToastProps{
+	w.pendingToasts = append(w.pendingToasts, ToastProps{
 		Title:       "后台任务异常",
 		Description: err.Error(),
-		Type:        feedback.ToastError,
+		Type:        ToastError,
 	})
 	w.mu.Unlock()
 }
@@ -682,18 +679,18 @@ func (w *Workbench) FlushPending() error {
 // PrepareClose keeps the draft/modal visible, notifies the user, and returns false.
 func (w *Workbench) PrepareClose() bool {
 	if w.saving {
-		w.EnqueueToast(feedback.ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: feedback.ToastInfo})
+		w.EnqueueToast(ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: ToastInfo})
 		return false
 	}
 	if w.jobSaving {
-		w.EnqueueToast(feedback.ToastProps{Title: "正在保存投递记录", Description: "保存完成后再关闭窗口", Type: feedback.ToastInfo})
+		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再关闭窗口", Type: ToastInfo})
 		return false
 	}
 	if w.IsBusy() {
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "后台任务正在执行",
 			Description: "请等待当前备份或附件操作完成后再关闭窗口，或先取消操作",
-			Type:        feedback.ToastWarning,
+			Type:        ToastWarning,
 		})
 		return false
 	}
@@ -708,10 +705,10 @@ func (w *Workbench) PrepareClose() bool {
 				}
 			}
 			w.jobDetailOpen = true
-			w.EnqueueToast(feedback.ToastProps{
+			w.EnqueueToast(ToastProps{
 				Title:       "存在未保存的投递修改",
 				Description: w.flushErrorDetail(err) + "，请先修正保存或点击“放弃修改”后再退出应用",
-				Type:        feedback.ToastWarning,
+				Type:        ToastWarning,
 			})
 			return false
 		}
@@ -719,10 +716,10 @@ func (w *Workbench) PrepareClose() bool {
 		w.navPage = NavProjectBoard
 		w.lastProjectPage = NavProjectBoard
 		w.detailExpanded = true
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "存在未保存的任务修改",
 			Description: w.flushErrorDetail(err) + "，请先修正保存或点击“放弃修改”后再退出应用",
-			Type:        feedback.ToastWarning,
+			Type:        ToastWarning,
 		})
 		return false
 	}
@@ -1236,10 +1233,10 @@ func (w *Workbench) DiscardSelectedTaskDraft() {
 	if w.detailTask != nil {
 		w.clearDetailTransientInputs()
 		w.syncDetailFromTask(*w.detailTask)
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "已放弃未保存修改",
 			Description: "任务内容已恢复为上次保存的状态",
-			Type:        feedback.ToastInfo,
+			Type:        ToastInfo,
 		})
 	} else {
 		w.resetSelectedTaskState()
@@ -1572,10 +1569,10 @@ func (w *Workbench) SubmitProjectModal() bool {
 		w.projectModalOpen = false
 		w.ReloadProjects()
 		w.SelectProject(created.ID)
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "已创建项目",
 			Description: created.Name,
-			Type:        feedback.ToastSuccess,
+			Type:        ToastSuccess,
 		})
 		return true
 	}
@@ -1587,10 +1584,10 @@ func (w *Workbench) SubmitProjectModal() bool {
 	}
 	w.projectModalOpen = false
 	w.ReloadProjects()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已更新项目",
 		Description: updated.Name,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 	return true
 }
@@ -1610,10 +1607,10 @@ func (w *Workbench) ArchiveProject(projectID string) {
 		return
 	}
 	w.ReloadProjects()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "项目已归档",
 		Description: p.Name,
-		Type:        feedback.ToastInfo,
+		Type:        ToastInfo,
 	})
 }
 
@@ -1629,10 +1626,10 @@ func (w *Workbench) UnarchiveProject(projectID string) {
 		return
 	}
 	w.ReloadProjects()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已恢复归档项目",
 		Description: p.Name,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -1662,10 +1659,10 @@ func (w *Workbench) SoftDeleteProject(projectID string) {
 			w.navPage = NavAllProjects
 		}
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "项目已移入回收站",
 		Description: "可在回收站中随时恢复或彻底删除",
-		Type:        feedback.ToastInfo,
+		Type:        ToastInfo,
 	})
 }
 
@@ -1736,10 +1733,10 @@ func (w *Workbench) SubmitTaskModal() bool {
 
 	w.taskModalOpen = false
 	w.ReloadBoardTasks()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已创建任务",
 		Description: created.Title,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 	return true
 }
@@ -1796,16 +1793,16 @@ func (w *Workbench) SoftDeleteTask(taskID string) {
 	}
 	w.ReloadBoardTasks()
 	w.ReloadTrash()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "任务已移入回收站",
 		Description: "可在回收站中恢复或永久删除",
-		Type:        feedback.ToastInfo,
+		Type:        ToastInfo,
 	})
 }
 
-func (w *Workbench) importAttachmentsWork(ctx context.Context, taskID string, paths []string) (int, []feedback.ToastProps) {
+func (w *Workbench) importAttachmentsWork(ctx context.Context, taskID string, paths []string) (int, []ToastProps) {
 	imported := 0
-	var toasts []feedback.ToastProps
+	var toasts []ToastProps
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -1813,26 +1810,26 @@ func (w *Workbench) importAttachmentsWork(ctx context.Context, taskID string, pa
 		}
 		_, err := w.app.Attachments.Import(ctx, taskID, p)
 		if err != nil {
-			toasts = append(toasts, feedback.ToastProps{
+			toasts = append(toasts, ToastProps{
 				Title:       "导入附件失败: " + filepath.Base(p),
 				Description: err.Error(),
-				Type:        feedback.ToastError,
+				Type:        ToastError,
 			})
 			continue
 		}
 		imported++
 	}
 	if imported > 0 {
-		toasts = append(toasts, feedback.ToastProps{
+		toasts = append(toasts, ToastProps{
 			Title:       "附件已导入",
 			Description: fmt.Sprintf("成功导入 %d 个附件", imported),
-			Type:        feedback.ToastSuccess,
+			Type:        ToastSuccess,
 		})
 	}
 	return imported, toasts
 }
 
-func (w *Workbench) applyImportedAttachments(imported int, toasts []feedback.ToastProps) {
+func (w *Workbench) applyImportedAttachments(imported int, toasts []ToastProps) {
 	for _, t := range toasts {
 		w.EnqueueToast(t)
 	}
@@ -1924,17 +1921,17 @@ func (w *Workbench) RemoveAttachmentFromSelectedTask(attachmentID string) {
 			w.ReloadBoardTasks()
 			if gcErr != nil {
 				// The row is gone; the file stays until the next successful cleanup.
-				w.EnqueueToast(feedback.ToastProps{
+				w.EnqueueToast(ToastProps{
 					Title:       "已移除附件，但清理文件失败",
 					Description: gcErr.Error(),
-					Type:        feedback.ToastWarning,
+					Type:        ToastWarning,
 				})
 				return
 			}
-			w.EnqueueToast(feedback.ToastProps{
+			w.EnqueueToast(ToastProps{
 				Title:       "已移除附件",
 				Description: "任务附件关联已移除并清理未引用文件",
-				Type:        feedback.ToastInfo,
+				Type:        ToastInfo,
 			})
 		}
 	})
@@ -1953,10 +1950,10 @@ func (w *Workbench) applyExportAttachmentResult(destPath string, err error) {
 		w.enqueueErrorToast("导出附件失败", err)
 		return
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "附件已另存为",
 		Description: destPath,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -2143,20 +2140,20 @@ func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
 			w.trashParentErrModalOpen = true
 			return
 		}
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       "恢复失败",
 			Description: err.Error(),
-			Type:        feedback.ToastError,
+			Type:        ToastError,
 		})
 		return
 	}
 	w.ReloadProjects()
 	w.ReloadJobApplications()
 	w.ReloadTrash()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已从回收站恢复",
 		Description: item.Name,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -2191,10 +2188,10 @@ func (w *Workbench) RestoreOrphanTaskWithParent() {
 		w.enqueueErrorToast("恢复任务失败（所属项目已恢复）", taskErr)
 		return
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已恢复项目与任务",
 		Description: taskItem.Name,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -2235,10 +2232,10 @@ func (w *Workbench) ConfirmPermanentDelete() {
 				w.reportTrashCleanupError(cleanupErr)
 				return
 			}
-			w.EnqueueToast(feedback.ToastProps{
+			w.EnqueueToast(ToastProps{
 				Title:       "已彻底删除",
 				Description: item.Name,
-				Type:        feedback.ToastInfo,
+				Type:        ToastInfo,
 			})
 		}
 	})
@@ -2280,10 +2277,10 @@ func (w *Workbench) ConfirmClearTrash() {
 				w.reportTrashCleanupError(cleanupErr)
 				return
 			}
-			w.EnqueueToast(feedback.ToastProps{
+			w.EnqueueToast(ToastProps{
 				Title:       "回收站已清空",
 				Description: "所有回收站项目、任务、投递记录与未引用附件均已彻底清理",
-				Type:        feedback.ToastInfo,
+				Type:        ToastInfo,
 			})
 		}
 	})
@@ -2293,10 +2290,10 @@ func (w *Workbench) ConfirmClearTrash() {
 }
 
 func (w *Workbench) reportTrashCleanupError(err error) {
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "条目已删除，但清理附件失败",
 		Description: err.Error(),
-		Type:        feedback.ToastWarning,
+		Type:        ToastWarning,
 	})
 }
 
@@ -2385,11 +2382,11 @@ func intervalLabel(d time.Duration) string {
 
 // withCurrentOption appends an entry for current when it is not one of the
 // presets, so a policy set outside the UI is shown and preserved as it is.
-func withCurrentOption(presets []field.SelectOption, current, label string) []field.SelectOption {
-	if current == "" || slices.ContainsFunc(presets, func(o field.SelectOption) bool { return o.Value == current }) {
+func withCurrentOption(presets []selectOption, current, label string) []selectOption {
+	if current == "" || slices.ContainsFunc(presets, func(o selectOption) bool { return o.Value == current }) {
 		return presets
 	}
-	return append(slices.Clone(presets), field.SelectOption{Value: current, Label: label})
+	return append(slices.Clone(presets), selectOption{Value: current, Label: label})
 }
 
 // ApplyThemeSetting persists and applies the given theme preference.
@@ -2434,10 +2431,10 @@ func (w *Workbench) SaveBackupPolicy() {
 		return
 	}
 	w.ReloadSettings()
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "自动备份策略已保存",
 		Description: "本地自动备份调度器已更新",
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -2470,16 +2467,16 @@ func (w *Workbench) RunDueBackupNow() {
 				w.mu.Unlock()
 			}
 			if path != "" {
-				w.EnqueueToast(feedback.ToastProps{
+				w.EnqueueToast(ToastProps{
 					Title:       "已执行到期自动备份",
 					Description: path,
-					Type:        feedback.ToastSuccess,
+					Type:        ToastSuccess,
 				})
 			} else {
-				w.EnqueueToast(feedback.ToastProps{
+				w.EnqueueToast(ToastProps{
 					Title:       "当前无需执行自动备份",
 					Description: "距离上次自动备份尚未到达设定周期，或自动备份未开启",
-					Type:        feedback.ToastInfo,
+					Type:        ToastInfo,
 				})
 			}
 		}
@@ -2500,10 +2497,10 @@ func (w *Workbench) applyExportBackupResult(destPath string, err error) {
 		return
 	}
 	w.lastExportedZipPath = destPath
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "完整备份导出成功",
 		Description: destPath,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
@@ -2673,17 +2670,17 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	if w.host.SetTheme != nil {
 		w.host.SetTheme(w.themeSetting)
 	}
-	w.EnqueueToast(feedback.ToastProps{
+	w.EnqueueToast(ToastProps{
 		Title:       "已从备份完整恢复数据",
 		Description: "恢复前安全备份已保存至: " + res.SafetyBackupPath,
-		Type:        feedback.ToastSuccess,
+		Type:        ToastSuccess,
 	})
 }
 
 // TriggerRestoreBackup executes app.Backups.Restore off the UI thread via runAsyncTask.
 func (w *Workbench) TriggerRestoreBackup() {
 	if w.saving || w.jobSaving {
-		w.EnqueueToast(feedback.ToastProps{Title: "正在保存未完成修改", Description: "保存完成后再恢复备份", Type: feedback.ToastInfo})
+		w.EnqueueToast(ToastProps{Title: "正在保存未完成修改", Description: "保存完成后再恢复备份", Type: ToastInfo})
 		return
 	}
 	if w.IsBusy() || w.IsRestoring() {
@@ -2720,7 +2717,7 @@ func (w *Workbench) drainPendingToasts(c *ui.Context) {
 	w.pendingToasts = nil
 	w.mu.Unlock()
 	for _, t := range toasts {
-		feedback.ShowToast(c, t)
+		uiShowToast(c, t)
 	}
 }
 
@@ -2729,13 +2726,13 @@ func (w *Workbench) View(c *ui.Context) {
 	// Apply theme according to saved setting (system / light / dark)
 	switch w.themeSetting {
 	case ThemeLight:
-		c.SetTheme(theme.Light().Theme())
+		c.SetTheme(lightPalette().Theme())
 	case ThemeDark:
-		c.SetTheme(theme.Dark().Theme())
+		c.SetTheme(darkPalette().Theme())
 	default:
-		theme.Apply(c)
+		applyUITheme(c)
 	}
-	tk := theme.TokensOf(c)
+	tk := tokensOf(c)
 
 	c.OnWindowShortcut(ui.Cmd, ui.KeyComma, func() {
 		if !c.ShortcutRepeated() {
@@ -2782,5 +2779,5 @@ func (w *Workbench) View(c *ui.Context) {
 	w.drainPendingToasts(c)
 
 	// Toast Host
-	feedback.ToastHost(c, feedback.ToastHostProps{Placement: feedback.ToastBottomLeft})
+	uiToastHost(c, toastHostProps{Placement: toastBottomLeft})
 }

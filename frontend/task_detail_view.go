@@ -8,14 +8,6 @@ import (
 	"aion/backend/model"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/lobehub/lobe-mygo/pkg/action"
-	"github.com/lobehub/lobe-mygo/pkg/choice"
-	"github.com/lobehub/lobe-mygo/pkg/display"
-	"github.com/lobehub/lobe-mygo/pkg/feedback"
-	"github.com/lobehub/lobe-mygo/pkg/field"
-	"github.com/lobehub/lobe-mygo/pkg/lucide"
-	"github.com/lobehub/lobe-mygo/pkg/markdown"
-	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
 var markdownTools = []struct {
@@ -35,7 +27,7 @@ var markdownTools = []struct {
 	{Key: "link", Label: "链接", Snippet: "[链接文字](https://example.com)"},
 }
 
-func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
+func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 	open := w.detailModalOpen()
 	if !open {
 		return
@@ -48,7 +40,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 		panel.Width(720).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
 			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("任务详情弹窗")
-		tk.Elevate(panel, theme.BoxShadow)
+		tk.Elevate(panel, boxShadow)
 
 		if panel.Dismissed() {
 			panelDismissed = true
@@ -69,31 +61,31 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 					case "saving":
 						ui.Text(c, "正在保存…").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 					case "validation_error":
-						ui.Icon(c, lucide.TriangleAlert()).FontSize(14).TextColor(tk.Warning)
+						ui.Icon(c, iconTriangleAlert()).FontSize(14).TextColor(tk.Warning)
 						ui.Text(c, w.saveErr).FontSize(12).TextColor(tk.Warning).SingleLine()
-						if action.Button(c, "放弃修改", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c, "放弃修改", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Clicked() {
 							w.DiscardSelectedTaskDraft()
 						}
 					case "error":
-						ui.Icon(c, lucide.CircleX()).FontSize(14).TextColor(tk.Error)
+						ui.Icon(c, iconCircleX()).FontSize(14).TextColor(tk.Error)
 						ui.Text(c, "保存失败: "+w.saveErr).FontSize(12).TextColor(tk.Error).SingleLine()
-						if action.Button(c, "重试保存", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c, "重试保存", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Clicked() {
 							_ = w.SaveSelectedTask()
 						}
-						if action.Button(c, "放弃修改", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c, "放弃修改", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Clicked() {
 							w.DiscardSelectedTaskDraft()
 						}
 					default:
-						ui.Icon(c, lucide.CircleCheck()).FontSize(14).TextColor(tk.Success)
+						ui.Icon(c, iconCircleCheck()).FontSize(14).TextColor(tk.Success)
 						saveText := "已自动保存"
 						if !w.lastSavedAt.IsZero() {
 							saveText = "已自动保存 · " + w.lastSavedAt.Local().Format("15:04:05")
@@ -104,16 +96,16 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 
 				// Delete & Close Buttons
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
-					if action.Button(c, "移入回收站", action.ButtonProps{
-						Variant: action.Default,
-						Size:    theme.Small,
+					if uiButton(c, "移入回收站", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
 						Danger:  true,
 					}).Label("将任务移入回收站").Clicked() {
 						w.SoftDeleteTask(t.ID)
 						return
 					}
-					if action.ActionIcon(c, lucide.X(), action.ActionIconProps{
-						Size:  theme.Small,
+					if uiActionIcon(c, iconX(), actionIconProps{
+						Size:  sizeSmall,
 						Title: "关闭详情弹窗",
 					}).Clicked() {
 						w.ClearSelectedTask()
@@ -133,9 +125,9 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 							Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
 							AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 							ui.Text(c, w.BusyLabel()).FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
-							if action.Button(c, "取消操作", action.ButtonProps{
-								Variant: action.Default,
-								Size:    theme.Small,
+							if uiButton(c, "取消操作", buttonProps{
+								Variant: buttonDefault,
+								Size:    sizeSmall,
 							}).Clicked() {
 								w.CancelBusyTask()
 							}
@@ -144,9 +136,9 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 
 					// Validation Alert Banner if title is empty
 					if w.saveState == "validation_error" {
-						feedback.Alert(c.Key("detail-validation-alert"), "任务标题不能为空，请输入有效标题以完成自动保存，或点击顶部“放弃修改”恢复原内容", feedback.AlertProps{
-							Type:    feedback.Warning,
-							Variant: feedback.Soft,
+						uiAlert(c.Key("detail-validation-alert"), "任务标题不能为空，请输入有效标题以完成自动保存，或点击顶部“放弃修改”恢复原内容", alertProps{
+							Type:    alertWarning,
+							Variant: alertSoft,
 						})
 					}
 
@@ -154,9 +146,9 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 					ui.Column(c.Key("detail-sec-title")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 						ui.Text(c, "任务标题").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 						beforeTitle := w.editTitle
-						field.Input(c.Key("detail-title-"+t.ID), &w.editTitle, field.InputProps{
+						uiInput(c.Key("detail-title-"+t.ID), &w.editTitle, inputProps{
 							Placeholder: "输入任务标题（必填）",
-							Size:        theme.Large,
+							Size:        sizeLarge,
 							Invalid:     strings.TrimSpace(w.editTitle) == "",
 						}).Label("任务详情标题")
 						if w.editTitle != beforeTitle {
@@ -171,8 +163,8 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 							ui.Text(c, "状态").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 							beforeStatus := w.editStatus
-							field.Select(c.Key("detail-status-"+t.ID), &w.editStatus, field.SelectProps{
-								Size:    theme.Small,
+							uiSelect(c.Key("detail-status-"+t.ID), &w.editStatus, selectProps{
+								Size:    sizeSmall,
 								Options: taskStatusOptions,
 							}).Label("任务详情状态")
 							if w.editStatus != beforeStatus {
@@ -185,8 +177,8 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 							ui.Text(c, "优先级").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 							beforePriority := w.editPriority
-							field.Select(c.Key("detail-priority-"+t.ID), &w.editPriority, field.SelectProps{
-								Size:    theme.Small,
+							uiSelect(c.Key("detail-priority-"+t.ID), &w.editPriority, selectProps{
+								Size:    sizeSmall,
 								Options: taskPriorityOptions,
 							}).Label("任务详情优先级")
 							if w.editPriority != beforePriority {
@@ -199,10 +191,10 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
 							ui.Text(c, "截止日期").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 							beforeDue := w.editDueDate
-							field.DatePicker(c.Key("detail-due-"+t.ID), &w.editDueDate, field.DatePickerProps{
+							uiDatePicker(c.Key("detail-due-"+t.ID), &w.editDueDate, datePickerProps{
 								Placeholder: "未设置截止日期",
 								AllowClear:  true,
-								Size:        theme.Small,
+								Size:        sizeSmall,
 							}).Label("任务详情截止日期")
 							if !w.editDueDate.Equal(beforeDue) {
 								w.dirty = true
@@ -224,7 +216,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 									rmBtn := ui.ButtonBase(c).Size(14, 14).Radius(7).Center().
 										Cursor(ui.CursorPointer).TextColor(tk.TextTertiary).
 										Label("移除标签 " + tagVal)
-									rmBtn.Children(func() { ui.Icon(c, lucide.X()).FontSize(11) })
+									rmBtn.Children(func() { ui.Icon(c, iconX()).FontSize(11) })
 									if rmBtn.Clicked() {
 										w.editTags = slices.Delete(w.editTags, idx, idx+1)
 										_ = w.SaveSelectedTask()
@@ -235,18 +227,18 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *theme.Tokens) {
 							// Add Tag Input + Button
 							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 								ui.Box(c).Width(150).Children(func() {
-									inp := field.Input(c.Key("new-tag-"+t.ID), &w.newTagInput, field.InputProps{
+									inp := uiInput(c.Key("new-tag-"+t.ID), &w.newTagInput, inputProps{
 										Placeholder: "+ 添加新标签...",
-										Size:        theme.Small,
+										Size:        sizeSmall,
 									}).Label("添加标签输入框")
 									if inp.Submitted() {
 										w.addTagFromInput()
 									}
 								})
 								if strings.TrimSpace(w.newTagInput) != "" {
-									if action.Button(c, "添加标签", action.ButtonProps{
-										Variant: action.Default,
-										Size:    theme.Small,
+									if uiButton(c, "添加标签", buttonProps{
+										Variant: buttonDefault,
+										Size:    sizeSmall,
 									}).Clicked() {
 										w.addTagFromInput()
 									}
@@ -301,16 +293,16 @@ func (w *Workbench) appendMarkdownSnippet(snippet string) {
 	_ = w.SaveSelectedTask()
 }
 
-func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t model.Task) {
+func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *uiTokens, t model.Task) {
 	ui.Column(c.Key("detail-sec-markdown")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
 		// Header + Edit/Preview/Split Segmented Switcher
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, lucide.FileText()).FontSize(14).TextColor(tk.TextSecondary)
+				ui.Icon(c, iconFileText()).FontSize(14).TextColor(tk.TextSecondary)
 				ui.Text(c, "任务描述 (Markdown)").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 			})
-			action.Segmented(c.Key("md-mode-"+t.ID), &w.mdMode, []string{"编辑", "预览", "分栏"}, action.SegmentedProps{
-				Size: theme.Small,
+			uiSegmented(c.Key("md-mode-"+t.ID), &w.mdMode, []string{"编辑", "预览", "分栏"}, segmentedProps{
+				Size: sizeSmall,
 			}).Label("Markdown 模式切换")
 		})
 
@@ -338,7 +330,7 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 		case 0: // 编辑
 			ui.Box(c.Key("md-edit-wrap")).AlignSelf(ui.Stretch).Children(func() {
 				beforeDesc := w.editDescription
-				field.TextArea(c.Key("detail-desc-"+t.ID), &w.editDescription, field.TextAreaProps{
+				uiTextArea(c.Key("detail-desc-"+t.ID), &w.editDescription, textAreaProps{
 					Placeholder: "输入任务详细说明，支持 Markdown 标题、列表、代码块、引用、链接...",
 					MinRows:     5,
 					MaxRows:     12,
@@ -355,8 +347,8 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 					ui.Text(c, "暂无任务描述，切换到“编辑”模式可输入 Markdown 内容。").
 						FontSize(13).TextColor(tk.TextTertiary)
 				} else {
-					markdown.Markdown(c.Key("md-preview-"+t.ID), w.editDescription, markdown.MarkdownProps{
-						Variant:               markdown.Chat,
+					uiMarkdown(c.Key("md-preview-"+t.ID), w.editDescription, markdownProps{
+						Variant:               markdownChat,
 						FullFeaturedCodeBlock: true,
 					})
 				}
@@ -366,7 +358,7 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 			ui.Row(c.Key("md-split-wrap")).Gap(10).AlignItems(ui.Stretch).AlignSelf(ui.Stretch).Children(func() {
 				ui.Column(c).Grow(1).Basis(0).MinWidth(0).Children(func() {
 					beforeDesc := w.editDescription
-					field.TextArea(c.Key("detail-desc-split-"+t.ID), &w.editDescription, field.TextAreaProps{
+					uiTextArea(c.Key("detail-desc-split-"+t.ID), &w.editDescription, textAreaProps{
 						Placeholder: "输入 Markdown 内容...",
 						MinRows:     6,
 						MaxRows:     12,
@@ -380,8 +372,8 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 					if strings.TrimSpace(w.editDescription) == "" {
 						ui.Text(c, "实时预览区域").FontSize(12).TextColor(tk.TextTertiary)
 					} else {
-						markdown.Markdown(c.Key("md-split-preview-"+t.ID), w.editDescription, markdown.MarkdownProps{
-							Variant:               markdown.Chat,
+						uiMarkdown(c.Key("md-split-preview-"+t.ID), w.editDescription, markdownProps{
+							Variant:               markdownChat,
 							FullFeaturedCodeBlock: true,
 						})
 					}
@@ -391,7 +383,7 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *theme.Tokens, t mod
 	})
 }
 
-func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t model.Task) {
+func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.Task) {
 	doneCount := 0
 	for _, st := range w.editSubtasks {
 		if st.Done {
@@ -408,23 +400,23 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 		// Header Row
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, lucide.SquareCheckBig()).FontSize(14).TextColor(tk.TextSecondary)
+				ui.Icon(c, iconSquareCheckBig()).FontSize(14).TextColor(tk.TextSecondary)
 				ui.Text(c, fmt.Sprintf("子任务 (%d/%d)", doneCount, totalCount)).
 					FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 			})
 			if totalCount > 0 && doneCount == totalCount {
-				display.Tag(c, "子任务已全部完成", display.TagProps{
-					Size:    theme.Small,
-					Variant: display.TagFilled,
-					Color:   display.TagGreen,
+				uiTag(c, "子任务已全部完成", tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
+					Color:   tagGreen,
 				})
 			}
 		})
 
 		// Progress Bar
 		if totalCount > 0 {
-			feedback.Progress(c, pct, feedback.ProgressProps{
-				Size:     theme.Small,
+			uiProgress(c, pct, progressProps{
+				Size:     sizeSmall,
 				ShowInfo: true,
 				Format:   formatProgressPercent,
 			})
@@ -445,7 +437,7 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 						AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 						// Checkbox
 						done := sub.Done
-						choice.Checkbox(c.Key("cb-"+keyID), &done, "", choice.CheckboxProps{}).
+						uiCheckbox(c.Key("cb-"+keyID), &done, "", checkboxProps{}).
 							Label("勾选子任务 " + sub.Title)
 						if done != sub.Done {
 							w.editSubtasks[idx].Done = done
@@ -465,23 +457,23 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 								_ = w.SaveSelectedTask()
 							}
 							ui.Box(c.Key("edit-sub-wrap-" + keyID)).Grow(1).MinWidth(0).Children(func() {
-								inp := field.Input(c.Key("edit-sub-inp-"+keyID), &w.editingSubtaskTitle, field.InputProps{
-									Size:    theme.Small,
+								inp := uiInput(c.Key("edit-sub-inp-"+keyID), &w.editingSubtaskTitle, inputProps{
+									Size:    sizeSmall,
 									Invalid: strings.TrimSpace(w.editingSubtaskTitle) == "",
 								}).Label("编辑子任务输入框")
 								if inp.Submitted() {
 									saveEdited()
 								}
 							})
-							if action.Button(c.Key("save-sub-"+keyID), "保存", action.ButtonProps{
-								Variant: action.Primary,
-								Size:    theme.Small,
+							if uiButton(c.Key("save-sub-"+keyID), "保存", buttonProps{
+								Variant: buttonPrimary,
+								Size:    sizeSmall,
 							}).Disabled(strings.TrimSpace(w.editingSubtaskTitle) == "").Label("保存子任务 " + sub.Title).Clicked() {
 								saveEdited()
 							}
-							if action.Button(c.Key("cancel-sub-"+keyID), "取消", action.ButtonProps{
-								Variant: action.Default,
-								Size:    theme.Small,
+							if uiButton(c.Key("cancel-sub-"+keyID), "取消", buttonProps{
+								Variant: buttonDefault,
+								Size:    sizeSmall,
 							}).Clicked() {
 								w.editingSubtaskID = ""
 								w.editingSubtaskTitle = ""
@@ -496,16 +488,16 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 
 							// Subtask Actions: Edit, Up, Down, Delete
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
-								if action.ActionIcon(c.Key("edit-btn-"+keyID), lucide.Pencil(), action.ActionIconProps{
-									Size:  theme.Small,
+								if uiActionIcon(c.Key("edit-btn-"+keyID), iconPencil(), actionIconProps{
+									Size:  sizeSmall,
 									Title: "编辑子任务 " + sub.Title,
 								}).Clicked() {
 									w.editingSubtaskID = keyID
 									w.editingSubtaskTitle = sub.Title
 								}
 								if idx > 0 {
-									if action.ActionIcon(c.Key("up-btn-"+keyID), lucide.ArrowUp(), action.ActionIconProps{
-										Size:  theme.Small,
+									if uiActionIcon(c.Key("up-btn-"+keyID), iconArrowUp(), actionIconProps{
+										Size:  sizeSmall,
 										Title: "上移子任务 " + sub.Title,
 									}).Clicked() {
 										w.editSubtasks[idx-1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx-1]
@@ -513,16 +505,16 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 									}
 								}
 								if idx < totalCount-1 {
-									if action.ActionIcon(c.Key("down-btn-"+keyID), lucide.ArrowDown(), action.ActionIconProps{
-										Size:  theme.Small,
+									if uiActionIcon(c.Key("down-btn-"+keyID), iconArrowDown(), actionIconProps{
+										Size:  sizeSmall,
 										Title: "下移子任务 " + sub.Title,
 									}).Clicked() {
 										w.editSubtasks[idx+1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx+1]
 										_ = w.SaveSelectedTask()
 									}
 								}
-								if action.ActionIcon(c.Key("del-btn-"+keyID), lucide.Trash2(), action.ActionIconProps{
-									Size:   theme.Small,
+								if uiActionIcon(c.Key("del-btn-"+keyID), iconTrash2(), actionIconProps{
+									Size:   sizeSmall,
 									Danger: true,
 									Title:  "删除子任务 " + sub.Title,
 								}).Clicked() {
@@ -540,9 +532,9 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 		ui.Row(c).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 			var submitted bool
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				inp := field.Input(c.Key("new-subtask-"+t.ID), &w.newSubtaskTitle, field.InputProps{
+				inp := uiInput(c.Key("new-subtask-"+t.ID), &w.newSubtaskTitle, inputProps{
 					Placeholder: "+ 输入新子任务标题...",
-					Size:        theme.Small,
+					Size:        sizeSmall,
 				}).Label("新子任务输入框")
 				submitted = inp.Submitted()
 			})
@@ -562,9 +554,9 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 			if submitted {
 				addSubtask()
 			}
-			if action.Button(c, "添加子任务", action.ButtonProps{
-				Variant: action.Default,
-				Size:    theme.Small,
+			if uiButton(c, "添加子任务", buttonProps{
+				Variant: buttonDefault,
+				Size:    sizeSmall,
 			}).Disabled(strings.TrimSpace(w.newSubtaskTitle) == "").Clicked() {
 				addSubtask()
 			}
@@ -572,21 +564,21 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *theme.Tokens, t mod
 	})
 }
 
-func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ model.Task) {
+func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens, _ model.Task) {
 	atts := w.detailAttachments
 
 	ui.Column(c.Key("detail-sec-attachments")).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 		// Header Row
 		ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, lucide.Paperclip()).FontSize(14).TextColor(tk.TextSecondary)
+				ui.Icon(c, iconPaperclip()).FontSize(14).TextColor(tk.TextSecondary)
 				ui.Text(c, fmt.Sprintf("附件 (%d)", len(atts))).
 					FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 			})
 
-			if action.Button(c, "+ 导入附件", action.ButtonProps{
-				Variant: action.Default,
-				Size:    theme.Small,
+			if uiButton(c, "+ 导入附件", buttonProps{
+				Variant: buttonDefault,
+				Size:    sizeSmall,
 			}).Disabled(w.IsBusy()).Clicked() {
 				w.PickAndImportAttachmentsToSelectedTask()
 			}
@@ -604,7 +596,7 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 		}
 		dropzone.Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, lucide.Upload()).FontSize(14).TextColor(tk.TextTertiary)
+				ui.Icon(c, iconUpload()).FontSize(14).TextColor(tk.TextTertiary)
 				ui.Text(c, "将文件或图片拖拽到此处添加附件（单文件 ≤ 256 MB）").
 					FontSize(12).TextColor(tk.TextTertiary)
 			})
@@ -614,7 +606,7 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 			return
 		}
 
-		// Image Thumbnails Preview Grid (with built-in Zoom / Rotate / Lightbox via display.ImageGroup)
+		// Image Thumbnails Preview Grid (with built-in Zoom / Rotate / Lightbox via uiImageGroup)
 		hasImages := false
 		for _, att := range atts {
 			if IsImageAttachment(att) {
@@ -623,7 +615,7 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 			}
 		}
 		if hasImages {
-			display.ImageGroup(c, func(gallery *display.ImageGallery) {
+			uiImageGroup(c, func(gallery *imageGallery) {
 				for _, att := range atts {
 					if !IsImageAttachment(att) {
 						continue
@@ -641,13 +633,13 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 							c.Invalidate()
 						}
 						if bmp == nil && !w.bitmapFailed[att.ID] && !inView {
-							display.Skeleton(c, display.SkeletonProps{
+							uiSkeleton(c, skeletonProps{
 								Width:     116,
 								Height:    84,
-								Animation: display.SkeletonStatic,
+								Animation: skeletonStatic,
 							}).Label("图片预览 " + att.Name)
 						} else {
-							display.Image(c, bmp, display.ImageProps{
+							uiImage(c, bmp, imageProps{
 								Width:   116,
 								Height:  84,
 								Gallery: gallery,
@@ -669,9 +661,9 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 					Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
 					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-						iconSVG := lucide.File()
+						iconSVG := iconFile()
 						if IsImageAttachment(att) {
-							iconSVG = lucide.Image()
+							iconSVG = iconImage()
 						}
 						ui.Icon(c, iconSVG).FontSize(16).TextColor(tk.Primary).Shrink(0)
 						ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
@@ -683,29 +675,29 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *theme.Tokens, _ 
 
 					// Attachment Action Buttons
 					ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(0).Children(func() {
-						if action.Button(c.Key("open-att-"+att.ID), "打开", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c.Key("open-att-"+att.ID), "打开", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Label("打开附件 " + att.Name).Clicked() {
 							w.openOrRevealAttachment("打开附件失败", w.host.OpenPath, att)
 						}
 
-						if action.Button(c.Key("reveal-att-"+att.ID), "Finder", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c.Key("reveal-att-"+att.ID), "Finder", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Label("在 Finder 中显示 " + att.Name).Clicked() {
 							w.openOrRevealAttachment("在 Finder 中显示失败", w.host.RevealPath, att)
 						}
 
-						if action.Button(c.Key("export-att-"+att.ID), "另存为", action.ButtonProps{
-							Variant: action.Default,
-							Size:    theme.Small,
+						if uiButton(c.Key("export-att-"+att.ID), "另存为", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
 						}).Disabled(w.IsBusy()).Label("导出附件 " + att.Name).Clicked() {
 							w.PickAndExportAttachment(att)
 						}
 
-						if action.ActionIcon(c.Key("rm-att-"+att.ID), lucide.Trash2(), action.ActionIconProps{
-							Size:   theme.Small,
+						if uiActionIcon(c.Key("rm-att-"+att.ID), iconTrash2(), actionIconProps{
+							Size:   sizeSmall,
 							Danger: true,
 							Title:  "移除附件 " + att.Name,
 						}).Clicked() {
@@ -724,18 +716,18 @@ func (w *Workbench) openOrRevealAttachment(failTitle string, actionFn func(strin
 	}
 	managedPath := w.AttachmentManagedPath(att)
 	if managedPath == "" {
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       failTitle,
 			Description: "附件文件不存在或路径无效",
-			Type:        feedback.ToastError,
+			Type:        ToastError,
 		})
 		return
 	}
 	if err := actionFn(managedPath); err != nil {
-		w.EnqueueToast(feedback.ToastProps{
+		w.EnqueueToast(ToastProps{
 			Title:       failTitle,
 			Description: err.Error(),
-			Type:        feedback.ToastError,
+			Type:        ToastError,
 		})
 	}
 }
