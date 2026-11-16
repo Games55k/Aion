@@ -83,12 +83,14 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 				// 2. Local Data Directory Card
 				ui.Column(c.Key("settings-card-datadir")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
 					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, iconHardDrive()).FontSize(18).TextColor(tk.Primary)
-						ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
+					ui.Column(c).Gap(4).Children(func() {
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.Icon(c, iconHardDrive()).FontSize(18).TextColor(tk.Primary)
+							ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
+						})
+						ui.Text(c, "所有项目、任务、求职投递、回收站、附件与设置均保存在以下本地目录：").
+							FontSize(13).TextColor(tk.TextSecondary)
 					})
-					ui.Text(c, "所有项目、任务、求职投递、回收站、附件与设置均保存在以下本地目录：").
-						FontSize(13).TextColor(tk.TextSecondary)
 
 					dataDir := w.app.DataDir()
 					ui.Row(c).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
