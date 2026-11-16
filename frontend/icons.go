@@ -239,10 +239,6 @@ func iconDelete() *ui.SVG {
 	return loadIcon("delete", `<path d="M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/><path d="m12 9 6 6"/><path d="m18 9-6 6"/>`)
 }
 
-func iconDownload() *ui.SVG {
-	return loadIcon("download", `<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>`)
-}
-
 func iconExpand() *ui.SVG {
 	return loadIcon("expand", `<path d="m15 15 6 6"/><path d="m15 9 6-6"/><path d="M21 16v5h-5"/><path d="M21 8V3h-5"/><path d="M3 16v5h5"/><path d="m3 21 6-6"/><path d="M3 8V3h5"/><path d="M9 9 3 3"/>`)
 }
@@ -301,10 +297,6 @@ func iconLayers() *ui.SVG {
 
 func iconLayoutGrid() *ui.SVG {
 	return loadIcon("layout-grid", `<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>`)
-}
-
-func iconLoaderCircle() *ui.SVG {
-	return loadIcon("loader-circle", `<path d="M21 12a9 9 0 1 1-6.219-8.56"/>`)
 }
 
 func iconOption() *ui.SVG {

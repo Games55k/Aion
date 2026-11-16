@@ -325,7 +325,7 @@ func renderToast(c *ui.Context, tk *uiTokens, t ui.Toast, heights map[string]flo
 		Background(tk.BgElevated).TextColor(tk.Text).FontSize(14).
 		Bottom(0).TransformOrigin(0.5, 1)
 	tk.Elevate(root, boxShadowSecondary)
-	enter := toastTransition(sideBottom)
+	enter := toastTransition()
 	enter.Colors = true
 	root.Transition(enter)
 	height := heights[t.ID]
