@@ -243,7 +243,6 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 			})
 
 			if uiActionIcon(c, iconPlus(), actionIconProps{
-				Size:  sizeSmall,
 				Title: "在" + col.Title + "中新建任务",
 			}).Clicked() {
 				w.OpenCreateTaskModal(col.Status)

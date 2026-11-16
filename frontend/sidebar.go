@@ -136,7 +136,6 @@ func (w *Workbench) renderJobSidebar(c *ui.Context, tk *uiTokens, nav sideNavSta
 		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "投递记录").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
 			if uiActionIcon(c, iconPlus(), actionIconProps{
-				Size:  sizeSmall,
 				Title: "快速新增投递",
 			}).Clicked() {
 				w.OpenJobCreateModal()
@@ -256,7 +255,6 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *uiTokens, nav sideNa
 		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "项目列表").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
 			if uiActionIcon(c, iconFolderPlus(), actionIconProps{
-				Size:  sizeSmall,
 				Title: "创建项目",
 			}).Clicked() {
 				w.OpenCreateProjectModal()
@@ -288,13 +286,11 @@ func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *uiTokens, nav sideNa
 					}
 					ui.Row(c).Height(28).Background(bg).PaddingX(2).Radius(tk.BorderRadiusSM).Gap(2).AlignItems(ui.Center).Children(func() {
 						if uiActionIcon(c.Key("edit-"+p.ID), iconPencil(), actionIconProps{
-							Size:  sizeSmall,
 							Title: "编辑项目: " + p.Name,
 						}).Clicked() {
 							w.OpenEditProjectModal(p)
 						}
 						if uiActionIcon(c.Key("archive-"+p.ID), iconArchive(), actionIconProps{
-							Size:  sizeSmall,
 							Title: "归档项目: " + p.Name,
 						}).Clicked() {
 							w.ArchiveProject(p.ID)

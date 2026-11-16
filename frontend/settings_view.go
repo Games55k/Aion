@@ -148,7 +148,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
 							ui.Text(c, "启用自动备份").FontSize(13).TextColor(tk.Text)
 							beforeEn := w.backupEnabled
-							uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled, switchProps{}).
+							uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled).
 								Label("启用自动备份开关")
 							if w.backupEnabled != beforeEn {
 								w.SaveBackupPolicy()

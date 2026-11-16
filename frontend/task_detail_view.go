@@ -105,7 +105,6 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 						return
 					}
 					if uiActionIcon(c, iconX(), actionIconProps{
-						Size:  sizeSmall,
 						Title: "关闭详情弹窗",
 					}).Clicked() {
 						w.ClearSelectedTask()
@@ -430,7 +429,7 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 						AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 						// Checkbox
 						done := sub.Done
-						uiCheckbox(c.Key("cb-"+keyID), &done, "", checkboxProps{}).
+						uiCheckbox(c.Key("cb-"+keyID), &done, "").
 							Label("勾选子任务 " + sub.Title)
 						if done != sub.Done {
 							w.editSubtasks[idx].Done = done
@@ -482,7 +481,6 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 							// Subtask Actions: Edit, Up, Down, Delete
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
 								if uiActionIcon(c.Key("edit-btn-"+keyID), iconPencil(), actionIconProps{
-									Size:  sizeSmall,
 									Title: "编辑子任务 " + sub.Title,
 								}).Clicked() {
 									w.editingSubtaskID = keyID
@@ -490,7 +488,6 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 								}
 								if idx > 0 {
 									if uiActionIcon(c.Key("up-btn-"+keyID), iconArrowUp(), actionIconProps{
-										Size:  sizeSmall,
 										Title: "上移子任务 " + sub.Title,
 									}).Clicked() {
 										w.editSubtasks[idx-1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx-1]
@@ -499,7 +496,6 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 								}
 								if idx < totalCount-1 {
 									if uiActionIcon(c.Key("down-btn-"+keyID), iconArrowDown(), actionIconProps{
-										Size:  sizeSmall,
 										Title: "下移子任务 " + sub.Title,
 									}).Clicked() {
 										w.editSubtasks[idx+1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx+1]
@@ -507,7 +503,6 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 									}
 								}
 								if uiActionIcon(c.Key("del-btn-"+keyID), iconTrash2(), actionIconProps{
-									Size:   sizeSmall,
 									Danger: true,
 									Title:  "删除子任务 " + sub.Title,
 								}).Clicked() {
@@ -690,7 +685,6 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens, _ mode
 						}
 
 						if uiActionIcon(c.Key("rm-att-"+att.ID), iconTrash2(), actionIconProps{
-							Size:   sizeSmall,
 							Danger: true,
 							Title:  "移除附件 " + att.Name,
 						}).Clicked() {

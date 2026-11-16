@@ -451,7 +451,6 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 		ui.Row(c).Width(jobColLinkWidth).Shrink(0).Gap(4).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			if app.ApplicationURL != "" {
 				if uiActionIcon(c.Key("copy-url-"+app.ID), iconCopy(), actionIconProps{
-					Size:  sizeSmall,
 					Title: "复制链接: " + app.CompanyName + " " + app.PositionName,
 				}).Clicked() {
 					c.Services().WriteClipboard(app.ApplicationURL)
@@ -462,7 +461,6 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 					})
 				}
 				if uiActionIcon(c.Key("open-url-"+app.ID), iconExternalLink(), actionIconProps{
-					Size:  sizeSmall,
 					Title: "打开链接: " + app.CompanyName + " " + app.PositionName,
 				}).Clicked() {
 					w.OpenJobURL(app.ApplicationURL)
@@ -519,7 +517,7 @@ func (w *Workbench) renderJobCreateModal(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).FillWidth().Padding(20, 24).Gap(14).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "新增投递记录").FontSize(17).FontWeight(700).TextColor(tk.Text)
-				if uiActionIcon(c, iconX(), actionIconProps{Size: sizeSmall, Title: "关闭新增投递弹窗"}).Clicked() {
+				if uiActionIcon(c, iconX(), actionIconProps{Title: "关闭新增投递弹窗"}).Clicked() {
 					w.jobCreateOpen = false
 				}
 			})

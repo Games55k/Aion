@@ -52,7 +52,6 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 						w.DeleteJobApplication(app.ID)
 					}
 					if uiActionIcon(c, iconX(), actionIconProps{
-						Size:  sizeSmall,
 						Title: "关闭投递详情",
 					}).Clicked() {
 						w.CloseJobDetail()
@@ -599,14 +598,12 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
 								if uiActionIcon(c.Key("edit-ev-"+ev.ID), iconPencil(), actionIconProps{
-									Size:  sizeSmall,
 									Title: "编辑时间线备注 " + ev.ID,
 								}).Clicked() {
 									w.StartEditJobTimelineEvent(ev)
 								}
 								if canDeleteTimelineEvent(ev) {
 									if uiActionIcon(c.Key("del-ev-"+ev.ID), iconTrash2(), actionIconProps{
-										Size:  sizeSmall,
 										Title: "删除时间线节点 " + ev.ID,
 									}).Clicked() {
 										w.DeleteJobTimelineEvent(app.ID, ev.ID)
@@ -672,7 +669,7 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).FillWidth().Padding(20, 24).Gap(14).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 				ui.Text(c, "结束求职流程").FontSize(17).FontWeight(700).TextColor(tk.Text)
-				if uiActionIcon(c, iconX(), actionIconProps{Size: sizeSmall, Title: "关闭结束流程弹窗"}).Clicked() {
+				if uiActionIcon(c, iconX(), actionIconProps{Title: "关闭结束流程弹窗"}).Clicked() {
 					w.jobCloseOpen = false
 				}
 			})
@@ -701,7 +698,7 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 					Variant:     alertSoft,
 					Description: fmt.Sprintf("选择「%s」要求阶段为 Offer，请勾选确认后随结果一并提交。", outcome.Label()),
 				})
-				uiCheckbox(c, &w.jobCloseConfirmOffer, "确认同步将当前阶段调整为 Offer", checkboxProps{}).
+				uiCheckbox(c, &w.jobCloseConfirmOffer, "确认同步将当前阶段调整为 Offer").
 					Label("确认同步将当前阶段调整为 Offer")
 			}
 

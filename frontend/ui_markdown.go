@@ -105,12 +105,12 @@ func renderCodeBlock(c *ui.Context, tk *uiTokens, src, lang string, fontSize flo
 				Cursor(ui.CursorPointer).Label(name).Children(func() {
 				ui.Text(c, name).FontSize(13).SingleLine().TextColor(tk.Text)
 			})
-			uiCopyButton(c, src, copyButtonProps{Size: sizeSmall})
+			uiCopyButton(c, src)
 			chevron := iconChevronDown()
 			if !*open {
 				chevron = iconChevronRight()
 			}
-			if uiActionIcon(c, chevron, actionIconProps{Size: sizeSmall}).Label(label).Clicked() {
+			if uiActionIcon(c, chevron, actionIconProps{}).Label(label).Clicked() {
 				*open = !*open
 			}
 		})
