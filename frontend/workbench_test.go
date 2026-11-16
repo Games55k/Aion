@@ -713,14 +713,13 @@ func TestVisualSnapshotRender(t *testing.T) {
 		longCompany := "超长名称科技有限公司（分布式基础设施与云原生系统研发中心）"
 		longPos := "资深 Go 分布式存储架构师 / 核心引擎技术专家（高并发低延迟方向）"
 		a1, _ := wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
-			CompanyName:      longCompany,
-			PositionName:     longPos,
-			AppliedDate:      "2026-11-12",
-			Stage:            model.JobStageInterview2,
-			ApplicationURL:   "https://careers.example.com/positions/senior-go-storage-architect",
-			Channel:          "内部推荐",
-			NextFollowUpDate: "2026-11-20",
-			Notes:            "一面深挖了 Raft 与 SQLite WAL 一致性细节，需要二面重点准备多租户隔离与压测数据分析，这是一个故意编写的非常长的多行备注\n第二行详细跟进要点。",
+			CompanyName:    longCompany,
+			PositionName:   longPos,
+			AppliedDate:    "2026-11-12",
+			Stage:          model.JobStageInterview2,
+			ApplicationURL: "https://careers.example.com/positions/senior-go-storage-architect",
+			Channel:        "内部推荐",
+			Notes:          "一面深挖了 Raft 与 SQLite WAL 一致性细节，需要二面重点准备多租户隔离与压测数据分析，这是一个故意编写的非常长的多行备注\n第二行详细跟进要点。",
 		})
 		a2, _ := wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
 			CompanyName:    "示例云科技",
@@ -3328,7 +3327,7 @@ func TestJobModuleSwitchingExpandedCollapsedAndPreservedState(t *testing.T) {
 	}
 	typeIntoJobField(t, tt, "搜索投递记录", "北极星")
 	chooseSelectOption(t, tt, "筛选阶段", "笔试 / 测评")
-	chooseSelectOption(t, tt, "排序方式", "最近更新 ↓")
+	chooseSelectOption(t, tt, "排序方式", "排序：最近更新 ↓")
 
 	if err := tt.Click("切换模块 项目"); err != nil {
 		t.Fatalf("switch back to projects: %v", err)
@@ -3404,9 +3403,8 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 		t.Fatalf("expected invalid URL error in create modal, open=%v err=%q", wb.jobCreateOpen, wb.jobCreateErr)
 	}
 
-	// Fix URL, pick follow-up date, add notes, and submit successfully.
+	// Fix URL, add notes, and submit successfully.
 	typeIntoJobField(t, tt, "创建投递链接", "https://jobs.example.com/backend")
-	pickDatePickerDay(t, tt, "创建下次跟进日期", time.Date(2026, 11, 20, 0, 0, 0, 0, time.Local))
 	typeIntoJobField(t, tt, "创建通用备注", "一面约周三")
 	if err := tt.Click("确认创建"); err != nil {
 		t.Fatal(err)
@@ -3416,7 +3414,7 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 		t.Fatalf("expected modal closed and 1 job created, open=%v len=%d err=%q", wb.jobCreateOpen, len(wb.jobApps), wb.jobCreateErr)
 	}
 	first := wb.jobApps[0]
-	if first.AppliedDate != "2026-11-15" || first.NextFollowUpDate != "2026-11-20" || first.Stage != model.JobStageApplied {
+	if first.AppliedDate != "2026-11-15" || first.Stage != model.JobStageApplied {
 		t.Fatalf("unexpected created job defaults/fields: %+v", first)
 	}
 
@@ -3466,8 +3464,7 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 		t.Fatalf("expected moving away from Offer to clear Offer count & tags, stats=%+v texts=%q", wb.jobStats, tt.Texts())
 	}
 
-	// Inline stage selector and follow-up DatePicker mutate table row and persist stage event in chronological order.
-	pickDatePickerDay(t, tt, "下次跟进 星河云 前端工程师", time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local))
+	// Inline stage selector mutates table row and persists stage event in chronological order.
 	var frontendApp model.JobApplication
 	for _, a := range wb.jobApps {
 		if a.PositionName == "前端工程师" {
@@ -3475,7 +3472,7 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 			break
 		}
 	}
-	if frontendApp.Stage != model.JobStageInterview1 || frontendApp.NextFollowUpDate != "2026-11-25" || frontendApp.ReachedOffer {
+	if frontendApp.Stage != model.JobStageInterview1 || frontendApp.ReachedOffer {
 		t.Fatalf("inline edits not persisted cleanly: %+v", frontendApp)
 	}
 	events, err := app.JobApplications.ListEvents(context.Background(), frontendApp.ID)
@@ -3652,11 +3649,11 @@ func TestJobFilterSearchSortPaginationViewsAndRestart(t *testing.T) {
 	}
 
 	// Verify sort orders (applied_asc puts Company 01 / 2026-10-01 first; updated_desc puts Company-05 last closed first).
-	chooseSelectOption(t, tt, "排序方式", "投递日期 ↑")
+	chooseSelectOption(t, tt, "排序方式", "排序：投递日期 ↑")
 	if wb.filteredJobApps[0].AppliedDate != "2026-10-01" {
 		t.Fatalf("expected earliest applied date first under SortAppliedAsc, got %+v", wb.filteredJobApps[0])
 	}
-	chooseSelectOption(t, tt, "排序方式", "最近更新 ↓")
+	chooseSelectOption(t, tt, "排序方式", "排序：最近更新 ↓")
 	if wb.filteredJobApps[0].CompanyName != "公司-05" {
 		t.Fatalf("expected latest updated app 公司-05 first under SortUpdatedDesc, got %+v", wb.filteredJobApps[0])
 	}
@@ -3788,19 +3785,75 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 		t.Fatalf("expected reopened active state with cleared current closure fields, got %+v", wb.detailJob)
 	}
 
-	// Scroll inside Detail Modal body so timeline note and historical backfill controls enter viewport cleanly.
-	tt.Scroll(720, 450, 0, 5000)
-	tt.Advance(time.Second)
+	// Interactive stage stepper advances stage directly from detail modal header.
+	if err := tt.Click("推进阶段至 二面"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.detailJob.Stage != model.JobStageInterview2 || wb.detailJob.Lifecycle != model.JobLifecycleActive {
+		t.Fatalf("expected stepper click to advance to 二面, got %+v", wb.detailJob)
+	}
+
+	// Toggle timeline sort order and restore descending order.
+	descBefore := wb.jobTimelineDesc
+	if err := tt.Click("切换时间线排序"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if wb.jobTimelineDesc == descBefore {
+		t.Fatalf("expected timeline sort order toggle from %v", descBefore)
+	}
+	if err := tt.Click("切换时间线排序"); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 
-	// Manual note event and historical backfill leave current stage & lifecycle untouched.
+	// Manual note event can be added, inline edited, backfilled, and deleted without mutating current workflow state.
 	stageBefore := wb.detailJob.Stage
 	typeIntoJobField(t, tt, "时间线备注输入", "HR 告知下周发正式书面材料")
 	if err := tt.Click("添加备注"); err != nil {
 		t.Fatal(err)
 	}
-	tt.Scroll(720, 450, 0, 5000)
-	tt.Advance(time.Second)
+	tt.Frame()
+	var noteEvID string
+	for _, ev := range wb.detailJobEvents {
+		if ev.EventType == model.JobEventNoteAdded && strings.Contains(ev.Note, "书面材料") {
+			noteEvID = ev.ID
+			break
+		}
+	}
+	if noteEvID == "" {
+		t.Fatalf("expected newly added manual note event in %+v", wb.detailJobEvents)
+	}
+
+	// Inline edit the manual note event.
+	if err := tt.Click("编辑时间线备注 " + noteEvID); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	typeIntoJobField(t, tt, "编辑事件备注输入", "HR 已于周五邮件发送正式 Offer")
+	if err := tt.Click("保存备注"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	dbEvents, err := app.JobApplications.ListEvents(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updatedNotePersisted bool
+	for _, ev := range dbEvents {
+		if ev.ID == noteEvID && ev.Note == "HR 已于周五邮件发送正式 Offer" {
+			updatedNotePersisted = true
+		}
+	}
+	if !updatedNotePersisted {
+		t.Fatalf("expected inline note edit persisted in DB, events=%+v", dbEvents)
+	}
+
+	// Expand collapsible backfill form and backfill historical stage event.
+	if err := tt.Click("切换补录历史节点"); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 	chooseSelectOption(t, tt, "补录阶段", "二面")
 	typeIntoJobField(t, tt, "补录说明", "系统架构深挖表现较好")
@@ -3819,7 +3872,7 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 		case model.JobEventReopened:
 			sawReopened = true
 		case model.JobEventNoteAdded:
-			sawNote = strings.Contains(ev.Note, "书面材料")
+			sawNote = strings.Contains(ev.Note, "正式 Offer")
 		case model.JobEventStageBackfilled:
 			sawBackfill = ev.ToStage == model.JobStageInterview2
 		}
@@ -3827,10 +3880,63 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 	if !sawClosed || !sawReopened || !sawNote || !sawBackfill {
 		t.Fatalf("missing expected timeline events: closed=%v reopened=%v note=%v backfill=%v events=%+v", sawClosed, sawReopened, sawNote, sawBackfill, wb.detailJobEvents)
 	}
+
+	// Delete manual note event from timeline while keeping workflow state intact.
+	if err := tt.Click("删除时间线节点 " + noteEvID); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	for _, ev := range wb.detailJobEvents {
+		if ev.ID == noteEvID {
+			t.Fatalf("expected manual note event %q deleted from UI state", noteEvID)
+		}
+	}
+	dbEvents, err = app.JobApplications.ListEvents(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range dbEvents {
+		if ev.ID == noteEvID {
+			t.Fatalf("expected manual note event %q deleted from DB", noteEvID)
+		}
+	}
+
 	if err := tt.Click("关闭投递详情"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
+
+	// Table status menu supports 1-click reject ("当前阶段挂") and quick reopen.
+	if err := tt.Click("状态操作 蓝海智算 存储研发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("标为未通过（当前阶段挂）"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	persisted, err = app.JobApplications.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Lifecycle != model.JobLifecycleClosed || persisted.Outcome != model.JobOutcomeRejected || persisted.Stage != model.JobStageInterview2 {
+		t.Fatalf("expected 1-click reject at current stage 二面, got %+v", persisted)
+	}
+	if err := tt.Click("状态操作 蓝海智算 存储研发"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("重新开启流程"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	persisted, err = app.JobApplications.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Lifecycle != model.JobLifecycleActive || persisted.Outcome != "" {
+		t.Fatalf("expected quick reopen from table status menu, got %+v", persisted)
+	}
 
 	// Narrow viewport renders horizontal scroll table + pagination controls cleanly without panicking.
 	ttNarrow := ui.NewTesterWith(wb.View, 900, 620, ui.TesterOptions{

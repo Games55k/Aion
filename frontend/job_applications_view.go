@@ -14,6 +14,7 @@ import (
 	"github.com/lobehub/lobe-mygo/pkg/field"
 	"github.com/lobehub/lobe-mygo/pkg/layout"
 	"github.com/lobehub/lobe-mygo/pkg/lucide"
+	"github.com/lobehub/lobe-mygo/pkg/overlay"
 	"github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
@@ -202,19 +203,20 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *theme.Tokens) {
 			}
 		})
 
-		// Sort selector
+		// Sort selector (visually separated from filters with explicit sort icon & prefix)
+		ui.Box(c).Width(1).Height(16).Background(tk.BorderSecondary)
 		sortVal := string(w.jobSortBy)
 		if sortVal == "" {
 			sortVal = string(jobapplications.SortAppliedDesc)
 		}
-		ui.Box(c).Width(155).Children(func() {
+		ui.Box(c).Width(188).Children(func() {
 			prevSort := sortVal
 			sel := field.Select(c.Key("job-sort"), &sortVal, field.SelectProps{
 				Options: []field.SelectOption{
-					{Value: string(jobapplications.SortAppliedDesc), Label: "投递日期 ↓"},
-					{Value: string(jobapplications.SortAppliedAsc), Label: "投递日期 ↑"},
-					{Value: string(jobapplications.SortUpdatedDesc), Label: "最近更新 ↓"},
-					{Value: string(jobapplications.SortUpdatedAsc), Label: "最近更新 ↑"},
+					{Value: string(jobapplications.SortAppliedDesc), Label: "排序：投递日期 ↓", Icon: lucide.ArrowDownWideNarrow()},
+					{Value: string(jobapplications.SortAppliedAsc), Label: "排序：投递日期 ↑", Icon: lucide.ArrowUpNarrowWide()},
+					{Value: string(jobapplications.SortUpdatedDesc), Label: "排序：最近更新 ↓", Icon: lucide.ArrowDownWideNarrow()},
+					{Value: string(jobapplications.SortUpdatedAsc), Label: "排序：最近更新 ↑", Icon: lucide.ArrowUpNarrowWide()},
 				},
 				Size:    theme.Small,
 				Variant: field.InputOutlined,
@@ -265,14 +267,28 @@ func (w *Workbench) renderJobEmptyState(c *ui.Context, tk *theme.Tokens) {
 }
 
 const (
-	jobColCompanyWidth  float32 = 170
-	jobColPositionWidth float32 = 210
+	jobColCompanyWidth  float32 = 190
+	jobColPositionWidth float32 = 260
 	jobColStageWidth    float32 = 148
-	jobColStatusWidth   float32 = 110
+	jobColStatusWidth   float32 = 116
 	jobColDateWidth     float32 = 110
-	jobColFollowWidth   float32 = 146
 	jobColLinkWidth     float32 = 110
 )
+
+func jobStatusMenuItems(app model.JobApplication) []overlay.MenuItem {
+	if app.Lifecycle == model.JobLifecycleActive {
+		return []overlay.MenuItem{
+			{Key: "reject", Label: "标为未通过（当前阶段挂）", Icon: lucide.CircleX(), Danger: true},
+			{Key: "withdrawn", Label: "标为主动放弃", Icon: lucide.Ban()},
+			{Divider: true},
+			{Key: "close_modal", Label: "结束流程（填写原因 / Offer 结果）…", Icon: lucide.FileText()},
+		}
+	}
+	return []overlay.MenuItem{
+		{Key: "reopen", Label: "重新开启流程", Icon: lucide.RotateCcw()},
+		{Key: "detail", Label: "查看 / 编辑结束原因…", Icon: lucide.FileText()},
+	}
+}
 
 func (w *Workbench) renderJobTable(c *ui.Context, tk *theme.Tokens) {
 	rows, _, _ := w.pagedJobApps()
@@ -286,7 +302,7 @@ func (w *Workbench) renderJobTable(c *ui.Context, tk *theme.Tokens) {
 			Direction: layout.Both,
 			State:     &w.jobTableScroll,
 		}, func() {
-			ui.Column(c).MinWidth(1020).FillWidth().Children(func() {
+			ui.Column(c).MinWidth(900).FillWidth().Children(func() {
 				// Table Header Row
 				ui.Row(c).Padding(10, 14).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch).
 					Background(tk.FillQuaternary).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
@@ -295,7 +311,6 @@ func (w *Workbench) renderJobTable(c *ui.Context, tk *theme.Tokens) {
 					tableHeaderCell(c, tk, "当前阶段", jobColStageWidth)
 					tableHeaderCell(c, tk, "状态 / 结果", jobColStatusWidth)
 					tableHeaderCell(c, tk, "投递日期", jobColDateWidth)
-					tableHeaderCell(c, tk, "下次跟进", jobColFollowWidth)
 					tableHeaderCell(c, tk, "链接与操作", jobColLinkWidth)
 				})
 
@@ -353,10 +368,22 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 			w.SelectJobApplication(app.ID)
 		}
 
-		// 3. Inline Stage Selector
-		stageOpts := make([]field.SelectOption, 0, len(model.AllJobStages()))
+		// 3. Inline Stage Selector (with quick close / reopen actions)
+		stageOpts := make([]field.SelectOption, 0, len(model.AllJobStages())+3)
 		for _, st := range model.AllJobStages() {
 			stageOpts = append(stageOpts, field.SelectOption{Value: string(st), Label: st.Label()})
+		}
+		if app.Lifecycle == model.JobLifecycleActive {
+			stageOpts = append(stageOpts,
+				field.SelectOption{Value: "__divider__", Label: "── 快捷结束流程 ──", Disabled: true},
+				field.SelectOption{Value: "__quick_reject__", Label: "标为未通过（当前阶段挂）"},
+				field.SelectOption{Value: "__open_close_modal__", Label: "更多结束结果 / 原因…"},
+			)
+		} else {
+			stageOpts = append(stageOpts,
+				field.SelectOption{Value: "__divider__", Label: "── 流程状态操作 ──", Disabled: true},
+				field.SelectOption{Value: "__reopen__", Label: "重新开启流程"},
+			)
 		}
 		ui.Box(c).Width(jobColStageWidth).Shrink(0).Children(func() {
 			selectedStage := string(app.Stage)
@@ -367,22 +394,59 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 			})
 			sel.Label("阶段 " + app.CompanyName + " " + app.PositionName)
 			if selectedStage != string(app.Stage) {
-				w.ChangeJobStage(app.ID, model.JobStage(selectedStage))
+				switch selectedStage {
+				case "__quick_reject__":
+					w.QuickCloseJobApplication(app.ID, model.JobOutcomeRejected)
+				case "__open_close_modal__":
+					w.OpenJobCloseModal(app.ID)
+				case "__reopen__":
+					w.ReopenJobApplication(app.ID)
+				default:
+					w.ChangeJobStage(app.ID, model.JobStage(selectedStage))
+				}
 			}
 		})
 
-		// 4. Lifecycle / Outcome Tag (separated from stage)
-		ui.Row(c).Width(jobColStatusWidth).Shrink(0).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			if app.Lifecycle == model.JobLifecycleActive {
-				display.Tag(c, app.Lifecycle.Label(), display.TagProps{
-					Color: display.TagProcessing,
-					Size:  theme.Small,
+		// 4. Lifecycle / Outcome Tag with Quick Close / Reopen Menu
+		ui.Row(c).Width(jobColStatusWidth).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			statusOpen := ui.Local(row, "statusMenuOpen", func() bool { return false })
+			chosen := overlay.DropdownMenu(c.Key("status-menu-"+app.ID), statusOpen, overlay.DropdownMenuProps{
+				Items: jobStatusMenuItems(app),
+			}, func(trig ui.Element) {
+				trig.Cursor(ui.CursorPointer).Radius(tk.BorderRadiusSM).Padding(3, 5).
+					Justify(ui.Center).AlignItems(ui.Center).
+					Label("状态操作 " + app.CompanyName + " " + app.PositionName)
+				if trig.Hovered() || *statusOpen {
+					trig.Background(tk.FillTertiary)
+				}
+				trig.Children(func() {
+					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+						if app.Lifecycle == model.JobLifecycleActive {
+							display.Tag(c, app.Lifecycle.Label(), display.TagProps{
+								Color: display.TagProcessing,
+								Size:  theme.Small,
+							})
+						} else {
+							display.Tag(c, app.Outcome.Label(), display.TagProps{
+								Color: jobOutcomeTagColor(app.Outcome),
+								Size:  theme.Small,
+							})
+						}
+						ui.Icon(c, lucide.ChevronDown()).FontSize(10).TextColor(tk.TextTertiary)
+					})
 				})
-			} else {
-				display.Tag(c, app.Outcome.Label(), display.TagProps{
-					Color: jobOutcomeTagColor(app.Outcome),
-					Size:  theme.Small,
-				})
+			})
+			switch chosen {
+			case "reject":
+				w.QuickCloseJobApplication(app.ID, model.JobOutcomeRejected)
+			case "withdrawn":
+				w.QuickCloseJobApplication(app.ID, model.JobOutcomeWithdrawn)
+			case "close_modal":
+				w.OpenJobCloseModal(app.ID)
+			case "reopen":
+				w.ReopenJobApplication(app.ID)
+			case "detail":
+				w.SelectJobApplication(app.ID)
 			}
 		})
 
@@ -391,22 +455,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *theme.Tokens, app model
 			ui.Text(c, app.AppliedDate).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 		})
 
-		// 6. Inline Next Follow-Up Date
-		ui.Box(c).Width(jobColFollowWidth).Shrink(0).Children(func() {
-			followVal := parseCalendarDateValue(app.NextFollowUpDate)
-			dp := field.DatePicker(c.Key("row-follow-"+app.ID), &followVal, field.DatePickerProps{
-				Placeholder: "未设置",
-				AllowClear:  true,
-				Size:        theme.Small,
-				Variant:     field.InputBorderless,
-			})
-			dp.Label("下次跟进 " + app.CompanyName + " " + app.PositionName)
-			if formatCalendarDate(followVal) != app.NextFollowUpDate {
-				w.UpdateJobFollowUpDate(app.ID, followVal)
-			}
-		})
-
-		// 7. Application URL Copy / Open & Detail Trigger
+		// 6. Application URL Copy / Open & Detail Trigger
 		ui.Row(c).Width(jobColLinkWidth).Shrink(0).Gap(4).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			if app.ApplicationURL != "" {
 				if action.ActionIcon(c.Key("copy-url-"+app.ID), lucide.Copy(), action.ActionIconProps{
@@ -528,18 +577,9 @@ func (w *Workbench) renderJobCreateModal(c *ui.Context, tk *theme.Tokens) {
 						})
 					})
 
-					ui.Row(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
-						ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-							ui.Text(c, "投递渠道").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-							field.Input(c, &w.jobCreateChannel, field.InputProps{Placeholder: "官网 / 内推 / 招聘平台"}).Label("创建投递渠道")
-						})
-						ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-							ui.Text(c, "下次跟进日期").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
-							field.DatePicker(c.Key("create-followup-date"), &w.jobCreateFollowUpDate, field.DatePickerProps{
-								Placeholder: "可选，可清空",
-								AllowClear:  true,
-							}).Label("创建下次跟进日期")
-						})
+					ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "投递渠道").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
+						field.Input(c, &w.jobCreateChannel, field.InputProps{Placeholder: "官网 / 内推 / 招聘平台"}).Label("创建投递渠道")
 					})
 
 					ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {

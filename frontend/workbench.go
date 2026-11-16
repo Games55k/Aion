@@ -147,16 +147,15 @@ type Workbench struct {
 	jobTableScroll       ui.ScrollState
 
 	// Job Create modal state
-	jobCreateOpen         bool
-	jobCreateCompany      string
-	jobCreatePosition     string
-	jobCreateAppliedDate  time.Time
-	jobCreateStage        string
-	jobCreateURL          string
-	jobCreateChannel      string
-	jobCreateFollowUpDate time.Time
-	jobCreateNotes        string
-	jobCreateErr          string
+	jobCreateOpen        bool
+	jobCreateCompany     string
+	jobCreatePosition    string
+	jobCreateAppliedDate time.Time
+	jobCreateStage       string
+	jobCreateURL         string
+	jobCreateChannel     string
+	jobCreateNotes       string
+	jobCreateErr         string
 
 	// Job Detail modal & auto-save state
 	selectedJobID        string
@@ -169,8 +168,6 @@ type Workbench struct {
 	editJobAppliedDate   time.Time
 	editJobURL           string
 	editJobChannel       string
-	editJobFollowUpDate  time.Time
-	editJobFollowUpDirty bool
 	editJobNotes         string
 	editJobClosureReason string
 	editJobReasonDirty   bool
@@ -185,21 +182,27 @@ type Workbench struct {
 	jobsNeedReload       bool
 
 	// Job Timeline input & retry state
-	jobNoteInput       string
-	jobNoteDate        time.Time
-	jobNoteErr         string
-	jobNoteOpID        string
-	jobBackfillStage   string
-	jobBackfillDate    time.Time
-	jobBackfillNote    string
-	jobBackfillErr     string
-	jobBackfillOpID    string
-	pendingStageAppID  string
-	pendingStageTarget model.JobStage
-	pendingStageOpID   string
-	jobReopenNote      string
-	jobReopenOpID      string
-	jobReopenErr       string
+	jobNoteInput           string
+	jobNoteDate            time.Time
+	jobNoteErr             string
+	jobNoteOpID            string
+	jobBackfillStage       string
+	jobBackfillDate        time.Time
+	jobBackfillNote        string
+	jobBackfillErr         string
+	jobBackfillOpID        string
+	jobTimelineDesc        bool
+	jobBackfillExpanded    bool
+	editingJobEventID      string
+	editingJobEventNote    string
+	pendingStageAppID      string
+	pendingStageTarget     model.JobStage
+	pendingStageOpID       string
+	pendingQuickCloseAppID string
+	pendingQuickCloseOpID  string
+	jobReopenNote          string
+	jobReopenOpID          string
+	jobReopenErr           string
 
 	// Job Close workflow modal state
 	jobCloseOpen         bool
@@ -337,6 +340,7 @@ func New(app *backend.App, host Host) *Workbench {
 		jobSortBy:         jobapplications.SortAppliedDesc,
 		jobPageSize:       20,
 		jobBackfillStage:  string(model.JobStageInterview1),
+		jobTimelineDesc:   true,
 		themeSetting:      ThemeSystem,
 		updateInfo:        host.UpdateInfo,
 	}
@@ -2629,7 +2633,6 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.jobCreateStage = ""
 	w.jobCreateURL = ""
 	w.jobCreateChannel = ""
-	w.jobCreateFollowUpDate = time.Time{}
 	w.jobCreateNotes = ""
 	w.jobCreateErr = ""
 	w.jobCloseOpen = false
@@ -2642,6 +2645,12 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.pendingStageAppID = ""
 	w.pendingStageTarget = ""
 	w.pendingStageOpID = ""
+	w.jobTimelineDesc = true
+	w.jobBackfillExpanded = false
+	w.editingJobEventID = ""
+	w.editingJobEventNote = ""
+	w.pendingQuickCloseAppID = ""
+	w.pendingQuickCloseOpID = ""
 	w.jobReopenNote = ""
 	w.jobReopenOpID = ""
 	w.jobReopenErr = ""

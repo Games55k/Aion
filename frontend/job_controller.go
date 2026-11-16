@@ -185,7 +185,6 @@ func (w *Workbench) OpenJobCreateModal() {
 	w.jobCreateStage = string(model.JobStageApplied)
 	w.jobCreateURL = ""
 	w.jobCreateChannel = ""
-	w.jobCreateFollowUpDate = time.Time{}
 	w.jobCreateNotes = ""
 	w.jobCreateErr = ""
 	w.jobCreateOpen = true
@@ -233,10 +232,9 @@ func (w *Workbench) SubmitJobCreateModal() {
 		PositionName:     position,
 		AppliedDate:      appliedDate,
 		Stage:            stage,
-		ApplicationURL:   appURL,
-		Channel:          strings.TrimSpace(w.jobCreateChannel),
-		NextFollowUpDate: formatCalendarDate(w.jobCreateFollowUpDate),
-		Notes:            strings.TrimRight(w.jobCreateNotes, "\r\n"),
+		ApplicationURL: appURL,
+		Channel:        strings.TrimSpace(w.jobCreateChannel),
+		Notes:          strings.TrimRight(w.jobCreateNotes, "\r\n"),
 	}
 	created, err := w.app.JobApplications.Create(context.Background(), in)
 	if err != nil {
@@ -296,6 +294,9 @@ func (w *Workbench) selectLoadedJob(app model.JobApplication, events []model.Job
 	w.jobBackfillNote = ""
 	w.jobBackfillErr = ""
 	w.jobBackfillOpID = ""
+	w.jobBackfillExpanded = false
+	w.editingJobEventID = ""
+	w.editingJobEventNote = ""
 	w.syncDetailFromJob(app)
 }
 
@@ -356,31 +357,86 @@ func (w *Workbench) ChangeJobStage(appID string, toStage model.JobStage) {
 	})
 }
 
-// UpdateJobFollowUpDate updates next_follow_up_date inline without overwriting concurrent text drafts or appending timeline events.
-func (w *Workbench) UpdateJobFollowUpDate(appID string, d time.Time) {
-	if w.IsRestoring() {
+func (w *Workbench) currentStageForJob(appID string) model.JobStage {
+	if w.selectedJobID == appID && w.detailJob != nil {
+		return w.detailJob.Stage
+	}
+	for _, a := range w.jobApps {
+		if a.ID == appID {
+			return a.Stage
+		}
+	}
+	return ""
+}
+
+func (w *Workbench) applyClosedJobToDetail(appID string, updated model.JobApplication, events []model.JobApplicationEvent) {
+	if w.selectedJobID == appID && w.detailJob != nil {
+		w.detailJob.Stage = updated.Stage
+		w.detailJob.Lifecycle = updated.Lifecycle
+		w.detailJob.Outcome = updated.Outcome
+		w.detailJob.ClosureReason = updated.ClosureReason
+		w.detailJob.ClosedAt = updated.ClosedAt
+		w.detailJob.ReachedOffer = updated.ReachedOffer
+		w.detailJob.UpdatedAt = updated.UpdatedAt
+		w.editJobClosureReason = updated.ClosureReason
+		w.editJobReasonDirty = false
+		if events != nil {
+			w.detailJobEvents = events
+		}
+	}
+}
+
+// QuickCloseJobApplication immediately closes an active application with outcome (or opens the close modal when Offer confirmation is needed).
+func (w *Workbench) QuickCloseJobApplication(appID string, outcome model.JobOutcome) {
+	if w.IsRestoring() || appID == "" || !outcome.Valid() {
 		return
 	}
-	dateStr := formatCalendarDate(d)
+	if !w.afterPendingSave(func() { w.QuickCloseJobApplication(appID, outcome) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再结束流程") {
+		return
+	}
+	if outcome.RequiresOfferStage() && w.currentStageForJob(appID) != model.JobStageOffer {
+		w.OpenJobCloseModal(appID)
+		if w.jobCloseOpen {
+			w.jobCloseOutcome = string(outcome)
+		}
+		return
+	}
+	if w.pendingQuickCloseAppID != appID || w.pendingQuickCloseOpID == "" {
+		w.pendingQuickCloseAppID = appID
+		w.pendingQuickCloseOpID = model.NewID()
+	}
+	opID := w.pendingQuickCloseOpID
 	service := w.app.JobApplications
 	var updated model.JobApplication
+	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
 		var err error
-		updated, err = service.UpdateFollowUpDate(context.Background(), appID, dateStr)
+		updated, err = service.Close(context.Background(), jobapplications.CloseInput{
+			ID:      appID,
+			Outcome: outcome,
+			EventID: opID,
+		})
+		if err != nil {
+			return err
+		}
+		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("更新下次跟进日期失败", err)
+			w.enqueueErrorToast("结束流程失败", err)
 			return
 		}
-		w.upsertJobInCache(updated)
-		if w.selectedJobID == appID && w.detailJob != nil {
-			w.detailJob.NextFollowUpDate = updated.NextFollowUpDate
-			w.detailJob.UpdatedAt = updated.UpdatedAt
-			if !w.editJobFollowUpDirty {
-				w.editJobFollowUpDate = parseCalendarDateValue(updated.NextFollowUpDate)
-			}
+		if w.pendingQuickCloseAppID == appID && w.pendingQuickCloseOpID == opID {
+			w.pendingQuickCloseAppID = ""
+			w.pendingQuickCloseOpID = ""
 		}
+		w.upsertJobInCache(updated)
+		w.applyClosedJobToDetail(appID, updated, events)
+		w.EnqueueToast(feedback.ToastProps{
+			Title:       "流程已结束",
+			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
+			Type:        feedback.ToastInfo,
+		})
 	})
 }
 
@@ -411,17 +467,7 @@ func (w *Workbench) SubmitJobCloseModal() {
 		w.jobCloseErr = "请选择有效的结束结果"
 		return
 	}
-	var currentStage model.JobStage
-	if w.selectedJobID == w.jobCloseAppID && w.detailJob != nil {
-		currentStage = w.detailJob.Stage
-	} else {
-		for _, a := range w.jobApps {
-			if a.ID == w.jobCloseAppID {
-				currentStage = a.Stage
-				break
-			}
-		}
-	}
+	currentStage := w.currentStageForJob(w.jobCloseAppID)
 	var stageOverride model.JobStage
 	if outcome.RequiresOfferStage() && currentStage != model.JobStageOffer {
 		if !w.jobCloseConfirmOffer {
@@ -462,20 +508,7 @@ func (w *Workbench) SubmitJobCloseModal() {
 		w.jobCloseErr = ""
 		w.jobCloseOpID = ""
 		w.upsertJobInCache(updated)
-		if w.selectedJobID == appID && w.detailJob != nil {
-			w.detailJob.Stage = updated.Stage
-			w.detailJob.Lifecycle = updated.Lifecycle
-			w.detailJob.Outcome = updated.Outcome
-			w.detailJob.ClosureReason = updated.ClosureReason
-			w.detailJob.ClosedAt = updated.ClosedAt
-			w.detailJob.ReachedOffer = updated.ReachedOffer
-			w.detailJob.UpdatedAt = updated.UpdatedAt
-			w.editJobClosureReason = updated.ClosureReason
-			w.editJobReasonDirty = false
-			if events != nil {
-				w.detailJobEvents = events
-			}
-		}
+		w.applyClosedJobToDetail(appID, updated, events)
 		w.EnqueueToast(feedback.ToastProps{
 			Title:       "流程已结束",
 			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
@@ -650,6 +683,106 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 			w.detailJob.ReachedOffer = updated.ReachedOffer
 			w.detailJobEvents = events
 		}
+	})
+}
+
+// StartEditJobTimelineEvent opens inline note editing for an existing timeline event.
+func (w *Workbench) StartEditJobTimelineEvent(ev model.JobApplicationEvent) {
+	if w.IsRestoring() || ev.ID == "" {
+		return
+	}
+	w.editingJobEventID = ev.ID
+	w.editingJobEventNote = ev.Note
+}
+
+// CancelEditJobTimelineEvent closes inline note editing on the timeline without saving changes.
+func (w *Workbench) CancelEditJobTimelineEvent() {
+	w.editingJobEventID = ""
+	w.editingJobEventNote = ""
+}
+
+// SaveJobTimelineEventNote persists edited note text on an existing timeline event.
+func (w *Workbench) SaveJobTimelineEventNote(appID, eventID string) {
+	if w.IsRestoring() || appID == "" || eventID == "" {
+		return
+	}
+	note := strings.TrimSpace(w.editingJobEventNote)
+	service := w.app.JobApplications
+	var updated model.JobApplication
+	var events []model.JobApplicationEvent
+	w.runJobWorker(func() error {
+		if _, err := service.UpdateEventNote(context.Background(), jobapplications.UpdateEventNoteInput{
+			ApplicationID: appID,
+			EventID:       eventID,
+			Note:          note,
+		}); err != nil {
+			return err
+		}
+		var err error
+		updated, err = service.Get(context.Background(), appID)
+		if err != nil {
+			return err
+		}
+		events, err = service.ListEvents(context.Background(), appID)
+		return err
+	}, func(err error) {
+		if err != nil {
+			w.enqueueErrorToast("保存时间线备注失败", err)
+			return
+		}
+		w.upsertJobInCache(updated)
+		if w.selectedJobID == appID && w.detailJob != nil {
+			w.detailJob.UpdatedAt = updated.UpdatedAt
+			w.detailJobEvents = events
+		}
+		if w.editingJobEventID == eventID {
+			w.editingJobEventID = ""
+			w.editingJobEventNote = ""
+		}
+		w.EnqueueToast(feedback.ToastProps{
+			Title: "已更新节点备注",
+			Type:  feedback.ToastSuccess,
+		})
+	})
+}
+
+// DeleteJobTimelineEvent deletes a manually added note or backfill node from the timeline.
+func (w *Workbench) DeleteJobTimelineEvent(appID, eventID string) {
+	if w.IsRestoring() || appID == "" || eventID == "" {
+		return
+	}
+	service := w.app.JobApplications
+	var updated model.JobApplication
+	var events []model.JobApplicationEvent
+	w.runJobWorker(func() error {
+		if err := service.DeleteEvent(context.Background(), appID, eventID); err != nil {
+			return err
+		}
+		var err error
+		updated, err = service.Get(context.Background(), appID)
+		if err != nil {
+			return err
+		}
+		events, err = service.ListEvents(context.Background(), appID)
+		return err
+	}, func(err error) {
+		if err != nil {
+			w.enqueueErrorToast("删除时间线节点失败", err)
+			return
+		}
+		w.upsertJobInCache(updated)
+		if w.selectedJobID == appID && w.detailJob != nil {
+			w.detailJob.UpdatedAt = updated.UpdatedAt
+			w.detailJobEvents = events
+		}
+		if w.editingJobEventID == eventID {
+			w.editingJobEventID = ""
+			w.editingJobEventNote = ""
+		}
+		w.EnqueueToast(feedback.ToastProps{
+			Title: "已删除时间线节点",
+			Type:  feedback.ToastInfo,
+		})
 	})
 }
 

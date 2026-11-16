@@ -53,8 +53,6 @@ func (w *Workbench) resetSelectedJobState() {
 	w.editJobAppliedDate = time.Time{}
 	w.editJobURL = ""
 	w.editJobChannel = ""
-	w.editJobFollowUpDate = time.Time{}
-	w.editJobFollowUpDirty = false
 	w.editJobNotes = ""
 	w.editJobClosureReason = ""
 	w.editJobReasonDirty = false
@@ -73,6 +71,9 @@ func (w *Workbench) resetSelectedJobState() {
 	w.jobBackfillNote = ""
 	w.jobBackfillErr = ""
 	w.jobBackfillOpID = ""
+	w.jobBackfillExpanded = false
+	w.editingJobEventID = ""
+	w.editingJobEventNote = ""
 }
 
 func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
@@ -85,8 +86,6 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 	w.editJobAppliedDate = parseCalendarDateValue(app.AppliedDate)
 	w.editJobURL = app.ApplicationURL
 	w.editJobChannel = app.Channel
-	w.editJobFollowUpDate = parseCalendarDateValue(app.NextFollowUpDate)
-	w.editJobFollowUpDirty = false
 	w.editJobNotes = app.Notes
 	w.editJobClosureReason = app.ClosureReason
 	w.editJobReasonDirty = false
@@ -121,9 +120,6 @@ func (w *Workbench) hasUnsavedChangesFromDetailJob() bool {
 		strings.TrimSpace(w.editJobURL) != w.detailJob.ApplicationURL ||
 		strings.TrimSpace(w.editJobChannel) != w.detailJob.Channel ||
 		strings.TrimRight(w.editJobNotes, "\r\n") != w.detailJob.Notes {
-		return true
-	}
-	if w.editJobFollowUpDirty && formatCalendarDate(w.editJobFollowUpDate) != w.detailJob.NextFollowUpDate {
 		return true
 	}
 	if w.editJobReasonDirty && w.detailJob.Lifecycle == model.JobLifecycleClosed && strings.TrimSpace(w.editJobClosureReason) != w.detailJob.ClosureReason {
@@ -166,10 +162,6 @@ func (w *Workbench) buildJobSaveRequest() (jobSave, error) {
 		ApplicationURL: appURL,
 		Channel:        strings.TrimSpace(w.editJobChannel),
 		Notes:          strings.TrimRight(w.editJobNotes, "\r\n"),
-	}
-	if w.editJobFollowUpDirty {
-		f := formatCalendarDate(w.editJobFollowUpDate)
-		in.NextFollowUpDate = &f
 	}
 	if w.editJobReasonDirty && w.detailJob.Lifecycle == model.JobLifecycleClosed {
 		r := strings.TrimSpace(w.editJobClosureReason)
@@ -276,7 +268,6 @@ func (w *Workbench) startJobSave(request jobSave) error {
 			return
 		}
 		w.jobDirty = false
-		w.editJobFollowUpDirty = false
 		w.editJobReasonDirty = false
 		w.jobSaveState = "saved"
 		w.jobSaveErr = ""

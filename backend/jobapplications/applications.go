@@ -109,6 +109,13 @@ type BackfillStageInput struct {
 	EventID       string
 }
 
+// UpdateEventNoteInput updates the note text on an existing timeline event without modifying workflow state.
+type UpdateEventNoteInput struct {
+	ApplicationID string
+	EventID       string
+	Note          string
+}
+
 // Matches reports whether app satisfies all filter conditions in f.
 func (f Filter) Matches(app model.JobApplication) bool {
 	if app.DeletedAt != nil {
@@ -749,4 +756,82 @@ func (s *Service) BackfillStageEvent(ctx context.Context, in BackfillStageInput)
 		return err
 	})
 	return created, err
+}
+
+// UpdateEventNote updates the note attached to an existing timeline event for an active application.
+func (s *Service) UpdateEventNote(ctx context.Context, in UpdateEventNoteInput) (model.JobApplicationEvent, error) {
+	appID := strings.TrimSpace(in.ApplicationID)
+	eventID := strings.TrimSpace(in.EventID)
+	if appID == "" || eventID == "" {
+		return model.JobApplicationEvent{}, fmt.Errorf("%w: 投递记录与事件标识不能为空", model.ErrInvalid)
+	}
+	note := strings.TrimSpace(in.Note)
+	nowTS := s.timestamp()
+
+	var updated model.JobApplicationEvent
+	err := s.s.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := getApplicationTx(ctx, tx, appID, false); err != nil {
+			return err
+		}
+		existing, exists, err := findEventByIDTx(ctx, tx, appID, eventID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return model.ErrNotFound
+		}
+		if existing.EventType == model.JobEventNoteAdded && note == "" {
+			return fmt.Errorf("%w: 时间线备注不能为空", model.ErrInvalid)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE job_application_events SET note = ? WHERE id = ? AND application_id = ?`,
+			note, eventID, appID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE job_applications SET updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
+			nowTS, appID,
+		); err != nil {
+			return err
+		}
+		updated, _, err = findEventByIDTx(ctx, tx, appID, eventID)
+		return err
+	})
+	return updated, err
+}
+
+// DeleteEvent deletes a timeline event (notes, backfilled stages, or accidental transitions/closures/reopenings) while preserving the initial created event.
+func (s *Service) DeleteEvent(ctx context.Context, applicationID, eventID string) error {
+	appID := strings.TrimSpace(applicationID)
+	evID := strings.TrimSpace(eventID)
+	if appID == "" || evID == "" {
+		return fmt.Errorf("%w: 投递记录与事件标识不能为空", model.ErrInvalid)
+	}
+	nowTS := s.timestamp()
+
+	return s.s.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := getApplicationTx(ctx, tx, appID, false); err != nil {
+			return err
+		}
+		existing, exists, err := findEventByIDTx(ctx, tx, appID, evID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return nil
+		}
+		if existing.EventType == model.JobEventCreated {
+			return fmt.Errorf("%w: 初始创建节点不可删除", model.ErrInvalid)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM job_application_events WHERE id = ? AND application_id = ?`,
+			evID, appID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE job_applications SET updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
+			nowTS, appID,
+		); err != nil {
+			return err
+		}
+		return nil
+	})
 }

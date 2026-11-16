@@ -361,6 +361,56 @@ func TestTimelineOrderingBackfillDeduplicationAndFieldIsolation(t *testing.T) {
 		events[3].EventType != model.JobEventStageChanged {
 		t.Fatalf("timeline events out of chronological order: %+v", events)
 	}
+
+	// UpdateEventNote updates manual note & stage-change notes while rejecting blank note_added values.
+	if _, err := svc.UpdateEventNote(ctx, jobapplications.UpdateEventNoteInput{
+		ApplicationID: app.ID,
+		EventID:       noteID,
+		Note:          "   ",
+	}); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid clearing note_added text, got %v", err)
+	}
+	updatedNote, err := svc.UpdateEventNote(ctx, jobapplications.UpdateEventNoteInput{
+		ApplicationID: app.ID,
+		EventID:       noteID,
+		Note:          "已更新：HR 约定下周二二面",
+	})
+	if err != nil || updatedNote.Note != "已更新：HR 约定下周二二面" {
+		t.Fatalf("UpdateEventNote on note event failed: %+v err=%v", updatedNote, err)
+	}
+	updatedStageEv, err := svc.UpdateEventNote(ctx, jobapplications.UpdateEventNoteInput{
+		ApplicationID: app.ID,
+		EventID:       events[3].ID,
+		Note:          "HR 面补充说明",
+	})
+	if err != nil || updatedStageEv.Note != "HR 面补充说明" {
+		t.Fatalf("UpdateEventNote on stage event failed: %+v err=%v", updatedStageEv, err)
+	}
+
+	// DeleteEvent removes non-created timeline events idempotently while protecting the initial created event and keeping current workflow state intact.
+	if err := svc.DeleteEvent(ctx, app.ID, events[0].ID); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid deleting created event, got %v", err)
+	}
+	if err := svc.DeleteEvent(ctx, app.ID, events[3].ID); err != nil {
+		t.Fatalf("DeleteEvent on stage_changed event failed: %v", err)
+	}
+	if err := svc.DeleteEvent(ctx, app.ID, noteID); err != nil {
+		t.Fatalf("DeleteEvent on note event failed: %v", err)
+	}
+	if err := svc.DeleteEvent(ctx, app.ID, bfID); err != nil {
+		t.Fatalf("DeleteEvent on backfill event failed: %v", err)
+	}
+	if err := svc.DeleteEvent(ctx, app.ID, bfID); err != nil {
+		t.Fatalf("DeleteEvent idempotency failed: %v", err)
+	}
+	afterDelete, err := svc.ListEvents(ctx, app.ID)
+	if err != nil || len(afterDelete) != 1 || afterDelete[0].ID != events[0].ID {
+		t.Fatalf("expected only created event remaining after deletes, err=%v events=%+v", err, afterDelete)
+	}
+	afterDelApp, err := svc.Get(ctx, app.ID)
+	if err != nil || afterDelApp.Stage != model.JobStageHR || afterDelApp.Lifecycle != model.JobLifecycleActive {
+		t.Fatalf("event deletion mutated current workflow state: app=%+v err=%v", afterDelApp, err)
+	}
 }
 
 func TestFilterSortStatsAndCascadeDelete(t *testing.T) {
