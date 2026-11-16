@@ -111,7 +111,7 @@ go test ./frontend -run TestVisualSnapshotRender
 
 ## 开发
 
-待实施方案：[开发自动化与 UI 封装精简](docs/plans/automation-and-ui-simplification.md)，按“开发用 Automation → 未使用 UI 能力清理”的顺序推进；其中的 Automation 命令需在接入完成后使用。
+开发方案：[开发自动化与 UI 封装精简](docs/plans/automation-and-ui-simplification.md)（第一阶段开发用 Automation 已接入，UI 封装清理按批次推进）。
 
 | 命令 | 用途 |
 |---|---|
@@ -121,9 +121,33 @@ go test ./frontend -run TestVisualSnapshotRender
 | `go vet ./...` | Go 静态分析检查 |
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
 
+### 真实窗口自动化冒烟（开发专用）
+
+`automation_e2e.go` 仅在 `-tags e2e` 构建时引入 `github.com/egoist/mygo/plugins/automation`，默认构建与正式发布构建（`mygo_noinspector`）均不启动自动化服务。使用独立临时目录运行真实窗口操作与截图：
+
+```bash
+# 在仓库目录安装与当前 go.mod 一致的 mygo-automation 客户端
+go install github.com/egoist/mygo/plugins/automation/cmd/mygo-automation
+
+# 在隔离临时目录构建并启动 e2e 实例
+aion_e2e_dir=$(mktemp -d /tmp/aion-e2e.XXXXXX)
+go build -tags e2e -o "$aion_e2e_dir/Aion" .
+MYGO_AUTOMATION="$aion_e2e_dir/app.sock" \
+  "$aion_e2e_dir/Aion" -data-dir "$aion_e2e_dir/data"
+
+# 另一个终端中（将上面的输出路径赋给 aion_e2e_dir）连接、检查控件与截图
+mygo-automation open --socket "$aion_e2e_dir/app.sock"
+mygo-automation snapshot -i
+mygo-automation screenshot "$aion_e2e_dir/window.png"
+mygo-automation close
+```
+
+`mygo-automation close` 仅结束客户端会话，应用正常退出（如菜单 `Aion` → `退出Aion`）后会自动清理 socket，再清理创建的临时目录即可。
+
 ```text
 Aion/
 ├── main.go                                 # 原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
+├── automation_e2e.go                       # e2e 构建标签专用的 MyGo Automation 插件入口
 ├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
