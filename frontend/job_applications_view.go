@@ -128,7 +128,6 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 				Placeholder: "搜索公司或岗位...",
 				ShortKey:    "mod+k",
 				Size:        sizeSmall,
-				Variant:     inputOutlined,
 			})
 			search.Label("搜索投递记录")
 			if search.Changed() {
@@ -149,7 +148,6 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 				Options:     stageOptions,
 				Placeholder: "全部阶段",
 				Size:        sizeSmall,
-				Variant:     inputOutlined,
 			})
 			sel.Label("筛选阶段")
 			if w.jobStageFilter != prev {
@@ -170,7 +168,6 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 				Options:     outcomeOptions,
 				Placeholder: "全部结果",
 				Size:        sizeSmall,
-				Variant:     inputOutlined,
 			})
 			sel.Label("筛选结果")
 			if w.jobOutcomeFilter != prev {
@@ -186,7 +183,6 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 				Placeholder: "投递日期筛选",
 				AllowClear:  true,
 				Size:        sizeSmall,
-				Variant:     inputOutlined,
 			})
 			dp.Label("筛选投递日期")
 			if formatCalendarDate(w.jobAppliedDateFilter) != prevDate {
@@ -210,8 +206,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 					{Value: string(jobapplications.SortUpdatedDesc), Label: "排序：最近更新 ↓", Icon: iconArrowDownWideNarrow()},
 					{Value: string(jobapplications.SortUpdatedAsc), Label: "排序：最近更新 ↑", Icon: iconArrowUpNarrowWide()},
 				},
-				Size:    sizeSmall,
-				Variant: inputOutlined,
+				Size: sizeSmall,
 			})
 			sel.Label("排序方式")
 			if sortVal != prevSort {
@@ -382,7 +377,6 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 			sel := uiSelect(c.Key("row-stage-"+app.ID), &selectedStage, selectProps{
 				Options: stageOpts,
 				Size:    sizeSmall,
-				Variant: inputOutlined,
 			})
 			sel.Label("阶段 " + app.CompanyName + " " + app.PositionName)
 			if selectedStage != string(app.Stage) {

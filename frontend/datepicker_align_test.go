@@ -96,7 +96,6 @@ func TestSelectPopupContainsAllStageOptions(t *testing.T) {
 			uiSelect(c.Key("long-select"), &selected, selectProps{
 				Options: manyOpts,
 				Size:    sizeSmall,
-				Variant: inputOutlined,
 			}).Label("长选项选择器")
 		})
 	}, 400, 600)

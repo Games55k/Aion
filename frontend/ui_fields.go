@@ -12,20 +12,16 @@ type inputVariant int
 const (
 	inputOutlined inputVariant = iota
 	inputFilled
-	inputBorderless
 )
 
 type inputProps struct {
 	Variant     inputVariant
 	Size        uiSize
 	Placeholder string
-	Prefix      *ui.SVG
-	Suffix      *ui.SVG
 	Invalid     bool
 }
 
 type textAreaProps struct {
-	Variant     inputVariant
 	Placeholder string
 	MinRows     int
 	MaxRows     int
@@ -43,10 +39,8 @@ func uiInput(c *ui.Context, value *string, p inputProps) ui.Element {
 	root := fieldRow(c, tk, p.Size).Gap(8)
 	var input ui.Element
 	root.Children(func() {
-		fieldAffix(c, tk, p.Prefix)
 		input = ui.TextInputBase(c, value).Grow(1).FocusRing(false).
 			Placeholder(p.Placeholder).PlaceholderColor(tk.TextPlaceholder)
-		fieldAffix(c, tk, p.Suffix)
 	})
 	styleField(root, tk, p.Variant, p.Invalid, input.Focused())
 	return input
@@ -68,14 +62,8 @@ func uiTextArea(c *ui.Context, value *string, p textAreaProps) ui.Element {
 		area = ui.TextAreaBase(c, value).Lines(minRows, maxRows).FocusRing(false).
 			Placeholder(p.Placeholder).PlaceholderColor(tk.TextPlaceholder)
 	})
-	styleField(root, tk, p.Variant, p.Invalid, area.Focused())
+	styleField(root, tk, inputOutlined, p.Invalid, area.Focused())
 	return area
-}
-
-func fieldAffix(c *ui.Context, tk *uiTokens, svg *ui.SVG) {
-	if svg != nil {
-		ui.Icon(c, svg).TextColor(tk.TextTertiary)
-	}
 }
 
 func styleField(root ui.Element, tk *uiTokens, v inputVariant, invalid, focused bool) {
@@ -87,8 +75,6 @@ func styleField(root ui.Element, tk *uiTokens, v inputVariant, invalid, focused 
 			bg = tk.FillSecondary
 		}
 		root.Background(bg)
-	case inputBorderless:
-		root.Background(ui.Transparent)
 	default:
 		root.Background(tk.BgContainer)
 	}
@@ -135,18 +121,14 @@ func styleFieldRow(e ui.Element, tk *uiTokens, size uiSize) ui.Element {
 type searchBarProps struct {
 	Placeholder string
 	ShortKey    string
-	Platform    hotkeyPlatform
-	Loading     bool
-	Variant     inputVariant
 	Size        uiSize
-	OnSearch    func(query string)
 }
 
 func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 	tk := tokensOf(c)
 	focusNow := false
 	if p.ShortKey != "" {
-		if mods, key, ok := hotkeyBinding(p.ShortKey, p.Platform); ok && c.Shortcut(mods, key) {
+		if mods, key, ok := hotkeyBinding(p.ShortKey, hotkeyAuto); ok && c.Shortcut(mods, key) {
 			focusNow = true
 		}
 	}
@@ -158,24 +140,16 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 	root := fieldRow(c, tk, p.Size).Gap(4)
 	var input ui.Element
 	root.Children(func() {
-		icon := ui.Icon(c, iconSearch()).TextColor(tk.TextPlaceholder).Shrink(0)
-		if p.Loading {
-			icon = ui.Icon(c.Key("loading"), iconLoaderCircle()).TextColor(tk.TextPlaceholder).Shrink(0)
-			icon.Rotate(icon.Loop("spin", time.Second, ui.Linear) * 360)
-		}
-		icon.Margin(0, 4, 0, 0)
+		ui.Icon(c, iconSearch()).TextColor(tk.TextPlaceholder).Shrink(0).Margin(0, 4, 0, 0)
 		input = ui.TextInputBase(c, query).Grow(1).FocusRing(false).
 			Placeholder(placeholder).PlaceholderColor(tk.TextPlaceholder)
 		if focusNow {
 			input.Focus()
 		}
 		if p.ShortKey != "" {
-			if mods, key, ok := hotkeyBinding(p.ShortKey, p.Platform); ok {
+			if mods, key, ok := hotkeyBinding(p.ShortKey, hotkeyAuto); ok {
 				input.KeyShortcuts(mods, key)
 			}
-		}
-		if input.Submitted() && p.OnSearch != nil {
-			p.OnSearch(*query)
 		}
 		switch {
 		case *query != "":
@@ -190,13 +164,13 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 			}
 			clearBtn.Children(func() { ui.Icon(c, iconCircleX()).FontSize(14) })
 		case p.ShortKey != "" && !input.Focused():
-			hk := uiHotkey(c, p.ShortKey, hotkeyProps{Compact: true, Size: p.Size, Platform: p.Platform}).TextColor(tk.TextDescription)
+			hk := uiHotkey(c, p.ShortKey, hotkeyProps{Compact: true, Size: p.Size}).TextColor(tk.TextDescription)
 			if p.Size == sizeSmall {
 				hk.Margin(0, -4, 0, 0)
 			}
 		}
 	})
-	styleField(root, tk, p.Variant, false, input.Focused())
+	styleField(root, tk, inputOutlined, false, input.Focused())
 	return input
 }
 
@@ -210,27 +184,19 @@ type selectOption struct {
 type selectProps struct {
 	Options     []selectOption
 	Placeholder string
-	Variant     inputVariant
 	Size        uiSize
-	Disabled    bool
 }
 
 func uiSelect(c *ui.Context, selected *string, p selectProps) ui.Element {
 	tk := tokensOf(c)
 	minHeight, fontSize, radius, padX, padY := float32(32), float32(14), tk.BorderRadius, float32(11), float32(4)
-	switch p.Size {
-	case sizeSmall:
+	if p.Size == sizeSmall {
 		minHeight, fontSize, radius, padX, padY = 24, 12, tk.BorderRadiusSM, 8, 0
-	case sizeLarge:
-		minHeight, fontSize, radius, padX, padY = 40, 16, tk.BorderRadiusLG, 12, 6
 	}
 	sel := ui.SelectBase(c, selected)
 	tr := sel.Trigger.MinHeight(minHeight).Padding(padY, padX).Gap(8).Radius(radius).FontSize(fontSize).
 		AlignItems(ui.Center).TextColor(tk.Text).Cursor(ui.CursorPointer).Unselectable().Transition(fieldTransition)
-	if p.Disabled {
-		tr.Disabled(true).Cursor(ui.CursorNotAllowed).TextColor(tk.TextDisabled)
-	}
-	styleField(tr, tk, p.Variant, false, sel.Open())
+	styleField(tr, tk, inputOutlined, false, sel.Open())
 
 	var current *selectOption
 	for i := range p.Options {
@@ -301,9 +267,7 @@ type datePickerProps struct {
 	DisabledDate func(day time.Time) bool
 	WeekStart    time.Weekday
 	NoToday      bool
-	Variant      inputVariant
 	Size         uiSize
-	Disabled     bool
 }
 
 func uiDatePicker(c *ui.Context, value *time.Time, p datePickerProps) ui.Element {
@@ -320,11 +284,7 @@ func uiDatePicker(c *ui.Context, value *time.Time, p datePickerProps) ui.Element
 	var trigger ui.Element
 	box.Children(func() {
 		trigger = styleFieldRow(ui.ButtonBase(c), tk, p.Size).Grow(1).Gap(8).Cursor(ui.CursorPointer).FocusRing(false)
-		if p.Disabled {
-			trigger.Disabled(true).Cursor(ui.CursorNotAllowed)
-			box.Opacity(0.5)
-		}
-		clearable := p.AllowClear && !value.IsZero() && !p.Disabled
+		clearable := p.AllowClear && !value.IsZero()
 		trigger.Children(func() {
 			if value.IsZero() {
 				ui.Text(c, placeholder).TextColor(tk.TextPlaceholder).Grow(1).SingleLine()
@@ -336,7 +296,7 @@ func uiDatePicker(c *ui.Context, value *time.Time, p datePickerProps) ui.Element
 				icon.Opacity(0)
 			}
 		})
-		styleField(trigger, tk, p.Variant, false, *open || trigger.Focused())
+		styleField(trigger, tk, inputOutlined, false, *open || trigger.Focused())
 		if clearable {
 			x := ui.ButtonBase(c).Label("Clear").Absolute().Right(10).Top(0).Bottom(0).Width(16).Radius(8).Center().
 				Cursor(ui.CursorPointer).TextColor(tk.TextTertiary)
@@ -347,9 +307,6 @@ func uiDatePicker(c *ui.Context, value *time.Time, p datePickerProps) ui.Element
 				*value = time.Time{}
 			}
 			x.Children(func() { ui.Icon(c, iconCircleX()).FontSize(14) })
-		}
-		if p.Disabled {
-			return
 		}
 		before := *value
 		panel := uiPopover(c, trigger, open, popoverProps{Placement: placementBottom}, func() {
