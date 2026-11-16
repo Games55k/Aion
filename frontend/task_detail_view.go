@@ -416,7 +416,6 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 		// Progress Bar
 		if totalCount > 0 {
 			uiProgress(c, pct, progressProps{
-				Size:     sizeSmall,
 				ShowInfo: true,
 				Format:   formatProgressPercent,
 			})

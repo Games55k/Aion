@@ -4073,3 +4073,58 @@ func TestJobGlobalRecycleBinAndRestoreCompatibility(t *testing.T) {
 	}
 }
 
+// Progress bars on project overview and task detail update percentages as tasks and subtasks complete.
+func TestProgressUpdatesWithCompletion(t *testing.T) {
+	dataDir := t.TempDir()
+	_, wb, tt := openTestWorkbench(t, dataDir, Host{})
+
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "进度验证项目"
+	wb.SubmitProjectModal()
+	projID := wb.activeProjectID
+
+	t1, err := wb.QuickCreateTask(model.Planned, "任务一")
+	if err != nil {
+		t.Fatalf("QuickCreateTask 1: %v", err)
+	}
+	if _, err := wb.QuickCreateTask(model.Done, "任务二"); err != nil {
+		t.Fatalf("QuickCreateTask 2: %v", err)
+	}
+
+	wb.NavigateTo(NavAllProjects)
+	tt.Frame()
+	if !tt.HasText("50%") {
+		t.Fatalf("expected 50%% project completion on overview, texts=%v", tt.Texts())
+	}
+
+	wb.SelectProject(projID)
+	wb.SelectTask(t1.ID)
+	tt.Frame()
+
+	wb.newSubtaskTitle = "子任务 A"
+	if err := tt.Click("添加子任务"); err != nil {
+		t.Fatalf("add subtask A: %v", err)
+	}
+	wb.newSubtaskTitle = "子任务 B"
+	if err := tt.Click("添加子任务"); err != nil {
+		t.Fatalf("add subtask B: %v", err)
+	}
+	if !tt.HasText("0%") {
+		t.Fatalf("expected 0%% subtask progress initially")
+	}
+
+	if err := tt.Click("勾选子任务 子任务 A"); err != nil {
+		t.Fatalf("check subtask A: %v", err)
+	}
+	if !tt.HasText("50%") {
+		t.Fatalf("expected 50%% subtask progress after checking 1/2")
+	}
+
+	if err := tt.Click("勾选子任务 子任务 B"); err != nil {
+		t.Fatalf("check subtask B: %v", err)
+	}
+	if !tt.HasText("100%") {
+		t.Fatalf("expected 100%% subtask progress after checking 2/2")
+	}
+}
+

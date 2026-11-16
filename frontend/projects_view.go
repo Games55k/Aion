@@ -220,7 +220,6 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Proje
 				if sum.Total > 0 {
 					ui.Box(c).Width(140).Children(func() {
 						uiProgress(c, pct, progressProps{
-							Size:     sizeSmall,
 							ShowInfo: true,
 							Format:   formatProgressPercent,
 						})
