@@ -128,7 +128,7 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 	tk := tokensOf(c)
 	focusNow := false
 	if p.ShortKey != "" {
-		if mods, key, ok := hotkeyBinding(p.ShortKey, hotkeyAuto); ok && c.Shortcut(mods, key) {
+		if mods, key, ok := hotkeyBinding(p.ShortKey); ok && c.Shortcut(mods, key) {
 			focusNow = true
 		}
 	}
@@ -147,7 +147,7 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 			input.Focus()
 		}
 		if p.ShortKey != "" {
-			if mods, key, ok := hotkeyBinding(p.ShortKey, hotkeyAuto); ok {
+			if mods, key, ok := hotkeyBinding(p.ShortKey); ok {
 				input.KeyShortcuts(mods, key)
 			}
 		}
@@ -164,7 +164,7 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 			}
 			clearBtn.Children(func() { ui.Icon(c, iconCircleX()).FontSize(14) })
 		case p.ShortKey != "" && !input.Focused():
-			hk := uiHotkey(c, p.ShortKey, hotkeyProps{Compact: true, Size: p.Size}).TextColor(tk.TextDescription)
+			hk := uiHotkey(c, p.ShortKey, hotkeyProps{Size: p.Size}).TextColor(tk.TextDescription)
 			if p.Size == sizeSmall {
 				hk.Margin(0, -4, 0, 0)
 			}

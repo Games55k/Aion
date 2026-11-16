@@ -18,19 +18,17 @@ const (
 	tagFilled tagVariant = iota
 	tagOutlined
 	tagBorderless
-	tagSolid
 )
 
 type tagColor string
 
 const (
-	tagRed      tagColor = "red"
-	tagOrange   tagColor = "orange"
-	tagGreen    tagColor = "green"
-	tagCyan     tagColor = "cyan"
-	tagBlue     tagColor = "blue"
-	tagPurple   tagColor = "purple"
-	tagGray     tagColor = "gray"
+	tagOrange tagColor = "orange"
+	tagGreen  tagColor = "green"
+	tagCyan   tagColor = "cyan"
+	tagBlue   tagColor = "blue"
+	tagPurple tagColor = "purple"
+	tagGray   tagColor = "gray"
 
 	tagError      tagColor = "error"
 	tagWarning    tagColor = "warning"
@@ -40,13 +38,10 @@ const (
 )
 
 type tagProps struct {
-	Variant  tagVariant
-	Color    tagColor
-	Size     uiSize
-	Round    bool
-	Icon     *ui.SVG
-	Closable bool
-	OnClose  func()
+	Variant tagVariant
+	Color   tagColor
+	Size    uiSize
+	Round   bool
 }
 
 type tagColors struct {
@@ -57,8 +52,6 @@ type tagColors struct {
 func uiTag(c *ui.Context, label string, p tagProps) ui.Element {
 	tk := tokensOf(c)
 	tag := ui.Row(c).Gap(5).FontSize(tk.FontSizeSM)
-	closed := ui.Local(tag, "closed", func() bool { return false })
-	tag.Hidden(*closed)
 
 	height, padding, radius := tagSize(p.Size, p.Round)
 	tag.Height(height).PaddingX(padding).Radius(radius)
@@ -90,42 +83,18 @@ func uiTag(c *ui.Context, label string, p tagProps) ui.Element {
 	tag.TextColor(text)
 
 	tag.Children(func() {
-		if p.Icon != nil {
-			ui.Icon(c, p.Icon)
-		}
 		ui.Text(c, label).SingleLine()
-		if p.Closable {
-			closeButton := ui.ButtonBase(c).Label("Close").Cursor(ui.CursorPointer)
-			glyph := tk.Icon
-			if closeButton.Hovered() {
-				glyph = tk.TextHeading
-			}
-			closeButton.TextColor(glyph).Children(func() { ui.Icon(c, iconX()).FontSize(10) })
-			if closeButton.Clicked() {
-				*closed = true
-				tag.Hidden(true)
-				if p.OnClose != nil {
-					p.OnClose()
-				}
-			}
-		}
 	})
 	return tag
 }
 
 func tagSize(s uiSize, round bool) (height, padding, radius float32) {
-	switch s {
-	case sizeSmall:
+	if s == sizeSmall {
 		height, padding, radius = 20, 4, 3
 		if round {
 			padding = 8
 		}
-	case sizeLarge:
-		height, padding, radius = 28, 12, 6
-		if round {
-			padding = 14
-		}
-	default:
+	} else {
 		height, padding, radius = 22, 8, 3
 		if round {
 			padding = 10
@@ -138,8 +107,8 @@ func tagSize(s uiSize, round bool) (height, padding, radius float32) {
 }
 
 func tagColorsFor(tk *uiTokens, color tagColor, v tagVariant) tagColors {
-	solid, borderless, filled := v == tagSolid, v == tagBorderless, v == tagFilled
-	tinted := func(base, text, fillTertiary, fillQuaternary ui.Color) tagColors {
+	borderless, filled := v == tagBorderless, v == tagFilled
+	tinted := func(text, fillTertiary, fillQuaternary ui.Color) tagColors {
 		out := tagColors{hasText: true, text: text, bg: fillTertiary, border: fillTertiary}
 		if filled {
 			out.border = fillQuaternary
@@ -147,34 +116,19 @@ func tagColorsFor(tk *uiTokens, color tagColor, v tagVariant) tagColors {
 		if borderless {
 			out.bg = ui.Transparent
 		}
-		if solid {
-			out = tagColors{hasText: true, text: readableOn(base), bg: base, border: base}
-		}
 		return out
 	}
 
-	if strings.HasPrefix(string(color), "#") {
-		hex := ui.Hex(string(color))
-		switch {
-		case solid:
-			return tagColors{hasText: true, text: readableOn(hex), bg: hex, border: hex}
-		case borderless:
-			return tagColors{hasText: true, text: hex}
-		}
-		return tagColors{hasText: true, text: tk.BgLayout, bg: hex}
-	}
-
 	if status, ok := tagStatus(tk, color); ok {
-		return tinted(status[0], status[0], status[1], status[2])
+		return tinted(status[0], status[1], status[2])
 	}
 	if name := string(color); name != "" {
-		base, okBase := tk.Color(strings.ToUpper(name[:1]) + name[1:])
-		if okBase {
+		if _, okBase := tk.Color(strings.ToUpper(name[:1]) + name[1:]); okBase {
 			title := strings.ToUpper(name[:1]) + name[1:]
 			active, _ := tk.Color(title + "Active")
 			fill3, _ := tk.Color(title + "FillTertiary")
 			fill4, _ := tk.Color(title + "FillQuaternary")
-			return tinted(base, active, fill3, fill4)
+			return tinted(active, fill3, fill4)
 		}
 	}
 	return tagColors{}
@@ -194,57 +148,14 @@ func tagStatus(tk *uiTokens, color tagColor) ([3]ui.Color, bool) {
 	return [3]ui.Color{}, false
 }
 
-func readableOn(bg ui.Color) ui.Color {
-	if oklabLightness(bg) > 0.62 {
-		return ui.RGB(0, 0, 0)
-	}
-	return ui.RGB(255, 255, 255)
-}
-
-func oklabLightness(c ui.Color) float64 {
-	lin := func(v uint8) float64 {
-		x := float64(v) / 255
-		if x <= 0.04045 {
-			return x / 12.92
-		}
-		return math.Pow((x+0.055)/1.055, 2.4)
-	}
-	r, g, b := lin(c.R), lin(c.G), lin(c.B)
-	l := math.Cbrt(0.4122214708*r + 0.5363325363*g + 0.0514459929*b)
-	m := math.Cbrt(0.2119034982*r + 0.6806995451*g + 0.1073969566*b)
-	s := math.Cbrt(0.0883024619*r + 0.2817188376*g + 0.6299787005*b)
-	return 0.2104542553*l + 0.7936177850*m - 0.0040720468*s
-}
-
 type emptyProps struct {
 	Icon               *ui.SVG
 	Title, Description string
 	Action             func()
-	Page               bool
 }
 
 func uiEmpty(c *ui.Context, p emptyProps) ui.Element {
 	tk := tokensOf(c)
-	if p.Page {
-		root := ui.Row(c).Padding(8).Gap(20).AlignItems(ui.Start).FillWidth()
-		root.Children(func() {
-			if p.Icon != nil {
-				ui.Icon(c, p.Icon).FontSize(36).TextColor(tk.TextQuaternary).Shrink(0)
-			}
-			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				if p.Title != "" {
-					ui.Text(c, p.Title).FontSize(18).FontWeight(600).TextColor(tk.Text).Margin(0, 0, 4, 0)
-				}
-				if p.Description != "" {
-					ui.Text(c, p.Description).FontSize(13).TextColor(tk.TextTertiary).MaxWidth(13 * 0.55 * 52)
-				}
-				if p.Action != nil {
-					ui.Row(c).Gap(8).Margin(14, 0, 0, 0).Children(p.Action)
-				}
-			})
-		})
-		return root
-	}
 	root := ui.Column(c).Gap(4).Padding(16, 8).AlignItems(ui.Center).FillWidth()
 	root.Children(func() {
 		if p.Icon != nil {
@@ -263,32 +174,17 @@ func uiEmpty(c *ui.Context, p emptyProps) ui.Element {
 	return root
 }
 
-type listVariant int
-
-const (
-	listBorderless listVariant = iota
-	listFilled
-	listOutlined
-)
-
 type listItem struct {
-	Key                string
-	Label, Description string
-	Icon               *ui.SVG
-	Avatar             func()
-	Extra              string
-	Actions            func()
-	ShowAction         bool
-	Danger             bool
-	Disabled           bool
-	Divider            bool
+	Key     string
+	Label   string
+	Icon    *ui.SVG
+	Extra   string
+	Actions func()
 }
 
 type listProps struct {
 	Items     []listItem
 	Active    string
-	Variant   listVariant
-	Compact   bool
 	Collapse  float32
 	RailWidth float32
 }
@@ -298,19 +194,9 @@ var listTransition = ui.ElementTransition{Duration: 150 * time.Millisecond, Ease
 func uiList(c *ui.Context, p listProps) string {
 	tk := tokensOf(c)
 	root := ui.Column(c).Gap(2).AlignSelf(ui.Stretch)
-	switch p.Variant {
-	case listFilled:
-		root.Padding(4).Radius(tk.BorderRadiusLG).Background(tk.FillQuaternary)
-	case listOutlined:
-		root.Padding(4).Radius(tk.BorderRadiusLG).Border(1, tk.BorderSecondary)
-	}
 	clicked := ""
 	root.Children(func() {
-		for i, it := range p.Items {
-			if it.Divider {
-				ui.Box(c.Key(i)).Height(1).Margin(4, 0).AlignSelf(ui.Stretch).Background(tk.BorderSecondary)
-				continue
-			}
+		for _, it := range p.Items {
 			if listRow(c.Key(it.Key), tk, it, it.Key == p.Active, p, root.LayoutBounds().W) {
 				clicked = it.Key
 			}
@@ -323,19 +209,13 @@ func listRow(c *ui.Context, tk *uiTokens, it listItem, active bool, p listProps,
 	clicked := false
 	cell := ui.Box(c).AlignSelf(ui.Stretch)
 	cell.Children(func() {
-		row := ui.ButtonBase(c).Label(it.Label).Disabled(it.Disabled).Row().Gap(12).AlignItems(ui.Center).
+		row := ui.ButtonBase(c).Label(it.Label).Row().Gap(12).AlignItems(ui.Center).
 			Justify(ui.Start).MinHeight(32).PaddingY(6).PaddingX(12).Radius(tk.BorderRadius).
 			FontSize(14).AlignSelf(ui.Stretch).Transition(listTransition)
-		pad := float32(12)
-		if p.Compact {
-			pad = 8
-			row.PaddingX(8)
-		}
+		const pad = float32(12)
 		k := min(max(p.Collapse, 0), 1)
 		fg := tk.TextSecondary
 		switch {
-		case it.Disabled:
-			row.Opacity(0.45).Cursor(ui.CursorNotAllowed)
 		case active:
 			fg = tk.Text
 			row.Background(tk.FillSecondary).Cursor(ui.CursorPointer)
@@ -345,17 +225,11 @@ func listRow(c *ui.Context, tk *uiTokens, it listItem, active bool, p listProps,
 		default:
 			row.Cursor(ui.CursorPointer)
 		}
-		if it.Danger {
-			fg = tk.Error
-		}
 		row.TextColor(fg)
 		var lead ui.Element
 		row.Children(func() {
 			lead = ui.Row(c).Shrink(0).Children(func() {
-				switch {
-				case it.Avatar != nil:
-					it.Avatar()
-				case it.Icon != nil:
+				if it.Icon != nil {
 					ui.Icon(c, it.Icon).FontSize(16)
 				}
 			})
@@ -368,9 +242,6 @@ func listRow(c *ui.Context, tk *uiTokens, it listItem, active bool, p listProps,
 				if active {
 					label.FontWeight(500)
 				}
-				if it.Description != "" {
-					ui.Text(c, it.Description).SingleLine().FontSize(12).LineHeight(1.4).TextColor(tk.TextDescription)
-				}
 			})
 			if it.Extra != "" && k < 1 {
 				ui.Text(c, it.Extra).FontSize(12).TextColor(tk.TextDescription).Shrink(0).Opacity(1 - k)
@@ -380,7 +251,7 @@ func listRow(c *ui.Context, tk *uiTokens, it listItem, active bool, p listProps,
 			railRow(c, row, lead, k, pad, p.RailWidth, width)
 		}
 		clicked = row.Clicked()
-		if it.Actions != nil && (it.ShowAction || cell.Hovered() || cell.FocusWithin()) {
+		if it.Actions != nil && (cell.Hovered() || cell.FocusWithin()) {
 			ui.Row(c).Absolute().Right(8).Top(0).Bottom(0).Gap(4).AlignItems(ui.Center).Children(it.Actions)
 		}
 	})
@@ -405,13 +276,11 @@ type skeletonAnimation int
 
 const (
 	skeletonFade skeletonAnimation = iota
-	skeletonSweep
 	skeletonStatic
 )
 
 type skeletonProps struct {
 	Width, Height float32
-	Circle        bool
 	Animation     skeletonAnimation
 }
 
@@ -428,84 +297,40 @@ func uiSkeleton(c *ui.Context, p skeletonProps) ui.Element {
 		h = tk.FontSize
 	}
 	e.Height(h)
-	if p.Circle {
-		e.Radius(h / 2)
-	}
-	switch p.Animation {
-	case skeletonFade:
+	if p.Animation == skeletonFade {
 		e.Opacity(1 - 0.5*e.Loop("fade", 1600*time.Millisecond, ui.Bounce(ui.EaseInOut)))
-	case skeletonSweep:
-		e.Clip().Children(func() {
-			at := e.Loop("sweep", 1400*time.Millisecond, cssEase)
-			ui.Box(c).Absolute().Fill().TranslatePercent(200*at-100, 0).
-				LinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-					{Color: ui.Transparent, At: 0}, {Color: tk.Fill, At: 0.5}, {Color: ui.Transparent, At: 1},
-				}})
-		})
 	}
 	return e
 }
 
-type hotkeyVariant int
-
-const (
-	hotkeyFilled hotkeyVariant = iota
-	hotkeyOutlined
-	hotkeyBorderless
-)
-
-type hotkeyPlatform int
-
-const (
-	hotkeyAuto hotkeyPlatform = iota
-	hotkeyApple
-	hotkeyOther
-)
-
 type hotkeyProps struct {
-	Variant  hotkeyVariant
-	Compact  bool
-	Size     uiSize
-	Platform hotkeyPlatform
+	Size uiSize
 }
 
 var isApple = sync.OnceValue(appleDevice)
 
 func appleDevice() bool { return runtime.GOOS == "darwin" || runtime.GOOS == "ios" }
 
-func browserOnMac() bool { return false }
-
 func uiHotkey(c *ui.Context, keys string, p hotkeyProps) ui.Element {
 	tk := tokensOf(c)
-	apple := p.Platform == hotkeyApple || p.Platform == hotkeyAuto && isApple()
+	apple := isApple()
 	parts := splitHotkeyParts(keys)
-	joined := p.Compact || p.Variant == hotkeyBorderless
-	gap := float32(2)
-	if p.Variant == hotkeyBorderless {
-		gap = 6
-	}
-	root := ui.Row(c).Gap(gap).AlignItems(ui.Center).Shrink(0)
+	root := ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0)
 	root.Children(func() {
-		if joined {
-			capGap := float32(6)
-			if p.Size == sizeSmall {
-				capGap = 4
+		capGap := float32(6)
+		if p.Size == sizeSmall {
+			capGap = 4
+		}
+		hotkeyCap(c, tk, p.Size).Gap(capGap).Children(func() {
+			for i, k := range parts {
+				hotkeyKey(c.Key(i), k, apple, p.Size)
 			}
-			hotkeyCap(c, tk, p.Variant, p.Size).Gap(capGap).Children(func() {
-				for i, k := range parts {
-					hotkeyKey(c.Key(i), k, apple, p.Size)
-				}
-			})
-			return
-		}
-		for i, k := range parts {
-			hotkeyCap(c.Key(i), tk, p.Variant, p.Size).Children(func() { hotkeyKey(c, k, apple, p.Size) })
-		}
+		})
 	})
 	return root
 }
 
-func hotkeyCap(c *ui.Context, tk *uiTokens, v hotkeyVariant, size uiSize) ui.Element {
+func hotkeyCap(c *ui.Context, tk *uiTokens, size uiSize) ui.Element {
 	font := float32(12)
 	height := font * 1.8
 	padX := float32(8)
@@ -514,17 +339,9 @@ func hotkeyCap(c *ui.Context, tk *uiTokens, v hotkeyVariant, size uiSize) ui.Ele
 		height = 16
 		padX = 6
 	}
-	e := ui.Row(c).AlignItems(ui.Center).Justify(ui.Center).Height(height).MinWidth(height).
-		PaddingX(padX).Radius(tk.BorderRadiusSM).FontSize(font).LineHeight(1.1).TextColor(tk.TextSecondary).Shrink(0)
-	switch v {
-	case hotkeyOutlined:
-		e.Border(1, tk.BorderSecondary)
-	case hotkeyBorderless:
-		e.PaddingX(4)
-	default:
-		e.Background(tk.FillTertiary)
-	}
-	return e
+	return ui.Row(c).AlignItems(ui.Center).Justify(ui.Center).Height(height).MinWidth(height).
+		PaddingX(padX).Radius(tk.BorderRadiusSM).FontSize(font).LineHeight(1.1).TextColor(tk.TextSecondary).
+		Background(tk.FillTertiary).Shrink(0)
 }
 
 type keyNameSpec struct {
@@ -601,24 +418,8 @@ func startCase(s string) string {
 	return string(r)
 }
 
-func hotkeyBinding(keys string, platform hotkeyPlatform) (ui.Modifiers, ui.Key, bool) {
-	mods, key, ok := parseHotkey(keys, platform == hotkeyApple || platform == hotkeyAuto && isApple())
-	return swapCmd(mods, browserOnMac()), key, ok
-}
-
-func swapCmd(m ui.Modifiers, swap bool) ui.Modifiers {
-	if !swap {
-		return m
-	}
-	ctrl, super := m&ui.Ctrl != 0, m&ui.Super != 0
-	m &^= ui.Ctrl | ui.Super
-	if ctrl {
-		m |= ui.Super
-	}
-	if super {
-		m |= ui.Ctrl
-	}
-	return m
+func hotkeyBinding(keys string) (ui.Modifiers, ui.Key, bool) {
+	return parseHotkey(keys, isApple())
 }
 
 var namedKeys = map[string]ui.Key{
@@ -670,26 +471,12 @@ func parseHotkey(keys string, apple bool) (ui.Modifiers, ui.Key, bool) {
 	return mods, key, found
 }
 
-type imageVariant int
-
-const (
-	imageFilled imageVariant = iota
-	imageOutlined
-	imageBorderless
-)
-
 type imageProps struct {
-	Width, Height, Size float32
-	Contain             bool
-	Variant             imageVariant
-	Loading             bool
-	Failed              bool
-	NoPreview           bool
-	Alt                 string
-	Actions             func()
-	AlwaysShowActions   bool
-	OnDownload          func(src ui.ImageSource)
-	Gallery             *imageGallery
+	Width, Height float32
+	Loading       bool
+	Failed        bool
+	Alt           string
+	Gallery       *imageGallery
 }
 
 type imageGallery struct {
@@ -715,16 +502,10 @@ var (
 func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 	tk := tokensOf(c)
 	w, h := p.Width, p.Height
-	if w == 0 {
-		w = p.Size
-	}
-	if h == 0 {
-		h = p.Size
-	}
 	if p.Loading {
 		return uiSkeleton(c, skeletonProps{Width: w, Height: h})
 	}
-	previewable := !p.NoPreview && src != nil && !p.Failed
+	previewable := src != nil && !p.Failed
 	var root ui.Element
 	if previewable {
 		root = ui.ButtonBase(c).Column().Cursor(ui.CursorZoomIn)
@@ -744,18 +525,12 @@ func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 	if w == 0 && h == 0 {
 		root.MaxWidthPercent(100)
 	}
-	switch p.Variant {
-	case imageOutlined:
-		root.Border(1, tk.BorderSecondary).Background(tk.BgContainer)
-	case imageBorderless:
-	default:
-		root.Border(1, tk.BorderSecondary).Background(tk.FillTertiary)
-	}
+	root.Border(1, tk.BorderSecondary).Background(tk.FillTertiary)
 
 	v, index := ui.Local(root, "viewer", func() imageViewer { return imageViewer{} }), 0
 	if p.Gallery != nil {
 		v, index = &p.Gallery.viewer, len(p.Gallery.items)
-		p.Gallery.items = append(p.Gallery.items, viewerItem{src: src, alt: p.Alt, onDownload: p.OnDownload, bounds: root.Bounds()})
+		p.Gallery.items = append(p.Gallery.items, viewerItem{src: src, alt: p.Alt, bounds: root.Bounds()})
 	}
 	if previewable && root.Clicked() {
 		v.openAt(index, root.Bounds())
@@ -766,9 +541,6 @@ func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 			imageFallback(c, tk, w, h)
 		default:
 			img := ui.Image(c, src).Fit(ui.Cover)
-			if p.Contain {
-				img.Fit(ui.Contain)
-			}
 			if w > 0 || h > 0 {
 				img.Fill()
 			} else {
@@ -778,12 +550,9 @@ func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 				img.Opacity(0)
 			}
 		}
-		if p.Actions != nil && (p.AlwaysShowActions || root.Hovered() || root.FocusWithin()) {
-			ui.Row(c).Absolute().Top(0).Right(0).ZIndex(1).Children(p.Actions)
-		}
 	})
 	if previewable && p.Gallery == nil {
-		v.build(c, tk, root, []viewerItem{{src: src, alt: p.Alt, onDownload: p.OnDownload, bounds: root.Bounds()}})
+		v.build(c, tk, root, []viewerItem{{src: src, alt: p.Alt, bounds: root.Bounds()}})
 	}
 	return root
 }
@@ -824,10 +593,9 @@ var (
 )
 
 type viewerItem struct {
-	src        ui.ImageSource
-	alt        string
-	onDownload func(ui.ImageSource)
-	bounds     ui.Rect
+	src    ui.ImageSource
+	alt    string
+	bounds ui.Rect
 }
 
 type imageViewer struct {
@@ -1139,9 +907,6 @@ func (v *imageViewer) chrome(c *ui.Context, tk *uiTokens, items []viewerItem, fi
 						v.reset()
 					}
 				}
-			}
-			if item.onDownload != nil && icon(iconDownload(), "Download") {
-				item.onDownload(item.src)
 			}
 		})
 	})

@@ -89,7 +89,7 @@ func uiTooltip(c *ui.Context, anchor ui.Element, text string, p tooltipProps) ui
 			ui.Row(c.Key(text)).Gap(6).Transition(tipContentTransition).Children(func() {
 				ui.Text(c, text)
 				if p.Hotkey != "" {
-					uiHotkey(c, p.Hotkey, hotkeyProps{Compact: true})
+					uiHotkey(c, p.Hotkey, hotkeyProps{})
 				}
 			})
 		})
@@ -157,7 +157,7 @@ func renderMenuItem(c *ui.Context, tk *uiTokens, m ui.MenuParts, it menuItem) ui
 				ui.Text(c, it.Extra).Font("monospace").FontSize(12).TextColor(tk.TextTertiary).Padding(0, 0, 0, 16).SingleLine()
 			}
 			if it.Hotkey != "" {
-				uiHotkey(c, it.Hotkey, hotkeyProps{Compact: true}).Margin(-2, -7, -2, 16)
+				uiHotkey(c, it.Hotkey, hotkeyProps{}).Margin(-2, -7, -2, 16)
 			}
 		})
 	})
