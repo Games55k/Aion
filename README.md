@@ -111,6 +111,8 @@ go test ./frontend -run TestVisualSnapshotRender
 
 ## 开发
 
+待实施方案：[开发自动化与 UI 封装精简](docs/plans/automation-and-ui-simplification.md)，按“开发用 Automation → 未使用 UI 能力清理”的顺序推进；其中的 Automation 命令需在接入完成后使用。
+
 | 命令 | 用途 |
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
@@ -125,6 +127,7 @@ Aion/
 ├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
+├── docs/plans/                             # 待实施方案与验收安排（状态以各文档为准）
 ├── .github/
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
