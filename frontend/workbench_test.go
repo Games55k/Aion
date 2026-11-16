@@ -4128,3 +4128,54 @@ func TestProgressUpdatesWithCompletion(t *testing.T) {
 	}
 }
 
+// Task Markdown preview and split mode render headings, copyable code blocks, and collapsible blocks.
+func TestTaskMarkdownPreviewAndCodeBlock(t *testing.T) {
+	dataDir := t.TempDir()
+	_, wb, tt := openTestWorkbench(t, dataDir, Host{})
+
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "Markdown 预览项目"
+	wb.SubmitProjectModal()
+
+	task, err := wb.QuickCreateTask(model.Planned, "文档任务")
+	if err != nil {
+		t.Fatalf("QuickCreateTask: %v", err)
+	}
+	wb.SelectTask(task.ID)
+	tt.Frame()
+
+	wb.editDescription = "# 标题\n\n```go\nfmt.Println(\"hello\")\n```"
+	if err := wb.SaveSelectedTask(); err != nil {
+		t.Fatalf("SaveSelectedTask: %v", err)
+	}
+	tt.Frame()
+
+	if err := tt.Click("预览"); err != nil {
+		t.Fatalf("click 预览: %v", err)
+	}
+	if !tt.HasText("标题") || !tt.HasText("Go") {
+		t.Fatalf("expected rendered Markdown heading and Go language header, texts=%v", tt.Texts())
+	}
+
+	if err := tt.Click("Copy"); err != nil {
+		t.Fatalf("click Copy: %v", err)
+	}
+	if got := tt.Clipboard(); got != "fmt.Println(\"hello\")" {
+		t.Fatalf("expected copied code block, got %q", got)
+	}
+
+	if err := tt.Click("Collapse"); err != nil {
+		t.Fatalf("click Collapse: %v", err)
+	}
+	if _, ok := tt.Find("Expand"); !ok {
+		t.Fatalf("expected code block toggle to switch to Expand after collapsing")
+	}
+
+	if err := tt.Click("分栏"); err != nil {
+		t.Fatalf("click 分栏: %v", err)
+	}
+	if !tt.HasText("标题") {
+		t.Fatalf("expected split preview to render Markdown heading")
+	}
+}
+

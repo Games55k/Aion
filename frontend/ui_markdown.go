@@ -2,46 +2,11 @@ package frontend
 
 import (
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 	mmd "github.com/egoist/mygo/ui/markdown"
 )
-
-type codeVariant int
-
-const (
-	codeFilled codeVariant = iota
-	codeOutlined
-	codeBorderless
-)
-
-type highlighterProps struct {
-	Language         string
-	Variant          codeVariant
-	NoCopy           bool
-	HideLanguage     bool
-	Wrap             bool
-	Shadow           bool
-	FullFeatured     bool
-	FileName         string
-	DefaultCollapsed bool
-	Actions          func()
-	FontSize         float32
-}
-
-type snippetProps struct {
-	Language string
-	Prefix   string
-	Variant  codeVariant
-	NoCopy   bool
-	Shadow   bool
-	FontSize float32
-}
-
-var codeChromeFade = ui.Animation{Duration: 200 * time.Millisecond, Ease: easeOut}
 
 type highlightedCode struct {
 	src, lang string
@@ -110,88 +75,6 @@ func codeLanguageName(lang string) string {
 	return "Plaintext"
 }
 
-func uiHighlighter(c *ui.Context, src string, p highlighterProps) ui.Element {
-	tk := tokensOf(c)
-	src = strings.TrimRight(strings.TrimLeft(src, "\r\n"), " \t\r\n")
-	root := ui.Column(c).AlignSelf(ui.Stretch).Radius(tk.BorderRadius).Clip().Role(ui.RoleGroup).Label(codeGroupLabel(p.Language))
-	switch p.Variant {
-	case codeFilled:
-		root.Background(tk.FillQuaternary)
-	case codeOutlined:
-		root.Border(1, tk.BorderSecondary)
-	}
-	if p.Shadow {
-		tk.Elevate(root, boxShadowSecondary)
-	}
-	hl := ui.Local(root, "spans", func() highlightedCode { return highlightedCode{} })
-	if hl.src != src || hl.lang != p.Language || hl.dark != tk.Dark {
-		*hl = highlightedCode{src: src, lang: p.Language, dark: tk.Dark, spans: codeSpans(codeTheme(tk), p.Language, src)}
-	}
-	if p.FullFeatured {
-		fullFeaturedCode(c, tk, root, src, hl.spans, p)
-		return root
-	}
-	shown := float32(0)
-	if root.Hovered() {
-		shown = 1
-	}
-	opacity := root.AnimateTo("chrome", shown, codeChromeFade)
-	root.Children(func() {
-		codeBody(c, hl.spans, p.Wrap, p.FontSize)
-		if !p.NoCopy || p.Actions != nil {
-			ui.Row(c).Absolute().Top(8).Right(8).Gap(4).AlignItems(ui.Center).Opacity(opacity).Children(func() {
-				codeActions(c, src, p)
-			})
-		}
-		if !p.HideLanguage && p.Language != "" {
-			uiTag(c, codeLanguageName(p.Language), tagProps{}).Absolute().Bottom(8).Right(8).
-				Font("monospace").TextColor(tk.TextSecondary).Background(tk.FillQuaternary).Opacity(opacity)
-		}
-	})
-	return root
-}
-
-func uiSnippet(c *ui.Context, src string, p snippetProps) ui.Element {
-	tk := tokensOf(c)
-	src = strings.TrimSpace(src)
-	root := ui.Row(c).AlignItems(ui.Center).Gap(8).Height(38).Padding(0, 8, 0, 12).
-		Radius(tk.BorderRadius).Clip().Role(ui.RoleGroup).Label(codeGroupLabel(p.Language))
-	switch p.Variant {
-	case codeFilled:
-		root.Background(tk.FillTertiary)
-	case codeOutlined:
-		root.Border(1, tk.BorderSecondary)
-	}
-	if p.Shadow {
-		tk.Elevate(root, boxShadowSecondary)
-	}
-	shown := src
-	if p.Prefix != "" {
-		shown = p.Prefix + " " + src
-	}
-	hl := ui.Local(root, "spans", func() highlightedCode { return highlightedCode{} })
-	if hl.src != shown || hl.lang != p.Language || hl.dark != tk.Dark {
-		*hl = highlightedCode{src: shown, lang: p.Language, dark: tk.Dark, spans: codeSpans(codeTheme(tk), p.Language, shown)}
-	}
-	return root.Children(func() {
-		ui.ScrollHorizontal(c).Grow(1).MinWidth(0).Font("monospace").FontSize(codeFontSize(p.FontSize)).TabSize(4).Children(func() {
-			ui.RichText(c, hl.spans...)
-		})
-		if !p.NoCopy {
-			uiCopyButton(c, src, copyButtonProps{Size: sizeSmall}).Shrink(0)
-		}
-	})
-}
-
-func codeActions(c *ui.Context, src string, p highlighterProps) {
-	if p.Actions != nil {
-		p.Actions()
-	}
-	if !p.NoCopy {
-		uiCopyButton(c, src, copyButtonProps{Size: sizeSmall})
-	}
-}
-
 func codeGroupLabel(lang string) string {
 	if lang == "" {
 		return "Code"
@@ -199,60 +82,30 @@ func codeGroupLabel(lang string) string {
 	return "Code, " + codeLanguageName(lang)
 }
 
-func codeFontSize(size float32) float32 {
-	if size <= 0 {
-		return 12
+func renderCodeBlock(c *ui.Context, tk *uiTokens, src, lang string, fontSize float32) ui.Element {
+	src = strings.TrimRight(strings.TrimLeft(src, "\r\n"), " \t\r\n")
+	root := ui.Column(c).AlignSelf(ui.Stretch).Radius(tk.BorderRadius).Clip().
+		Background(tk.FillQuaternary).Role(ui.RoleGroup).Label(codeGroupLabel(lang))
+	hl := ui.Local(root, "spans", func() highlightedCode { return highlightedCode{} })
+	if hl.src != src || hl.lang != lang || hl.dark != tk.Dark {
+		*hl = highlightedCode{src: src, lang: lang, dark: tk.Dark, spans: codeSpans(codeTheme(tk), lang, src)}
 	}
-	return size
-}
 
-func codeBody(c *ui.Context, spans []ui.Span, wrap bool, size float32) ui.Element {
-	var outer ui.Element
-	if wrap {
-		outer = ui.Column(c)
-	} else {
-		outer = ui.ScrollHorizontal(c)
-	}
-	outer.AlignSelf(ui.Stretch).Direction(ui.LeftToRight).Font("monospace").FontSize(codeFontSize(size)).LineHeight(1.8).TabSize(4)
-	return outer.Children(func() {
-		inner := ui.Column(c).Padding(16)
-		if !wrap {
-			inner.Shrink(0)
-		}
-		inner.Children(func() {
-			text := ui.RichText(c, spans...)
-			if !wrap {
-				text.NoWrap()
-			}
-		})
-	})
-}
-
-func fullFeaturedCode(c *ui.Context, tk *uiTokens, root ui.Element, src string, spans []ui.Span, p highlighterProps) {
-	open := ui.Local(root, "open", func() bool { return !p.DefaultCollapsed })
-	name := p.FileName
-	if name == "" {
-		name = codeLanguageName(p.Language)
-	}
+	open := ui.Local(root, "open", func() bool { return true })
+	name := codeLanguageName(lang)
 	label := "Collapse"
 	if !*open {
 		label = "Expand"
 	}
 	root.Children(func() {
 		var col ui.CollapsibleParts
-		head := ui.Row(c).AlignItems(ui.Center).Gap(4).Padding(4).AlignSelf(ui.Stretch)
-		if p.Variant == codeBorderless {
-			head.PaddingX(0)
-		}
-		head.Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(4).Padding(4).AlignSelf(ui.Stretch).Children(func() {
 			col = ui.CollapsibleBase(c, open)
 			col.Trigger.Row().Grow(1).MinWidth(0).AlignSelf(ui.Stretch).AlignItems(ui.Center).PaddingX(8).
 				Cursor(ui.CursorPointer).Label(name).Children(func() {
-				if !p.HideLanguage {
-					ui.Text(c, name).FontSize(13).SingleLine().TextColor(tk.Text)
-				}
+				ui.Text(c, name).FontSize(13).SingleLine().TextColor(tk.Text)
 			})
-			codeActions(c, src, p)
+			uiCopyButton(c, src, copyButtonProps{Size: sizeSmall})
 			chevron := iconChevronDown()
 			if !*open {
 				chevron = iconChevronRight()
@@ -263,78 +116,31 @@ func fullFeaturedCode(c *ui.Context, tk *uiTokens, root ui.Element, src string, 
 		})
 		progress := col.Progress()
 		col.Panel(func() {
-			panel := ui.Column(c).AlignSelf(ui.Stretch).Opacity(progress)
-			if p.Variant != codeBorderless {
-				panel.BorderWidth(1, 0, 0, 0).BorderColor(tk.FillQuaternary)
-			}
-			panel.Children(func() { codeBody(c, spans, p.Wrap, p.FontSize) })
+			ui.Column(c).AlignSelf(ui.Stretch).Opacity(progress).
+				BorderWidth(1, 0, 0, 0).BorderColor(tk.FillQuaternary).Children(func() {
+				ui.ScrollHorizontal(c).AlignSelf(ui.Stretch).Direction(ui.LeftToRight).
+					Font("monospace").FontSize(fontSize).LineHeight(1.8).TabSize(4).Children(func() {
+					ui.Column(c).Padding(16).Shrink(0).Children(func() {
+						ui.RichText(c, hl.spans...).NoWrap()
+					})
+				})
+			})
 		})
 	})
+	return root
 }
 
-type markdownVariant int
-
-const (
-	markdownDefault markdownVariant = iota
-	markdownChat
-)
-
-type markdownSmoothing int
-
-const (
-	mdBalanced markdownSmoothing = iota
-	mdRealtime
-	mdSilky
-)
-
-type markdownGranularity int
-
-const (
-	mdByChar markdownGranularity = iota
-	mdByWord
-)
-
-type markdownProps struct {
-	Variant               markdownVariant
-	FontSize              float32
-	HeaderMultiple        float32
-	MarginMultiple        float32
-	LineHeight            float32
-	FullFeaturedCodeBlock bool
-	OnLink                func(url string)
-	LoadImage             func(url string) (ui.ImageSource, error)
-	Animated              bool
-	Smoothing             markdownSmoothing
-	Granularity           markdownGranularity
-}
-
-type markdownScale struct {
-	fontSize, headerMultiple, marginMultiple, lineHeight float32
-}
-
-func markdownScaleOf(p markdownProps) markdownScale {
-	s := markdownScale{16, 1, 2, 1.8}
-	if p.Variant == markdownChat {
-		s = markdownScale{14, 0.25, 1, 1.6}
-	}
-	set := func(v *float32, o float32) {
-		if o > 0 {
-			*v = o
-		}
-	}
-	set(&s.fontSize, p.FontSize)
-	set(&s.headerMultiple, p.HeaderMultiple)
-	set(&s.marginMultiple, p.MarginMultiple)
-	set(&s.lineHeight, p.LineHeight)
-	return s
-}
-
-func markdownThemeFor(tk *uiTokens, p markdownProps) *mmd.Theme {
-	s := markdownScaleOf(p)
+func markdownThemeFor(tk *uiTokens) *mmd.Theme {
+	const (
+		fontSize       float32 = 14
+		headerMultiple float32 = 0.25
+		marginMultiple float32 = 1
+		lineHeight     float32 = 1.6
+	)
 	th := &mmd.Theme{
-		FontSize:         s.fontSize,
+		FontSize:         fontSize,
 		CodeFont:         "monospace",
-		LineHeight:       s.lineHeight,
+		LineHeight:       lineHeight,
 		Text:             tk.Text,
 		Muted:            tk.TextSecondary,
 		Link:             tk.InfoText,
@@ -343,8 +149,8 @@ func markdownThemeFor(tk *uiTokens, p markdownProps) *mmd.Theme {
 		Code:             tk.Text,
 		CodeBackground:   tk.FillSecondary,
 		CodeSize:         0.875,
-		BlockSpacing:     s.marginMultiple * 0.5,
-		ItemSpacing:      s.marginMultiple * 0.33,
+		BlockSpacing:     marginMultiple * 0.5,
+		ItemSpacing:      marginMultiple * 0.33,
 		QuoteBar:         tk.Border,
 		QuoteText:        tk.TextSecondary,
 		QuoteBarWidth:    4,
@@ -357,74 +163,35 @@ func markdownThemeFor(tk *uiTokens, p markdownProps) *mmd.Theme {
 	}
 	grow := [6]float32{1.5, 1, 0.5, 0.25, 0, 0}
 	for i := range th.Headings {
-		size := 1 + grow[i]*s.headerMultiple
-		room := max(s.headerMultiple*s.marginMultiple*0.4*size, 1)
+		size := 1 + grow[i]*headerMultiple
+		room := max(headerMultiple*marginMultiple*0.4*size, 1)
 		th.Headings[i] = mmd.HeadingStyle{Size: size, Weight: 700, Color: tk.Text, Top: room, Bottom: room}
 	}
 	return th
 }
 
-type markdownThemeKey struct {
-	dark bool
-	s    markdownScale
-}
-
 type markdownViewState struct {
 	opts mmd.Options
-	key  markdownThemeKey
+	dark bool
 	set  bool
 }
 
-func uiMarkdown(c *ui.Context, src string, p markdownProps) ui.Element {
+func uiMarkdown(c *ui.Context, src string) ui.Element {
 	tk := tokensOf(c)
 	root := ui.Column(c).AlignSelf(ui.Stretch)
 	v := ui.Local(root, "markdown", func() *markdownViewState { return &markdownViewState{} })
-	key := markdownThemeKey{dark: tk.Dark, s: markdownScaleOf(p)}
-	if !(*v).set || (*v).key != key {
-		(*v).opts.Theme = markdownThemeFor(tk, p)
-		(*v).key, (*v).set = key, true
+	if !(*v).set || (*v).dark != tk.Dark {
+		(*v).opts.Theme = markdownThemeFor(tk)
+		(*v).dark, (*v).set = tk.Dark, true
 	}
 	o := &(*v).opts
-	reveal := revealForMarkdown(p)
-	o.Reveal = &reveal
-	o.OnLink = p.OnLink
-	o.LoadImage = p.LoadImage
 	size := o.Theme.FontSize * 0.85
-	full := p.FullFeaturedCodeBlock
 	o.CodeBlock = func(c *ui.Context, b *mmd.CodeBlockView) {
-		codeSrc := b.Code()
-		if !full && singleLineCode(codeSrc) {
-			uiSnippet(c, codeSrc, snippetProps{Language: b.Language, FontSize: size})
-			return
-		}
-		uiHighlighter(c, codeSrc, highlighterProps{Language: b.Language, FullFeatured: full, FontSize: size})
+		renderCodeBlock(c, tokensOf(c), b.Code(), b.Language, size)
 	}
 	var md ui.Element
 	root.Children(func() {
-		if p.Animated {
-			md = mmd.Stream(c, src, o)
-		} else {
-			md = mmd.View(c, src, o)
-		}
+		md = mmd.View(c, src, o)
 	})
 	return md
-}
-
-func revealForMarkdown(p markdownProps) mmd.Reveal {
-	r := mmd.Reveal{Unit: mmd.ByCharacter, CatchUp: 120 * time.Millisecond, Fade: 300 * time.Millisecond}
-	switch p.Smoothing {
-	case mdRealtime:
-		r.CatchUp = 40 * time.Millisecond
-	case mdSilky:
-		r.CatchUp = 170 * time.Millisecond
-	}
-	if p.Granularity == mdByWord {
-		r.Unit = mmd.ByWord
-	}
-	return r
-}
-
-func singleLineCode(src string) bool {
-	src = strings.TrimRight(src, "\n")
-	return !strings.Contains(src, "\n") && utf8.RuneCountInString(src) <= 32
 }

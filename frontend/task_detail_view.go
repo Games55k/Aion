@@ -347,10 +347,7 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *uiTokens, t model.T
 					ui.Text(c, "暂无任务描述，切换到“编辑”模式可输入 Markdown 内容。").
 						FontSize(13).TextColor(tk.TextTertiary)
 				} else {
-					uiMarkdown(c.Key("md-preview-"+t.ID), w.editDescription, markdownProps{
-						Variant:               markdownChat,
-						FullFeaturedCodeBlock: true,
-					})
+					uiMarkdown(c.Key("md-preview-"+t.ID), w.editDescription)
 				}
 			})
 
@@ -372,10 +369,7 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *uiTokens, t model.T
 					if strings.TrimSpace(w.editDescription) == "" {
 						ui.Text(c, "实时预览区域").FontSize(12).TextColor(tk.TextTertiary)
 					} else {
-						uiMarkdown(c.Key("md-split-preview-"+t.ID), w.editDescription, markdownProps{
-							Variant:               markdownChat,
-							FullFeaturedCodeBlock: true,
-						})
+						uiMarkdown(c.Key("md-split-preview-"+t.ID), w.editDescription)
 					}
 				})
 			})
