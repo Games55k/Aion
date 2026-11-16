@@ -1,7 +1,7 @@
 # 开发自动化与 UI 封装精简方案
 
 日期：2026-11-16  
-状态：待实施；本文仅描述计划，Automation 尚未接入。  
+状态：已完成；已按两阶段分批提交并完成测试、静态检查、视觉快照与真实窗口冒烟验收。  
 顺序：先接入开发用 Automation，再分批清理 UI 封装中未使用的能力。
 
 ## 1. 目标与范围
@@ -153,12 +153,22 @@ P2、P3、P4 是审计候选，不预先断言其中每项都可删除。审计�
 
 ## 6. 完成标准与收益评估
 
-- [ ] 开发人员能按文档启动隔离实例，并通过 Automation 操作和截图。
-- [ ] 默认构建和发布构建保持原有运行方式，不开启自动化服务。
-- [ ] 每个删除项都有明确的无业务调用依据，必要行为和视觉保持一致。
-- [ ] 原有测试及新增必要测试通过，新 UI 测试重复运行稳定。
-- [ ] 记录删掉的变体、参数、辅助函数和净代码量；不以测试删减换取数字。
-- [ ] 如衡量体积，使用同一架构、Go/MyGo 版本和发布参数比较，开发插件不计入正式包。
+- [x] 开发人员能按文档启动隔离实例，并通过 Automation 操作和截图。
+- [x] 默认构建和发布构建保持原有运行方式，不开启自动化服务。
+- [x] 每个删除项都有明确的无业务调用依据，必要行为和视觉保持一致。
+- [x] 原有测试及新增必要测试通过，新 UI 测试重复运行稳定。
+- [x] 记录删掉的变体、参数、辅助函数和净代码量；不以测试删减换取数字。
+- [x] 如衡量体积，使用同一架构、Go/MyGo 版本和发布参数比较，开发插件不计入正式包。
+
+### 实施与验收记录
+
+- **阶段一（Automation）**：新增 `automation_e2e.go`（`//go:build e2e`）；验证默认构建不含 `plugins/automation`、`e2e,mygo_noinspector` 忽略 `MYGO_AUTOMATION` 且不监听、`e2e` 构建配合 `MYGO_AUTOMATION` 与临时 `-data-dir` 完成 5 项最小冒烟场景并在退出后清理 socket。
+- **阶段二（UI 封装精简）**：
+  - P1 进度条（`ui_feedback.go`）：删除圆环、分段、Inset、状态变体、发光动画及未用自定义字段，保留横条、百分比与无障碍进度值；新增 `TestProgressUpdatesWithCompletion`（`-count=5` 通过）。
+  - P2 Markdown（`ui_markdown.go`）：删除流式揭示、`markdownDefault`、尺度覆盖字段、`uiSnippet`/`singleLineCode` 与非完整代码块分支，保留当前预览、代码高亮、复制、折叠和主题适配；新增 `TestTaskMarkdownPreviewAndCodeBlock`（`-count=5` 通过）。
+  - P3 通用封装（`ui_controls.go`、`ui_fields.go`、`ui_display.go`、`ui_layout.go`、`ui_overlay.go`、`ui_feedback.go`）：删除 `buttonDashed/Filled/Link`、`actionIconVariant`、`copyButtonProps`、`segmentedOutlined/Block`、`checkboxShape/Indeterminate`、`switchProps.Size`、`inputBorderless`、`fieldAffix`、`searchBarProps.Platform/Loading/OnSearch`、`tagSolid/Closable/Icon/tagRed`、`uiEmpty.Page`、`listVariant/Compact/Avatar/Disabled/Divider`、`skeletonSweep/Circle`、`hotkeyVariant/Platform/swapCmd`、`imageVariant/Contain/NoPreview/Actions/OnDownload`、侧栏与滚动区域未用方向/边缘渐变选项、`placementLeft/Right`、`tooltipProps`、`menuItem.Hotkey`、`alertSecondary/Outlined/Plain/NoIcon/Closed`、`modalProps.NoFooter`、`toastPlacement`（固定左下角）及 `ToastDefault/ToastLoading`。保留日期选择器清空/禁用/年月切换与 Toast 动作按钮及交互。
+  - P4 主题与图标（`ui_theme.go`、`icons.go`）：删除 `iconDownload`、`iconLoaderCircle`、`FillBorderStrong`、`sideLeft/sideRight` 及 123 个未用令牌字段与对应 `Color()` 分支，保留 `Tag` 动态颜色及所有品牌/项目图标。
+- **代码量变化**：`frontend/ui_*.go` 由 4,942 行降至 3,532 行（净减少 1,410 行），`frontend/icons.go` 净减少 8 行；`go test ./...`、`go vet ./...`、`go vet -tags e2e ./...`、`go tool mygo vet .`、`TestVisualSnapshotRender` 与真实窗口 5 项冒烟场景全部通过。
 
 主要收益是降低维护和验收成本，不承诺显著缩小安装包。未引用函数可能已经被 Go 链接器移除；删除它们仍可减少阅读、修改和审查负担。
 
