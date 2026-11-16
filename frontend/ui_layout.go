@@ -14,13 +14,8 @@ type sideNavState struct {
 
 type draggableSideNavProps struct {
 	Header, Footer          func(nav sideNavState)
-	Right                   bool
 	MinWidth                float32
 	MaxWidth                float32
-	NoExpand                bool
-	NoResize                bool
-	NoBorder                bool
-	NoHandle                bool
 	ShowHandleWhenCollapsed bool
 	HighlightHandle         bool
 	Background              ui.Color
@@ -57,29 +52,18 @@ func uiDraggableSideNav(c *ui.Context, width *float32, expanded *bool, p draggab
 
 	root := ui.Box(c).Shrink(0).AlignSelf(ui.Stretch).ZIndex(1)
 	drag := ui.Local(root, "drag", func() sideNavDrag { return sideNavDrag{} })
-	var border float32
-	if !p.NoBorder {
-		border = 1
-	}
+	const border float32 = 1
 	collapse := sideNavCollapse(root, drag, *width, *expanded, minW, p)
 	shown := *expanded || (!drag.pressing && collapse < 1)
 	nav := sideNavState{Expanded: shown, RailWidth: minW - border, Collapse: collapse}
 
 	var dx, contentW float32
 	var held bool
-	var content ui.Element
 	root.Children(func() {
-		frame := ui.Row(c).Fill().Clip().Background(bg)
-		if !p.NoBorder {
-			if p.Right {
-				frame.BorderWidth(0, 0, 0, 1)
-			} else {
-				frame.BorderWidth(0, 1, 0, 0)
-			}
-			frame.BorderColor(tk.BorderSecondary)
-		}
+		frame := ui.Row(c).Fill().Clip().Background(bg).
+			BorderWidth(0, 1, 0, 0).BorderColor(tk.BorderSecondary)
 		frame.Children(func() {
-			content = ui.Column(c).AlignSelf(ui.Stretch)
+			content := ui.Column(c).AlignSelf(ui.Stretch)
 			switch {
 			case drag.pressing:
 				content.Grow(1)
@@ -101,17 +85,10 @@ func uiDraggableSideNav(c *ui.Context, width *float32, expanded *bool, p draggab
 				}
 			})
 		})
-		if !p.NoResize {
-			dx, held = sideNavSeam(c, tk, root, p)
-		}
-		if !p.NoHandle && !p.NoExpand {
-			sideNavHandle(c, tk, root, expanded, bg, p)
-		}
+		dx, held = sideNavSeam(c, tk, root, p)
+		sideNavHandle(c, tk, root, expanded, bg, p)
 	})
 
-	if p.Right {
-		dx = -dx
-	}
 	resizeSideNav(dx, held, width, expanded, drag, minW, p)
 
 	target := minW
@@ -123,9 +100,6 @@ func uiDraggableSideNav(c *ui.Context, width *float32, expanded *bool, p draggab
 		current = root.Jump("width", clampSideNav(drag.raw, minW, p.MaxWidth))
 	} else {
 		current = root.AnimateTo("width", target, sideNavResize)
-	}
-	if p.Right && contentW > 0 {
-		content.Margin(0, 0, 0, min(0, current-border-contentW))
 	}
 	return root.Width(current)
 }
@@ -166,10 +140,6 @@ func resizeSideNav(dx float32, held bool, width *float32, expanded *bool, d *sid
 	}
 	d.pressing = false
 	w := clampSideNav(d.raw, minW, p.MaxWidth)
-	if p.NoExpand {
-		*width = w
-		return
-	}
 	threshold := minW + (*width-minW)/3
 	switch {
 	case d.raw <= minW || d.raw < threshold:
@@ -180,13 +150,8 @@ func resizeSideNav(dx float32, held bool, width *float32, expanded *bool, d *sid
 }
 
 func sideNavSeam(c *ui.Context, tk *uiTokens, root ui.Element, p draggableSideNavProps) (float32, bool) {
-	seam := ui.ButtonBase(c).Absolute().Top(0).Bottom(0).Width(8).Role(ui.RoleSeparator).
+	seam := ui.ButtonBase(c).Absolute().Top(0).Bottom(0).Width(8).Right(-4).Role(ui.RoleSeparator).
 		Label("Resize side nav").Cursor(ui.CursorResizeColumn)
-	if p.Right {
-		seam.Left(-4)
-	} else {
-		seam.Right(-4)
-	}
 	dx, _, held := seam.Dragged()
 	line, thick := ui.Color{}, float32(2)
 	if p.HighlightHandle {
@@ -205,20 +170,13 @@ func sideNavSeam(c *ui.Context, tk *uiTokens, root ui.Element, p draggableSideNa
 }
 
 func sideNavHandle(c *ui.Context, tk *uiTokens, root ui.Element, expanded *bool, bg ui.Color, p draggableSideNavProps) {
-	label, icon := "Collapse side nav", iconChevronLeft()
-	if p.Right {
-		icon = iconChevronRight()
-	}
+	label := "Collapse side nav"
 	if !*expanded {
 		label = "Expand side nav"
 	}
 	b := ui.ButtonBase(c).Label(label).Absolute().TopPercent(50).TranslatePercent(0, -50).Size(16, 54).
+		Right(-15).Radius(0, 8, 8, 0).BorderWidth(1, 1, 1, 0).
 		Background(bg).BorderColor(tk.Border).Cursor(ui.CursorPointer).ZIndex(50)
-	if p.Right {
-		b.Left(-15).Radius(8, 0, 0, 8).BorderWidth(1, 0, 1, 1)
-	} else {
-		b.Right(-15).Radius(0, 8, 8, 0).BorderWidth(1, 1, 1, 0)
-	}
 	visible := float32(0)
 	if root.Hovered() || b.Hovered() || b.FocusVisible() || (!*expanded && p.ShowHandleWhenCollapsed) {
 		visible = 1
@@ -238,7 +196,7 @@ func sideNavHandle(c *ui.Context, tk *uiTokens, root ui.Element, expanded *bool,
 	}
 	angle := b.AnimateTo("turn", turn, ui.Animation{Duration: 200 * time.Millisecond, Ease: easeOut})
 	b.Children(func() {
-		ui.Icon(c, icon).FontSize(16).TextColor(glyph).Rotate(angle)
+		ui.Icon(c, iconChevronLeft()).FontSize(16).TextColor(glyph).Rotate(angle)
 	})
 	if b.Clicked() {
 		*expanded = !*expanded
@@ -249,18 +207,15 @@ type scrollDirection int
 
 const (
 	scrollVertical scrollDirection = iota
-	scrollHorizontal
 	scrollBoth
 )
 
 type scrollAreaProps struct {
 	Direction scrollDirection
-	Fade      bool
 	State     *ui.ScrollState
 }
 
 const (
-	scrollFadeSize      = 40
 	scrollBarInset      = 3
 	scrollBarHit        = 12
 	scrollThumbRest     = 3
@@ -290,19 +245,13 @@ func uiScrollArea(c *ui.Context, p scrollAreaProps, content func()) ui.Element {
 
 	root.Children(func() {
 		var s ui.Element
-		switch p.Direction {
-		case scrollHorizontal:
-			s = ui.ScrollHorizontal(c)
-		case scrollBoth:
+		if p.Direction == scrollBoth {
 			s = ui.ScrollBoth(c)
-		default:
+		} else {
 			s = ui.Scroll(c)
 		}
 		s.Fill().Scrollbars(false).TrackScroll(state).Children(content)
-		if p.Fade {
-			fadeEdges(s, p.Direction, size, state)
-		}
-		if p.Direction != scrollHorizontal && state.MaxY > 0 {
+		if state.MaxY > 0 {
 			scrollBar(c, tk, root, state, size, moved, scrolling, true)
 		}
 		if p.Direction != scrollVertical && state.MaxX > 0 {
@@ -361,31 +310,6 @@ func scrollBar(c *ui.Context, tk *uiTokens, root ui.Element, state *ui.ScrollSta
 		thumb.Opacity(shown)
 		strip.IgnoreInput(shown == 0 && !root.Hovered())
 	})
-}
-
-func fadeEdges(s ui.Element, d scrollDirection, size ui.Rect, state *ui.ScrollState) {
-	vertical := edgeFadeGradient(180, size.H, state.Y, state.MaxY-state.Y)
-	horizontal := edgeFadeGradient(90, size.W, state.X, state.MaxX-state.X)
-	switch d {
-	case scrollHorizontal:
-		s.MaskLinearGradient(horizontal)
-	case scrollBoth:
-		s.Masks(ui.Mask{Image: vertical, Composite: ui.MaskIntersect}, ui.Mask{Image: horizontal})
-	default:
-		s.MaskLinearGradient(vertical)
-	}
-}
-
-func edgeFadeGradient(angle, length, before, after float32) ui.LinearGradient {
-	black := ui.RGB(0, 0, 0)
-	if length <= 0 {
-		return ui.LinearGradient{From: black, To: black}
-	}
-	start := min(scrollFadeSize, max(before, 0)) / length
-	end := 1 - min(scrollFadeSize, max(after, 0))/length
-	return ui.LinearGradient{Angle: angle, Stops: []ui.GradientStop{
-		{Color: ui.Transparent, At: 0}, {Color: black, At: start}, {Color: black, At: end}, {Color: ui.Transparent, At: 1},
-	}}
 }
 
 func clampScroll(v, lo, hi float32) float32 { return min(max(v, lo), hi) }

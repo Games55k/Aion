@@ -68,8 +68,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 							alertType = alertWarning
 						}
 						uiAlert(c, w.jobSaveErr, alertProps{
-							Type:    alertType,
-							Variant: alertSoft,
+							Type: alertType,
 						})
 						ui.Row(c).Gap(8).Justify(ui.End).AlignSelf(ui.Stretch).Children(func() {
 							if w.jobSaveState == "error" {
@@ -496,7 +495,7 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 		// Compact Top Quick-Note Bar
 		ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 			if w.jobNoteErr != "" {
-				uiAlert(c, w.jobNoteErr, alertProps{Type: alertError, Variant: alertSoft})
+				uiAlert(c, w.jobNoteErr, alertProps{Type: alertError})
 			}
 			ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 				ui.Box(c).Grow(1).MinWidth(150).Children(func() {
@@ -527,7 +526,7 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 					ui.Text(c, "仅记录过去经历，不会更改当前阶段与流程状态").FontSize(11).TextColor(tk.TextTertiary)
 				})
 				if w.jobBackfillErr != "" {
-					uiAlert(c, w.jobBackfillErr, alertProps{Type: alertError, Variant: alertSoft})
+					uiAlert(c, w.jobBackfillErr, alertProps{Type: alertError})
 				}
 				stageOpts := make([]selectOption, 0, len(model.AllJobStages()))
 				for _, st := range model.AllJobStages() {
@@ -678,7 +677,7 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 				FontSize(12).TextColor(tk.TextSecondary)
 
 			if w.jobCloseErr != "" {
-				uiAlert(c, w.jobCloseErr, alertProps{Type: alertError, Variant: alertSoft})
+				uiAlert(c, w.jobCloseErr, alertProps{Type: alertError})
 			}
 
 			ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
@@ -695,7 +694,6 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 			if needsOfferConfirm {
 				uiAlert(c, "当前阶段尚未处于 Offer", alertProps{
 					Type:        alertWarning,
-					Variant:     alertSoft,
 					Description: fmt.Sprintf("选择「%s」要求阶段为 Offer，请勾选确认后随结果一并提交。", outcome.Label()),
 				})
 				uiCheckbox(c, &w.jobCloseConfirmOffer, "确认同步将当前阶段调整为 Offer").

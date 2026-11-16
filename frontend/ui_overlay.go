@@ -11,31 +11,19 @@ type overlayPlacement int
 const (
 	placementTop overlayPlacement = iota
 	placementBottom
-	placementLeft
-	placementRight
 )
 
 func (p overlayPlacement) side() motionSide {
-	switch p {
-	case placementBottom:
+	if p == placementBottom {
 		return sideBottom
-	case placementLeft:
-		return sideLeft
-	case placementRight:
-		return sideRight
 	}
 	return sideTop
 }
 
 func attachOverlay(e, anchor ui.Element, p overlayPlacement, gap float32) {
-	switch p {
-	case placementBottom:
+	if p == placementBottom {
 		e.AttachTo(anchor, ui.AnchorBottom, ui.AnchorTop).Margin(gap, 0, 0, 0)
-	case placementLeft:
-		e.AttachTo(anchor, ui.AnchorLeft, ui.AnchorRight).Margin(0, gap, 0, 0)
-	case placementRight:
-		e.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).Margin(0, 0, 0, gap)
-	default:
+	} else {
 		e.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).Margin(0, 0, gap, 0)
 	}
 	e.AttachedOrigin()
@@ -68,29 +56,21 @@ func tipTransition(p overlayPlacement) ui.ElementTransition {
 	return tr
 }
 
-type tooltipProps struct {
-	Placement overlayPlacement
-	Hotkey    string
-}
-
-func uiTooltip(c *ui.Context, anchor ui.Element, text string, p tooltipProps) ui.Element {
+func uiTooltip(c *ui.Context, anchor ui.Element, text string) ui.Element {
 	if text == "" {
 		return ui.Element{}
 	}
 	anchor.Description(text)
 	tk := tokensOf(c)
 	return ui.TooltipBase(c, anchor, func(tip ui.Element) {
-		attachOverlay(tip, anchor, p.Placement, 6)
+		attachOverlay(tip, anchor, placementTop, 6)
 		tip.Padding(4, 8).Radius(tk.BorderRadiusSM).MaxWidth(320).
 			Background(tk.BgElevated).TextColor(tk.TextLabel).FontSize(tk.FontSizeSM).
-			Transition(tipTransition(p.Placement))
+			Transition(tipTransition(placementTop))
 		tk.Elevate(tip, boxShadowTertiary)
 		tip.Children(func() {
 			ui.Row(c.Key(text)).Gap(6).Transition(tipContentTransition).Children(func() {
 				ui.Text(c, text)
-				if p.Hotkey != "" {
-					uiHotkey(c, p.Hotkey, hotkeyProps{})
-				}
 			})
 		})
 	})
@@ -100,7 +80,6 @@ type menuItem struct {
 	Key      string
 	Label    string
 	Icon     *ui.SVG
-	Hotkey   string
 	Extra    string
 	Danger   bool
 	Disabled bool
@@ -155,9 +134,6 @@ func renderMenuItem(c *ui.Context, tk *uiTokens, m ui.MenuParts, it menuItem) ui
 			ui.Text(c, it.Label).Grow(1).SingleLine()
 			if it.Extra != "" {
 				ui.Text(c, it.Extra).Font("monospace").FontSize(12).TextColor(tk.TextTertiary).Padding(0, 0, 0, 16).SingleLine()
-			}
-			if it.Hotkey != "" {
-				uiHotkey(c, it.Hotkey, hotkeyProps{}).Margin(-2, -7, -2, 16)
 			}
 		})
 	})

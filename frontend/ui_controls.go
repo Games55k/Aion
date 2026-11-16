@@ -155,7 +155,7 @@ func styleActionIcon(c *ui.Context, b ui.Element, svg *ui.SVG, p actionIconProps
 		Cursor(ui.CursorPointer).Transition(buttonTransition)
 	if p.Title != "" {
 		b.Label(p.Title)
-		uiTooltip(c, b, p.Title, tooltipProps{})
+		uiTooltip(c, b, p.Title)
 	}
 
 	state := stateOfButton(b)

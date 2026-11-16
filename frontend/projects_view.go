@@ -253,8 +253,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(14).AlignSelf(ui.Stretch).Children(func() {
 			if w.projectModalErr != "" {
 				uiAlert(c.Key("project-modal-err"), w.projectModalErr, alertProps{
-					Type:    alertError,
-					Variant: alertSoft,
+					Type: alertError,
 				})
 			}
 

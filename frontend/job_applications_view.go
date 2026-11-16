@@ -520,13 +520,12 @@ func (w *Workbench) renderJobCreateModal(c *ui.Context, tk *uiTokens) {
 			if dupes := w.activeDuplicateMatches(w.jobCreateCompany, w.jobCreatePosition); len(dupes) > 0 {
 				uiAlert(c, fmt.Sprintf("检测到 %d 条同公司同岗位的进行中记录", len(dupes)), alertProps{
 					Type:        alertWarning,
-					Variant:     alertSoft,
 					Description: "仍可继续创建独立记录（例如同一岗位再次投递或区分不同渠道）。",
 				})
 			}
 
 			if w.jobCreateErr != "" {
-				uiAlert(c, w.jobCreateErr, alertProps{Type: alertError, Variant: alertSoft})
+				uiAlert(c, w.jobCreateErr, alertProps{Type: alertError})
 			}
 
 			uiScrollArea(c, scrollAreaProps{Direction: scrollVertical}, func() {

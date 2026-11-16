@@ -257,7 +257,6 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			uiAlert(c, "所属项目处于已删除状态", alertProps{
 				Type:        alertWarning,
-				Variant:     alertSoft,
 				Description: fmt.Sprintf("任务「%s」所属的项目「%s」仍在回收站中，请先恢复所属项目，才能恢复该任务。", taskTitle, projTitle),
 			})
 			ui.Text(c, "点击“一并恢复项目与任务”将立即恢复该项目及其关联任务。").
@@ -288,7 +287,6 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			uiAlert(c, "此操作不可撤销", alertProps{
 				Type:        alertError,
-				Variant:     alertSoft,
 				Description: desc,
 			})
 		})
@@ -306,7 +304,6 @@ func (w *Workbench) renderTrashModals(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(10).AlignSelf(ui.Stretch).Children(func() {
 			uiAlert(c, "清空后无法恢复", alertProps{
 				Type:        alertError,
-				Variant:     alertSoft,
 				Description: fmt.Sprintf("即将永久删除回收站中的全部 %d 项内容（包括项目、任务、求职投递及关联数据）。", len(w.trashItems)),
 			})
 		})

@@ -662,8 +662,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			if w.taskModalErr != "" {
 				uiAlert(c.Key("task-modal-err"), w.taskModalErr, alertProps{
-					Type:    alertError,
-					Variant: alertSoft,
+					Type: alertError,
 				})
 			}
 

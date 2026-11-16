@@ -136,8 +136,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 					// Validation Alert Banner if title is empty
 					if w.saveState == "validation_error" {
 						uiAlert(c.Key("detail-validation-alert"), "任务标题不能为空，请输入有效标题以完成自动保存，或点击顶部“放弃修改”恢复原内容", alertProps{
-							Type:    alertWarning,
-							Variant: alertSoft,
+							Type: alertWarning,
 						})
 					}
 

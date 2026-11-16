@@ -14,105 +14,57 @@ const (
 	alertSuccess
 	alertWarning
 	alertError
-	alertSecondary
-)
-
-type alertVariant int
-
-const (
-	alertSoft alertVariant = iota
-	alertOutlined
-	alertPlain
 )
 
 type alertProps struct {
 	Type        alertType
-	Variant     alertVariant
 	Description string
-	NoIcon      bool
-	Closed      *bool
 }
 
-var (
-	alertCloseTransition = ui.ElementTransition{Duration: 160 * time.Millisecond, Ease: easeOut, Colors: true}
-	dialogCloseTransition = ui.ElementTransition{Duration: 160 * time.Millisecond, Ease: softEase, Colors: true}
-)
+var dialogCloseTransition = ui.ElementTransition{Duration: 160 * time.Millisecond, Ease: softEase, Colors: true}
 
 func uiAlert(c *ui.Context, title string, p alertProps) ui.Element {
-	if p.Closed != nil && *p.Closed {
-		return ui.Element{}
-	}
 	tk := tokensOf(c)
-	accent, icon, share, ring := alertTone(tk, p.Type)
+	accent, icon := alertTone(tk, p.Type)
 	detailed := p.Description != ""
 
 	root := ui.Row(c).Gap(10).AlignSelf(ui.Stretch).AlignItems(ui.Start).Radius(tk.BorderRadius).
-		FontSize(14).TextColor(tk.Text).Transition(collapseTransition())
-	switch {
-	case p.Variant == alertPlain:
-		root.Padding(2, 0)
-	case detailed:
+		FontSize(14).TextColor(tk.Text).Transition(collapseTransition()).
+		Background(mixColor(tk.BgContainer, accent, 0.05)).InsetShadow(0, 0, 0, 1, accent.Alpha(0.14))
+	if detailed {
 		root.Padding(12, 14)
-	default:
+	} else {
 		root.Padding(10, 12)
-	}
-	switch p.Variant {
-	case alertSoft:
-		root.Background(mixColor(tk.BgContainer, accent, share)).InsetShadow(0, 0, 0, 1, accent.Alpha(ring))
-	case alertOutlined:
-		root.InsetShadow(0, 0, 0, 1, tk.BorderSecondary)
 	}
 
 	root.Children(func() {
-		if !p.NoIcon {
-			glyph := float32(16)
-			if detailed {
-				glyph = 18
-			}
-			ui.Row(c).Height(20).AlignItems(ui.Center).Shrink(0).Children(func() {
-				ui.Icon(c, icon()).FontSize(glyph).TextColor(accent)
-			})
+		glyph := float32(16)
+		if detailed {
+			glyph = 18
 		}
+		ui.Row(c).Height(20).AlignItems(ui.Center).Shrink(0).Children(func() {
+			ui.Icon(c, icon()).FontSize(glyph).TextColor(accent)
+		})
 		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 			ui.Text(c, title).FontWeight(500).LineHeight(20.0 / 14)
 			if detailed {
 				ui.Text(c, p.Description).FontSize(13).LineHeight(20.0 / 13).TextColor(tk.TextSecondary)
 			}
 		})
-		if p.Closed != nil && alertCloseButton(c, tk).Clicked() {
-			*p.Closed = true
-		}
 	})
 	return root
 }
 
-func alertTone(tk *uiTokens, t alertType) (accent ui.Color, icon func() *ui.SVG, share, ring float32) {
+func alertTone(tk *uiTokens, t alertType) (accent ui.Color, icon func() *ui.SVG) {
 	switch t {
 	case alertSuccess:
-		return tk.Success, iconCircleCheck, 0.05, 0.14
+		return tk.Success, iconCircleCheck
 	case alertWarning:
-		return tk.Warning, iconTriangleAlert, 0.05, 0.14
+		return tk.Warning, iconTriangleAlert
 	case alertError:
-		return tk.Error, iconCircleX, 0.05, 0.14
-	case alertSecondary:
-		return tk.TextSecondary, iconTriangleAlert, 0.04, 0.12
+		return tk.Error, iconCircleX
 	}
-	return tk.Info, iconInfo, 0.05, 0.14
-}
-
-func alertCloseButton(c *ui.Context, tk *uiTokens) ui.Element {
-	b := ui.ButtonBase(c).Label("Close").Size(32, 32).Radius(tk.BorderRadiusSM).Margin(-6, -4, -6, 0).
-		Shrink(0).Cursor(ui.CursorPointer).Transition(alertCloseTransition)
-	if b.Hovered() {
-		b.Background(tk.FillTertiary).TextColor(tk.Text)
-	} else {
-		b.TextColor(tk.TextTertiary)
-	}
-	if b.Pressed() {
-		b.Scale(0.96, 0.96)
-	}
-	b.Children(func() { ui.Icon(c, iconX()).FontSize(16) })
-	return b
+	return tk.Info, iconInfo
 }
 
 type dialogState struct{ shown, closing, entered bool }
@@ -170,7 +122,6 @@ type modalProps struct {
 	Width      float32
 	OkText     string
 	CancelText string
-	NoFooter   bool
 }
 
 func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
@@ -205,16 +156,14 @@ func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
 				}
 				col.Children(content)
 			})
-			if !p.NoFooter {
-				ui.Row(c).Gap(8).Padding(12, 16).Justify(ui.End).Children(func() {
-					if uiButton(c, textOr(p.CancelText, "Cancel"), buttonProps{}).Clicked() {
-						*open = false
-					}
-					if uiButton(c, textOr(p.OkText, "OK"), buttonProps{Variant: buttonPrimary}).Clicked() {
-						ok = true
-					}
-				})
-			}
+			ui.Row(c).Gap(8).Padding(12, 16).Justify(ui.End).Children(func() {
+				if uiButton(c, textOr(p.CancelText, "Cancel"), buttonProps{}).Clicked() {
+					*open = false
+				}
+				if uiButton(c, textOr(p.OkText, "OK"), buttonProps{Variant: buttonPrimary}).Clicked() {
+					ok = true
+				}
+			})
 			if dialogCloseButton(c, tk, 18).Absolute().Top(8).Right(12).Radius(12).Clicked() {
 				*open = false
 			}
@@ -277,15 +226,13 @@ func uiProgress(c *ui.Context, percent float32, p progressProps) ui.Element {
 type ToastType int
 
 const (
-	ToastDefault ToastType = iota
-	ToastInfo
+	ToastInfo ToastType = iota
 	ToastSuccess
 	ToastWarning
 	ToastError
-	ToastLoading
 )
 
-var toastTypeNames = []string{"", "info", "success", "warning", "error", "loading"}
+var toastTypeNames = []string{"info", "success", "warning", "error"}
 
 // ToastProps describes an in-app toast notification.
 type ToastProps struct {
@@ -308,21 +255,6 @@ func uiShowToast(c *ui.Context, o ToastProps) string {
 	})
 }
 
-type toastPlacement int
-
-const (
-	toastBottomRight toastPlacement = iota
-	toastBottomLeft
-	toastBottom
-	toastTopRight
-	toastTopLeft
-	toastTop
-)
-
-type toastHostProps struct {
-	Placement toastPlacement
-}
-
 const (
 	toastWidth = 360
 	toastGap   = 12
@@ -335,24 +267,10 @@ var (
 	toastSizeAnim  = ui.Animation{Duration: 150 * time.Millisecond, Ease: cssEase}
 )
 
-func uiToastHost(c *ui.Context, p toastHostProps) ui.Element {
+func uiToastHost(c *ui.Context) ui.Element {
 	tk := tokensOf(c)
-	top := p.Placement >= toastTopRight
 	return ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
-		viewport.Padding(16)
-		switch p.Placement {
-		case toastBottomLeft, toastTopLeft:
-			viewport.AlignItems(ui.Start)
-		case toastBottom, toastTop:
-			viewport.AlignItems(ui.Center)
-		default:
-			viewport.AlignItems(ui.End)
-		}
-		if top {
-			viewport.Justify(ui.Start)
-		} else {
-			viewport.Justify(ui.End)
-		}
+		viewport.Padding(16).AlignItems(ui.Start).Justify(ui.End)
 
 		stack := ui.Box(c).Width(toastWidth).MaxWidthPercent(100)
 		heights := *ui.Local(stack, "heights", func() map[string]float32 { return map[string]float32{} })
@@ -379,7 +297,7 @@ func uiToastHost(c *ui.Context, p toastHostProps) ui.Element {
 			scale := 1 - 0.05*float32(depth)
 			l := toastLayout{
 				depth: depth, y: float32(depth)*toastPeek + (1-scale)*front, scale: scale,
-				collapsed: !expanded && depth > 0, front: front, top: top,
+				collapsed: !expanded && depth > 0, front: front,
 			}
 			if expanded {
 				l.y, l.scale = offset, 1
@@ -398,23 +316,16 @@ func uiToastHost(c *ui.Context, p toastHostProps) ui.Element {
 type toastLayout struct {
 	depth           int
 	y, scale, front float32
-	collapsed, top  bool
+	collapsed       bool
 }
 
 func renderToast(c *ui.Context, tk *uiTokens, t ui.Toast, heights map[string]float32, l toastLayout) {
 	parts := ui.ToastBase(c, t)
 	root := parts.Root.Absolute().Left(0).Right(0).Radius(tk.BorderRadiusLG).Clip().
-		Background(tk.BgElevated).TextColor(tk.Text).FontSize(14)
+		Background(tk.BgElevated).TextColor(tk.Text).FontSize(14).
+		Bottom(0).TransformOrigin(0.5, 1)
 	tk.Elevate(root, boxShadowSecondary)
 	enter := toastTransition(sideBottom)
-	y := -l.y
-	if l.top {
-		enter = toastTransition(sideTop)
-		root.Top(0).TransformOrigin(0.5, 0)
-		y = l.y
-	} else {
-		root.Bottom(0).TransformOrigin(0.5, 1)
-	}
 	enter.Colors = true
 	root.Transition(enter)
 	height := heights[t.ID]
@@ -424,7 +335,7 @@ func renderToast(c *ui.Context, tk *uiTokens, t ui.Toast, heights map[string]flo
 	if height > 0 {
 		root.Height(root.AnimateTo("height", height, toastSizeAnim))
 	}
-	root.Translate(0, root.AnimateTo("y", y, toastStackAnim))
+	root.Translate(0, root.AnimateTo("y", -l.y, toastStackAnim))
 	scale := root.AnimateTo("scale", l.scale, toastStackAnim)
 	root.Scale(scale, scale)
 
@@ -470,18 +381,15 @@ func renderToast(c *ui.Context, tk *uiTokens, t ui.Toast, heights map[string]flo
 
 func toastIcon(tk *uiTokens, typ string) (func() *ui.SVG, ui.Color) {
 	switch typ {
-	case "info":
-		return iconInfo, tk.Info
 	case "success":
 		return iconCircleCheck, tk.Success
 	case "warning":
 		return iconTriangleAlert, tk.Warning
 	case "error":
 		return iconCircleX, tk.Error
-	case "loading":
-		return iconLoaderCircle, tk.TextSecondary
+	default:
+		return iconInfo, tk.Info
 	}
-	return iconInfo, tk.Text
 }
 
 func toastClose(c *ui.Context, tk *uiTokens, b ui.Element) {

@@ -185,7 +185,6 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 					if errMsg != "" {
 						uiAlert(c.Key("settings-backup-err"), "最近一次自动备份失败", alertProps{
 							Type:        alertError,
-							Variant:     alertSoft,
 							Description: errMsg,
 						})
 					}
@@ -275,7 +274,6 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 					if w.lastExportedZipPath != "" {
 						uiAlert(c.Key("settings-export-alert"), "最近一次手动备份已导出", alertProps{
 							Type:        alertSuccess,
-							Variant:     alertSoft,
 							Description: "备份包路径: " + w.lastExportedZipPath,
 						})
 					}
@@ -283,7 +281,6 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 					if w.lastRestoreResult != nil {
 						uiAlert(c.Key("settings-restore-alert"), "数据已从备份包完整恢复", alertProps{
 							Type:        alertSuccess,
-							Variant:     alertSoft,
 							Description: fmt.Sprintf("恢复前自动生成的安全备份已保存在: %s", w.lastRestoreResult.SafetyBackupPath),
 						})
 					}
@@ -389,19 +386,16 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 		case info.IsDev || displayVersion == "":
 			uiAlert(c.Key("settings-updates-dev"), "当前为开发构建，不支持应用内自动更新", alertProps{
 				Type:        alertInfo,
-				Variant:     alertSoft,
 				Description: "请使用正式打包的 .dmg 安装包运行 Aion，或点击“前往 Releases 下载”手动获取最新安装包。",
 			})
 		case !info.CanSelfUpdate:
 			uiAlert(c.Key("settings-updates-readonly"), "当前安装位置不可写，无法应用内自动更新", alertProps{
 				Type:        alertWarning,
-				Variant:     alertSoft,
 				Description: "请将 Aion.app 移动到当前用户有写入权限的“应用程序”目录后重试，或点击“前往 Releases 下载”手动下载。",
 			})
 		case info.AvailableVersion != "":
 			uiAlert(c.Key("settings-updates-available"), "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), alertProps{
 				Type:        alertSuccess,
-				Variant:     alertSoft,
 				Description: "点击“检查更新”查看更新说明、下载并安装新版本。",
 			})
 		}
@@ -418,7 +412,6 @@ func (w *Workbench) renderSettingsModals(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			uiAlert(c, "整包覆盖恢复说明", alertProps{
 				Type:        alertWarning,
-				Variant:     alertSoft,
 				Description: "从备份包恢复将完整替换当前工作区的全部项目、任务、求职投递、附件、回收站及全局设置。若恢复较早版本且不含求职数据的备份包，当前求职记录将被清空，并在备份目录保留恢复前安全备份。",
 			})
 			ui.Column(c).Gap(6).Padding(10, 12).Radius(tk.BorderRadius).

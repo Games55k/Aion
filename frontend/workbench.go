@@ -2779,5 +2779,5 @@ func (w *Workbench) View(c *ui.Context) {
 	w.drainPendingToasts(c)
 
 	// Toast Host
-	uiToastHost(c, toastHostProps{Placement: toastBottomLeft})
+	uiToastHost(c)
 }
