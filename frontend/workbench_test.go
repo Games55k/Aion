@@ -4179,3 +4179,78 @@ func TestTaskMarkdownPreviewAndCodeBlock(t *testing.T) {
 	}
 }
 
+// Regression: empty text inputs previously kept rendering placeholder text under the caret after clicking until characters were typed.
+func TestInputPlaceholderHidesOnFocus(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "占位符隐藏测试"
+	wb.SubmitProjectModal()
+	tt.Frame()
+
+	countInk := func(bounds ui.Rect) int {
+		img := tt.Image()
+		x0 := int(bounds.X) + 4
+		x1 := min(int(bounds.X+bounds.W)-4, int(bounds.X)+120)
+		y0 := int(bounds.Y) + 1
+		y1 := min(int(bounds.Y+bounds.H)-1, int(bounds.Y)+20)
+		bg := img.RGBAAt(x1, y0)
+		ink := 0
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				if img.RGBAAt(x, y) != bg {
+					ink++
+				}
+			}
+		}
+		return ink
+	}
+
+	assertPlaceholderHides := func(focusLabel, blurLabel string) {
+		t.Helper()
+		node, ok := tt.Access(focusLabel)
+		if !ok {
+			t.Fatalf("missing %s", focusLabel)
+		}
+		if node.Placeholder == "" {
+			t.Fatalf("%s has empty accessibility placeholder", focusLabel)
+		}
+		if got := countInk(node.Bounds); got == 0 {
+			t.Fatalf("%s rendered no placeholder ink before focus", focusLabel)
+		}
+
+		if err := tt.Click(focusLabel); err != nil {
+			t.Fatalf("click %s: %v", focusLabel, err)
+		}
+		if !tt.Focused(focusLabel) {
+			t.Fatalf("expected %s to be focused after click", focusLabel)
+		}
+		node, ok = tt.Access(focusLabel)
+		if !ok {
+			t.Fatalf("missing %s while focused", focusLabel)
+		}
+		if node.Placeholder == "" {
+			t.Fatalf("%s lost accessibility placeholder while focused", focusLabel)
+		}
+		if got := countInk(node.Bounds); got != 0 {
+			t.Fatalf("%s still rendered %d placeholder ink pixels while focused and empty", focusLabel, got)
+		}
+
+		if err := tt.Click(blurLabel); err != nil {
+			t.Fatalf("click %s: %v", blurLabel, err)
+		}
+		if tt.Focused(focusLabel) {
+			t.Fatalf("expected %s to lose focus after clicking %s", focusLabel, blurLabel)
+		}
+		if got := countInk(node.Bounds); got == 0 {
+			t.Fatalf("%s did not restore placeholder ink after losing focus", focusLabel)
+		}
+	}
+
+	assertPlaceholderHides("快速添加计划任务", "快速添加进行中任务")
+	assertPlaceholderHides("搜索任务", "快速添加计划任务")
+
+	wb.OpenCreateTaskModal(model.Planned)
+	tt.Frame()
+	assertPlaceholderHides("新建任务描述输入框", "新建任务标签输入框")
+}
+

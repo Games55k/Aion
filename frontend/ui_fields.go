@@ -34,13 +34,23 @@ var (
 	arrowTurn        = ui.Animation{Duration: 150 * time.Millisecond, Ease: easeOut}
 )
 
+func placeholderColorFor(tk *uiTokens, input ui.Element) ui.Color {
+	// Hide placeholder ink while focused so the caret does not overlap hint text,
+	// while keeping Placeholder(...) populated for accessibility metadata.
+	if input.Focused() {
+		return ui.Transparent
+	}
+	return tk.TextPlaceholder
+}
+
 func uiInput(c *ui.Context, value *string, p inputProps) ui.Element {
 	tk := tokensOf(c)
 	root := fieldRow(c, tk, p.Size).Gap(8)
 	var input ui.Element
 	root.Children(func() {
 		input = ui.TextInputBase(c, value).Grow(1).FocusRing(false).
-			Placeholder(p.Placeholder).PlaceholderColor(tk.TextPlaceholder)
+			Placeholder(p.Placeholder)
+		input.PlaceholderColor(placeholderColorFor(tk, input))
 	})
 	styleField(root, tk, p.Variant, p.Invalid, input.Focused())
 	return input
@@ -60,7 +70,8 @@ func uiTextArea(c *ui.Context, value *string, p textAreaProps) ui.Element {
 	var area ui.Element
 	root.Children(func() {
 		area = ui.TextAreaBase(c, value).Lines(minRows, maxRows).FocusRing(false).
-			Placeholder(p.Placeholder).PlaceholderColor(tk.TextPlaceholder)
+			Placeholder(p.Placeholder)
+		area.PlaceholderColor(placeholderColorFor(tk, area))
 	})
 	styleField(root, tk, inputOutlined, p.Invalid, area.Focused())
 	return area
@@ -142,7 +153,7 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 	root.Children(func() {
 		ui.Icon(c, iconSearch()).TextColor(tk.TextPlaceholder).Shrink(0).Margin(0, 4, 0, 0)
 		input = ui.TextInputBase(c, query).Grow(1).FocusRing(false).
-			Placeholder(placeholder).PlaceholderColor(tk.TextPlaceholder)
+			Placeholder(placeholder)
 		if focusNow {
 			input.Focus()
 		}
@@ -169,6 +180,7 @@ func uiSearchBar(c *ui.Context, query *string, p searchBarProps) ui.Element {
 				hk.Margin(0, -4, 0, 0)
 			}
 		}
+		input.PlaceholderColor(placeholderColorFor(tk, input))
 	})
 	styleField(root, tk, inputOutlined, false, input.Focused())
 	return input
