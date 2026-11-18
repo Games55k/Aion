@@ -218,32 +218,35 @@ func truncateUTF8(s string, maxBytes int) string {
 // rotate only touches paths recorded locally after successful creation; neither
 // filenames nor an archive's own manifest establish ownership. Hash mismatches
 // lose ownership and are preserved (a user may have replaced a file manually).
-// It stops before deleting keepFile, and returns the entries still owned.
+// The current restore source is retained in addition to the newest keep entries.
 func (s *Service) rotate(ctx context.Context, files []ownedBackup, keep int, keepFile os.FileInfo) ([]ownedBackup, error) {
 	sort.SliceStable(files, func(i, j int) bool { return files[i].CreatedAt.Before(files[j].CreatedAt) })
+	var protected []ownedBackup
 	for len(files) > keep {
 		if err := ctx.Err(); err != nil {
-			return files, err
+			return append(protected, files...), err
 		}
 		old := files[0]
 		if keepFile != nil {
 			if info, err := os.Stat(old.Path); err == nil && os.SameFile(info, keepFile) {
-				return files, nil
+				protected = append(protected, old)
+				files = files[1:]
+				continue
 			}
 		}
 		h, err := archiveHash(ctx, old.Path)
 		// A missing file, or a replaced symlink/special file, is never removed.
 		if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, model.ErrInvalid) {
-			return files, err
+			return append(protected, files...), err
 		}
 		if err == nil && h == old.SHA256 {
 			if err = os.Remove(old.Path); err != nil {
-				return files, err
+				return append(protected, files...), err
 			}
 		}
 		files = files[1:]
 	}
-	return files, nil
+	return append(protected, files...), nil
 }
 
 // recordSafetyBackup takes ownership of a new pre-restore archive and prunes

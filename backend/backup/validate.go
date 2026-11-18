@@ -133,9 +133,8 @@ func validateJobApplicationRows(ctx context.Context, db *sql.DB) error {
 			if !outcome.Valid() || !closedAt.Valid {
 				return invalid("closed job application requires outcome and closed_at")
 			}
-			if outcome.RequiresOfferStage() && stage != model.JobStageOffer {
-				return invalid("offer closure outcome requires offer stage")
-			}
+			// Closing enforces the Offer stage at that instant. The user may
+			// subsequently correct the stage while retaining the outcome.
 		}
 	}
 	return rows.Err()

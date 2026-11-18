@@ -70,7 +70,7 @@ func buildV1BackupArchive(t *testing.T, createdAt time.Time, mutate func(*sql.DB
 }
 
 func TestExportAndRestoreV2WithJobApplications(t *testing.T) {
-	// Exporting and restoring a v2 workspace preserves job applications, closure snapshots, and complete timelines.
+	// Restore must preserve the Offer outcome even after the user corrects the current stage.
 	source := testStore(t)
 	seed(t, source, "proj-1", "attachment-payload")
 	jobs := jobapplications.New(source)
@@ -98,6 +98,11 @@ func TestExportAndRestoreV2WithJobApplications(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	app, err = jobs.ChangeStage(testCtx, jobapplications.ChangeStageInput{ID: app.ID, ToStage: model.JobStageHR})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	archive := filepath.Join(t.TempDir(), "v2-backup.zip")
 	if err := New(source).Export(testCtx, archive); err != nil {
 		t.Fatal(err)
@@ -113,11 +118,11 @@ func TestExportAndRestoreV2WithJobApplications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CompanyName != "未来科技" || got.Outcome != model.JobOutcomeOfferAccepted || got.ClosureReason != "已签约" || !got.ReachedOffer {
+	if got.CompanyName != "未来科技" || got.Stage != model.JobStageHR || got.Outcome != model.JobOutcomeOfferAccepted || got.ClosureReason != "已签约" || !got.ReachedOffer {
 		t.Fatalf("restored job application mismatch: %+v", got)
 	}
 	evs, err := restoredJobs.ListEvents(testCtx, app.ID)
-	if err != nil || len(evs) != 3 {
+	if err != nil || len(evs) != 4 {
 		t.Fatalf("restored events = %+v, err=%v", evs, err)
 	}
 }
@@ -238,7 +243,7 @@ func TestRejectCorruptV1AndInvalidV2JobBackupsWithoutTouchingLive(t *testing.T) 
 		{"blank company", `UPDATE job_applications SET company_name='   ' WHERE id='` + srcApp.ID + `'`},
 		{"bad applied_date", `UPDATE job_applications SET applied_date='2026-02-30' WHERE id='` + srcApp.ID + `'`},
 		{"bad application_url", `UPDATE job_applications SET application_url='javascript:alert(1)' WHERE id='` + srcApp.ID + `'`},
-		{"offer outcome without offer stage", `UPDATE job_applications SET stage='interview_1', lifecycle='closed', outcome='offer_accepted', closed_at='2026-11-02T10:00:00Z' WHERE id='` + srcApp.ID + `'`},
+		{"bad follow-up date", `UPDATE job_applications SET next_follow_up_date='2026-02-30' WHERE id='` + srcApp.ID + `'`},
 		{"bad event timestamp", `UPDATE job_application_events SET occurred_at='bad-ts' WHERE application_id='` + srcApp.ID + `'`},
 	}
 	for _, tc := range invalidMutations {

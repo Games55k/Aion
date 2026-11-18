@@ -924,7 +924,18 @@ func TestRestoreRotatesOwnedSafetyBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Restoring from the oldest remaining safety archive must not delete it.
-	restore(safety[1])
+	for range MaxSafetyBackups + 1 {
+		restore(safety[1])
+	}
+	state, err := service.loadState()
+	if err != nil || len(state.Safety) != MaxSafetyBackups+1 {
+		t.Fatalf("expected the restore source plus the latest safety archives, got %d: %v", len(state.Safety), err)
+	}
+	for _, path := range safety[2 : len(safety)-MaxSafetyBackups] {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale safety archive %s survived rotation: %v", path, err)
+		}
+	}
 	for _, path := range []string{safety[1], foreign, archive} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("restore removed %s: %v", path, err)

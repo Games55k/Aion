@@ -15,6 +15,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 - Use `automation_e2e.go` (`go build -tags e2e` with `MYGO_AUTOMATION` and `-data-dir` in a temporary directory) and `mygo-automation` for real-window smoke checks, layout inspection, and screenshots. Do not replace deterministic `ui.Tester` tests with Automation, do not bypass `Host` stubs for dialogs/external apps, and do not add GUI-dependent Automation checks as unconditional CI gates. Prefer stable `Key`s and accessibility labels over transient `@eN` refs, and check explicit state with bounded deadlines instead of fixed sleeps.
 - Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
 - Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
+- Round-trip a closed Offer application after a stage correction. When restoring from an old safety archive repeatedly, verify rotation retains the source and the latest five safety archives.
 - Cover partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
 
 ## Documentation
