@@ -2746,9 +2746,9 @@ func (w *Workbench) View(c *ui.Context) {
 	// Apply theme according to saved setting (system / light / dark)
 	switch w.themeSetting {
 	case ThemeLight:
-		c.SetTheme(lightPalette().Theme())
+		c.SetTheme(uiLightTheme)
 	case ThemeDark:
-		c.SetTheme(darkPalette().Theme())
+		c.SetTheme(uiDarkTheme)
 	default:
 		applyUITheme(c)
 	}

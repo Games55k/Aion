@@ -352,15 +352,9 @@ func (t *uiTokens) Color(name string) (ui.Color, bool) {
 	return ui.Color{}, false
 }
 
-func lightPalette() *uiTokens {
-	t := lightTokens
-	return &t
-}
+func lightPalette() *uiTokens { return &lightTokens }
 
-func darkPalette() *uiTokens {
-	t := darkTokens
-	return &t
-}
+func darkPalette() *uiTokens { return &darkTokens }
 
 func mixColor(c, o ui.Color, t float32) ui.Color {
 	t = max(0, min(t, 1))
@@ -464,8 +458,10 @@ const (
 	sideTop
 )
 
-func popupTransition() ui.ElementTransition {
-	return ui.ElementTransition{
+var (
+	tooltipEnterAnim = bouncySpring(280 * time.Millisecond)
+
+	basePopupTransition = ui.ElementTransition{
 		Duration:     150 * time.Millisecond,
 		Ease:         easeOut,
 		ExitDuration: 75 * time.Millisecond,
@@ -473,21 +469,14 @@ func popupTransition() ui.ElementTransition {
 		Enter:        &ui.Motion{Scale: 0.96, Y: -6, Flip: true},
 		Exit:         &ui.Motion{Scale: 0.96, Y: -6, Flip: true},
 	}
-}
-
-func tooltipTransition() ui.ElementTransition {
-	enter := bouncySpring(280 * time.Millisecond)
-	return ui.ElementTransition{
-		Animation:    &enter,
+	baseTooltipTransition = ui.ElementTransition{
+		Animation:    &tooltipEnterAnim,
 		ExitDuration: 100 * time.Millisecond,
 		ExitEase:     exitEase,
 		Enter:        &ui.Motion{Scale: 0.97, Y: -3, Flip: true},
 		Exit:         &ui.Motion{Scale: 0.97, Y: -3, Flip: true},
 	}
-}
-
-func modalTransition() ui.ElementTransition {
-	return ui.ElementTransition{
+	baseModalTransition = ui.ElementTransition{
 		Duration:     220 * time.Millisecond,
 		Ease:         softEase,
 		ExitDuration: 120 * time.Millisecond,
@@ -495,34 +484,32 @@ func modalTransition() ui.ElementTransition {
 		Enter:        &ui.Motion{Scale: 0.97},
 		Exit:         &ui.Motion{Scale: 0.98},
 	}
-}
-
-func backdropTransition() ui.ElementTransition {
-	return ui.ElementTransition{
+	baseBackdropTransition = ui.ElementTransition{
 		Duration: 180 * time.Millisecond,
 		Ease:     softEase,
 		Enter:    &ui.Motion{},
 		Exit:     &ui.Motion{},
 	}
-}
-
-func toastTransition() ui.ElementTransition {
-	return ui.ElementTransition{
+	baseToastTransition = ui.ElementTransition{
 		Duration: 400 * time.Millisecond,
 		Ease:     toastEase,
 		Enter:    &ui.Motion{YPercent: 150},
 		Exit:     &ui.Motion{YPercent: 150},
 	}
-}
-
-func collapseTransition() ui.ElementTransition {
-	return ui.ElementTransition{
+	baseCollapseTransition = ui.ElementTransition{
 		Duration: 200 * time.Millisecond,
 		Ease:     easeOut,
 		Enter:    &ui.Motion{Collapse: true, Y: 6},
 		Exit:     &ui.Motion{Collapse: true, Y: -6},
 	}
-}
+)
+
+func popupTransition() ui.ElementTransition    { return basePopupTransition }
+func tooltipTransition() ui.ElementTransition  { return baseTooltipTransition }
+func modalTransition() ui.ElementTransition    { return baseModalTransition }
+func backdropTransition() ui.ElementTransition { return baseBackdropTransition }
+func toastTransition() ui.ElementTransition    { return baseToastTransition }
+func collapseTransition() ui.ElementTransition { return baseCollapseTransition }
 
 func towardSide(tr ui.ElementTransition, side motionSide) ui.ElementTransition {
 	turn := func(m *ui.Motion) *ui.Motion {

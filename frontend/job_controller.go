@@ -668,17 +668,12 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 	}
 	w.jobBackfillRequest = input
 	service := w.app.JobApplications
-	var updated model.JobApplication
 	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
 		if _, err := service.BackfillStageEvent(context.Background(), input); err != nil {
 			return err
 		}
 		var err error
-		updated, err = service.Get(context.Background(), appID)
-		if err != nil {
-			return err
-		}
 		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
@@ -698,9 +693,7 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 				w.jobBackfillNote = ""
 			}
 		}
-		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
-			w.detailJob.ReachedOffer = updated.ReachedOffer
 			w.detailJobEvents = events
 		}
 	})
