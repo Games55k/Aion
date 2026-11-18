@@ -104,6 +104,35 @@ func TestReplaceDatabase(t *testing.T) {
 	}
 }
 
+// A restore that loses the live database path must not silently reopen a newly created empty database.
+func TestFailedReplacementDoesNotCreateMissingDatabase(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	snapshot := filepath.Join(t.TempDir(), "snapshot.sqlite")
+	err = s.Exclusive(ctx, func(db *sql.DB) error {
+		if _, err := db.Exec("VACUUM INTO ?", snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(s.DBPath(), s.DBPath()+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		return s.ReplaceDatabaseLocked(ctx, snapshot)
+	})
+	if err == nil {
+		t.Fatal("replaced a missing database")
+	}
+	if _, err := os.Stat(s.DBPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing live database was recreated: %v", err)
+	}
+	if err := s.Read(ctx, func(_ *sql.Tx) error { return nil }); err == nil {
+		t.Fatal("store continued to use an unrelated database")
+	}
+}
+
 // Opening a database with a newer schema version fails without rewriting its contents.
 func TestFutureSchemaIsRejectedWithoutRewriting(t *testing.T) {
 	root := t.TempDir()
@@ -121,7 +150,7 @@ func TestFutureSchemaIsRejectedWithoutRewriting(t *testing.T) {
 		newer.Close()
 		t.Fatal("future schema accepted")
 	}
-	db, err := openDB(filepath.Join(root, "aion.sqlite"))
+	db, err := openDB(filepath.Join(root, "aion.sqlite"), "rw")
 	if err != nil {
 		t.Fatal(err)
 	}

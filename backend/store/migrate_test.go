@@ -13,7 +13,7 @@ func TestIncrementalMigrationFromV1PreservesDataAndMatchesFreshSchema(t *testing
 	ctx := context.Background()
 	v1Dir := t.TempDir()
 	dbPath := filepath.Join(v1Dir, "aion.sqlite")
-	db, err := openDB(dbPath)
+	db, err := openDB(dbPath, "rwc")
 	if err != nil {
 		t.Fatalf("open v1 db: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestFailedMigrationRollsBackWithoutCorruptingV1Data(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "aion.sqlite")
-	db, err := openDB(dbPath)
+	db, err := openDB(dbPath, "rwc")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestFailedMigrationRollsBackWithoutCorruptingV1Data(t *testing.T) {
 		t.Fatal("expected migration failure on conflicting table")
 	}
 
-	recheck, err := openDB(dbPath)
+	recheck, err := openDB(dbPath, "rw")
 	if err != nil {
 		t.Fatalf("reopen raw db: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestMigrateDatabaseFileRejectsUnversionedOrFutureDB(t *testing.T) {
 	// MigrateDatabaseFile must reject empty unversioned files and future schema versions before modifying anything.
 	ctx := context.Background()
 	unversioned := filepath.Join(t.TempDir(), "empty.sqlite")
-	db, err := openDB(unversioned)
+	db, err := openDB(unversioned, "rwc")
 	if err != nil {
 		t.Fatalf("open empty db: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestMigrateDatabaseFileRejectsUnversionedOrFutureDB(t *testing.T) {
 	}
 
 	future := filepath.Join(t.TempDir(), "future.sqlite")
-	db2, err := openDB(future)
+	db2, err := openDB(future, "rwc")
 	if err != nil {
 		t.Fatalf("open future db: %v", err)
 	}

@@ -768,8 +768,7 @@ func (s *Service) restore(ctx context.Context, source string) (RestoreResult, er
 			return err
 		}
 		if err := s.replaceDatabase(ctx, filepath.Join(dir, "database.sqlite")); err != nil {
-			// Store restores its old database on failure. Preserve the old file
-			// directory until rollback has completed; never delete it on failure.
+			// Preserve the original attachments until their rollback succeeds.
 			moveErr := os.Rename(live, filepath.Join(dir, "failed-attachments"))
 			rollbackErr := os.Rename(old, live)
 			if rollbackErr != nil {

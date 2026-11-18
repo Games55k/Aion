@@ -69,7 +69,7 @@ func Open(root string) (*Store, error) {
 		return nil, fmt.Errorf("data directory is already open: %w", err)
 	}
 	s := &Store{root: root, lock: lock}
-	s.db, err = openDB(s.DBPath())
+	s.db, err = openDB(s.DBPath(), "rwc")
 	if err == nil {
 		err = s.migrate()
 	}
@@ -80,12 +80,13 @@ func Open(root string) (*Store, error) {
 	return s, nil
 }
 
-func openDB(path string) (*sql.DB, error) {
+func openDB(path, mode string) (*sql.DB, error) {
 	if st, e := os.Lstat(path); e == nil && !st.Mode().IsRegular() {
 		return nil, errors.New("unsafe database path")
 	}
 	u := url.URL{Scheme: "file", Path: path}
 	q := url.Values{}
+	q.Set("mode", mode)
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "busy_timeout(5000)")
 	u.RawQuery = q.Encode()
@@ -122,7 +123,7 @@ func ApplySchemaUpTo(ctx context.Context, db *sql.DB, targetVersion int) error {
 
 // MigrateDatabaseFile upgrades an isolated SQLite file from an older supported schema version to SchemaVersion.
 func MigrateDatabaseFile(ctx context.Context, path string) error {
-	db, err := openDB(path)
+	db, err := openDB(path, "rw")
 	if err != nil {
 		return err
 	}
@@ -281,7 +282,7 @@ func (s *Store) ReplaceDatabaseLocked(ctx context.Context, stagedPath string) er
 	if err != nil {
 		return err
 	}
-	probe, err := openDB(name)
+	probe, err := openDB(name, "rw")
 	if err != nil {
 		return err
 	}
@@ -299,17 +300,24 @@ func (s *Store) ReplaceDatabaseLocked(ctx context.Context, stagedPath string) er
 		return errors.New("invalid restore database")
 	}
 	old := filepath.Join(s.root, ".previous-db-"+filepath.Base(name))
-	if err = s.db.Close(); err != nil {
-		return err
+	err = s.db.Close()
+	s.db = nil
+	reopen := func() error {
+		var openErr error
+		s.db, openErr = openDB(s.DBPath(), "rw")
+		return openErr
 	}
-	reopen := func() error { var e error; s.db, e = openDB(s.DBPath()); return e }
+	if err != nil {
+		return errors.Join(err, reopen())
+	}
 	if err = os.Rename(s.DBPath(), old); err != nil {
 		return errors.Join(err, reopen())
 	}
 	rollback := func(cause error) error {
-		os.Remove(s.DBPath())
-		e := os.Rename(old, s.DBPath())
-		return errors.Join(cause, e, reopen())
+		if err := os.Rename(old, s.DBPath()); err != nil {
+			return errors.Join(cause, fmt.Errorf("database rollback failed; original retained at %s: %w", old, err))
+		}
+		return errors.Join(cause, reopen())
 	}
 	if err = os.Rename(name, s.DBPath()); err != nil {
 		return rollback(err)

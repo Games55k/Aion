@@ -626,6 +626,43 @@ func TestRecycleBinAndSettingsBackupRestore(t *testing.T) {
 	}
 }
 
+// Cancelling after the safety archive is written used to hide its location from the user.
+func TestRestoreFailureRetainsSafetyBackupLocation(t *testing.T) {
+	dir := t.TempDir()
+	fixed := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
+	queue := make(chan func(), 16)
+	var wb *Workbench
+	now := func() time.Time {
+		archives, _ := filepath.Glob(filepath.Join(dir, "backups", "safety-*.zip"))
+		if len(archives) > 0 && wb != nil {
+			wb.CancelBusyTask()
+		}
+		return fixed
+	}
+	app, wb, tt := openTestWorkbenchAt(t, dir, now, Host{
+		Now:      func() time.Time { return fixed },
+		Dispatch: func(f func()) { queue <- f },
+	})
+	archive := filepath.Join(t.TempDir(), "source.zip")
+	if err := app.Backups.Export(context.Background(), archive); err != nil {
+		t.Fatal(err)
+	}
+	wb.NavigateTo(NavSettings)
+	wb.RequestRestoreBackup(archive)
+	tt.Frame()
+	if err := tt.Click("确认覆盖并恢复"); err != nil {
+		t.Fatal(err)
+	}
+	drainTestUI(wb, queue)
+	safety, err := filepath.Glob(filepath.Join(dir, "backups", "safety-*.zip"))
+	if err != nil || len(safety) != 1 {
+		t.Fatalf("expected pre-restore archive, found %v, error %v", safety, err)
+	}
+	if wb.lastRestoreResult != nil || !strings.Contains(wb.lastRestoreError, safety[0]) {
+		t.Fatalf("restore result = %+v, reported error = %q", wb.lastRestoreResult, wb.lastRestoreError)
+	}
+}
+
 // Export populated board and settings snapshots for manual visual inspection when requested.
 func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
@@ -4253,4 +4290,3 @@ func TestInputPlaceholderHidesOnFocus(t *testing.T) {
 	tt.Frame()
 	assertPlaceholderHides("新建任务描述输入框", "新建任务标签输入框")
 }
-

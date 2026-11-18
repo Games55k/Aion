@@ -278,7 +278,12 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 						})
 					}
 
-					if w.lastRestoreResult != nil {
+					if w.lastRestoreError != "" {
+						uiAlert(c.Key("settings-restore-error"), "备份恢复失败", alertProps{
+							Type:        alertError,
+							Description: w.lastRestoreError,
+						})
+					} else if w.lastRestoreResult != nil {
 						uiAlert(c.Key("settings-restore-alert"), "数据已从备份包完整恢复", alertProps{
 							Type:        alertSuccess,
 							Description: fmt.Sprintf("恢复前自动生成的安全备份已保存在: %s", w.lastRestoreResult.SafetyBackupPath),

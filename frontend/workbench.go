@@ -304,6 +304,7 @@ type Workbench struct {
 	backupStatus         backup.AutoStatus
 	lastExportedZipPath  string
 	lastRestoreResult    *backup.RestoreResult
+	lastRestoreError     string
 	confirmRestoreOpen   bool
 	pendingRestoreZip    string
 	updateInfo           UpdateCapability
@@ -2571,6 +2572,7 @@ func (w *Workbench) RequestRestoreBackup(zipPath string) {
 
 func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.lastRestoreResult = &res
+	w.lastRestoreError = ""
 	w.mu.Lock()
 	w.lastAsyncErr = ""
 	w.mu.Unlock()
@@ -2696,7 +2698,12 @@ func (w *Workbench) TriggerRestoreBackup() {
 		return func() {
 			defer w.setRestoring(false)
 			if err != nil {
-				w.enqueueErrorToast("备份恢复失败（原数据未受影响）", err)
+				w.lastRestoreResult = nil
+				w.lastRestoreError = err.Error()
+				if res.SafetyBackupPath != "" {
+					w.lastRestoreError += "\n恢复前安全备份：" + res.SafetyBackupPath
+				}
+				w.EnqueueToast(ToastProps{Title: "备份恢复失败", Description: w.lastRestoreError, Type: ToastError})
 				return
 			}
 			w.applyRestoredState(res)
