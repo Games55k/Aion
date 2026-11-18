@@ -1209,6 +1209,8 @@ func (w *Workbench) resetSelectedTaskState() {
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
+	w.pendingSave = nil
+	w.discardAfterSave = false
 	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
 	w.attachmentPaths = make(map[string]string)
@@ -1221,13 +1223,18 @@ func (w *Workbench) resetSelectedTaskState() {
 // DiscardSelectedTaskDraft explicitly discards unsaved edits on the currently selected task
 // and restores its fields from the last saved version.
 func (w *Workbench) DiscardSelectedTaskDraft() {
-	w.afterSave = nil
-	if w.saving {
-		w.pendingSave = nil
-		w.discardAfterSave = true
+	if w.IsRestoring() {
 		return
 	}
-	if w.IsRestoring() {
+	w.afterSave = nil
+	w.pendingSave = nil
+	w.saveRevision++
+	if w.saving {
+		w.clearDetailTransientInputs()
+		if w.detailTask != nil {
+			w.syncDetailFromTask(*w.detailTask)
+		}
+		w.discardAfterSave = true
 		return
 	}
 	if w.detailTask != nil {
@@ -1775,10 +1782,18 @@ func (w *Workbench) QuickCreateTask(status model.Status, title string) (*model.T
 
 // SoftDeleteTask moves a task to the Recycle Bin.
 func (w *Workbench) SoftDeleteTask(taskID string) {
-	if w.IsRestoring() {
+	if w.IsRestoring() || taskID == "" {
 		return
 	}
-	if w.selectedTaskID != taskID {
+	if w.saving && w.selectedTaskID == taskID {
+		w.EnqueueToast(ToastProps{Title: "正在保存任务", Description: "保存完成后再移入回收站", Type: ToastInfo})
+		return
+	}
+	if w.selectedTaskID == taskID {
+		w.pendingSave = nil
+		w.discardAfterSave = false
+		w.afterSave = nil
+	} else {
 		if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再删除其他任务"); err != nil {
 			return
 		}
@@ -2578,6 +2593,8 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.mu.Unlock()
 
 	// Reset all pre-restore UI/filter/modal/draft state WITHOUT flushing old drafts into the restored DB.
+	w.afterSave = nil
+	w.boardNeedsReload = false
 	w.activeProjectID = ""
 	w.boardTasks = nil
 	w.filteredTasks = nil

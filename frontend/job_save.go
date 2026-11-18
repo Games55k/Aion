@@ -208,7 +208,7 @@ func (w *Workbench) SaveSelectedJob() error {
 
 // DiscardJobChanges reverts unsaved job detail edits back to the last persisted state.
 func (w *Workbench) DiscardJobChanges() {
-	if !w.jobSelected() {
+	if w.IsRestoring() || !w.jobSelected() {
 		return
 	}
 	w.afterSave = nil
@@ -243,6 +243,10 @@ func (w *Workbench) startJobSave(request jobSave) error {
 			w.discardJobAfterSave = false
 			if w.detailJob != nil {
 				w.syncDetailFromJob(*w.detailJob)
+			}
+			if next := w.afterSave; next != nil {
+				w.afterSave = nil
+				next()
 			}
 			return
 		}

@@ -815,9 +815,10 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再移入回收站", Type: ToastInfo})
 		return
 	}
-	if w.selectedJobID == appID && (w.jobDirty || w.hasUnsavedChangesFromDetailJob()) {
+	if w.selectedJobID == appID {
 		// Explicit delete supersedes unsaved text edits cleanly instead of trapping the user on validation errors.
 		w.pendingJobSave = nil
+		w.discardJobAfterSave = false
 		w.afterSave = nil
 	}
 	service := w.app.JobApplications

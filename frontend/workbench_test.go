@@ -4290,3 +4290,31 @@ func TestInputPlaceholderHidesOnFocus(t *testing.T) {
 	tt.Frame()
 	assertPlaceholderHides("新建任务描述输入框", "新建任务标签输入框")
 }
+
+// Regression: whitespace-only job search queries triggered the filtered empty state, and out-of-range or dismissed toasts panicked or retained stale heights.
+func TestWhitespaceJobSearchEmptyStateAndToastLifecycle(t *testing.T) {
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	wb.SwitchModule("job_applications")
+	wb.jobSearchQuery = "   "
+	wb.rebuildJobDerived()
+	tt.Frame()
+
+	if err := tt.Click("立即新增投递"); err != nil {
+		t.Fatalf("expected unfiltered empty-state create action under whitespace search: %v", err)
+	}
+	if !wb.jobCreateOpen {
+		t.Fatal("expected job create modal to open")
+	}
+	wb.jobCreateOpen = false
+
+	for i := 0; i < 3; i++ {
+		wb.EnqueueToast(ToastProps{
+			Title:   fmt.Sprintf("toast-%d", i),
+			Type:    ToastType(99),
+			Timeout: 50 * time.Millisecond,
+		})
+	}
+	tt.Frame()
+	tt.Advance(200 * time.Millisecond)
+	tt.Frame()
+}

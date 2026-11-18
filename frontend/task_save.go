@@ -79,7 +79,12 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 		}
 		if w.discardAfterSave {
 			w.discardAfterSave = false
+			w.clearDetailTransientInputs()
 			w.syncDetailFromTask(*w.detailTask)
+			if next := w.afterSave; next != nil {
+				w.afterSave = nil
+				next()
+			}
 			return
 		}
 		if next := w.pendingSave; next != nil {

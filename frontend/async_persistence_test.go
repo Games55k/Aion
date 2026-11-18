@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -563,5 +564,91 @@ func TestQueuedJobSelectionPreservesNewDraft(t *testing.T) {
 	drainTestUI(w, queue)
 	if w.selectedJobID != first.ID || !w.jobDirty || w.editJobURL != "ftp://invalid.example" {
 		t.Fatal("stale selection replaced the new draft")
+	}
+}
+
+// Regression: discarding during an in-flight task or job save dropped a subsequent close or navigation and left afterSave armed for a later save.
+func TestAsyncDiscardThenNavigateDoesNotDropOrLeakAfterSave(t *testing.T) {
+	s, w, tt, queue, ps, _ := asyncTestWorkbench(t)
+	task2, err := w.app.Projects.CreateTask(context.Background(), ps[0].ID, projects.TaskInput{
+		Title:    "Second task",
+		Status:   model.Planned,
+		Priority: model.Low,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unlock := holdTestStore(t, s)
+	typeTaskTitle(t, tt, "In flight task")
+	typeTaskTitle(t, tt, "   ")
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.SelectProject(ps[1].ID)
+	unlock()
+	drainTestUI(w, queue)
+	tt.Frame()
+	if w.activeProjectID != ps[1].ID {
+		t.Fatalf("expected deferred project switch after discard-while-saving, got %q", w.activeProjectID)
+	}
+
+	w.SelectProject(ps[0].ID)
+	drainTestUI(w, queue)
+	w.SelectTask(task2.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	typeTaskTitle(t, tt, "Independent task edit")
+	drainTestUI(w, queue)
+	if w.activeProjectID != ps[0].ID || w.selectedTaskID != task2.ID {
+		t.Fatalf("stale afterSave leaked into unrelated task save: project=%q selected=%q", w.activeProjectID, w.selectedTaskID)
+	}
+
+	s2, w2, tt2, queue2, _, job2 := asyncJobTestWorkbench(t)
+	unlock2 := holdTestStore(t, s2)
+	typeJobDetailField(t, tt2, "详情公司名称", "在途公司")
+	typeJobDetailField(t, tt2, "详情公司名称", "   ")
+	if err := tt2.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w2.CloseJobDetail()
+	unlock2()
+	drainTestUI(w2, queue2)
+	tt2.Frame()
+	if w2.jobDetailOpen || w2.selectedJobID != "" {
+		t.Fatalf("expected job detail closed after discard-while-saving finished, open=%v selected=%q", w2.jobDetailOpen, w2.selectedJobID)
+	}
+
+	w2.SelectJobApplication(job2.ID)
+	drainTestUI(w2, queue2)
+	tt2.Frame()
+	typeJobDetailField(t, tt2, "详情公司名称", "独立求职修改")
+	drainTestUI(w2, queue2)
+	if !w2.jobDetailOpen || w2.selectedJobID != job2.ID {
+		t.Fatalf("stale afterSave leaked into unrelated job save: open=%v selected=%q", w2.jobDetailOpen, w2.selectedJobID)
+	}
+}
+
+// Regression: SoftDeleteTask lacked an in-flight save guard and left pending save state behind when deleting the active task.
+func TestAsyncSoftDeleteTaskGuardWhileSaving(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeTaskTitle(t, tt, "Saving before delete")
+	w.SoftDeleteTask(task.ID)
+	if w.selectedTaskID != task.ID {
+		t.Fatal("SoftDeleteTask deleted the task while an async save was still in flight")
+	}
+	unlock()
+	drainTestUI(w, queue)
+	tt.Frame()
+
+	typeTaskTitle(t, tt, "   ")
+	w.SoftDeleteTask(task.ID)
+	drainTestUI(w, queue)
+	if w.selectedTaskID != "" || w.pendingSave != nil || w.afterSave != nil || w.discardAfterSave {
+		t.Fatalf("expected active task save state cleared on delete, selected=%q pending=%v", w.selectedTaskID, w.pendingSave)
+	}
+	if _, err := w.app.Projects.GetTask(context.Background(), task.ID); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("expected deleted task not found, got %v", err)
 	}
 }

@@ -229,7 +229,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 
 							if uiButton(c, "选择目录...", buttonProps{
 								Variant: buttonDefault,
-							}).Clicked() {
+							}).Disabled(w.IsBusy()).Clicked() {
 								if pick := w.host.PickDirectory; pick != nil {
 									curDir := w.backupDirInput
 									w.runDialog(func() func() {

@@ -209,7 +209,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 			}
 		})
 
-		if w.jobSearchQuery != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero() {
+		if strings.TrimSpace(w.jobSearchQuery) != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero() {
 			clearBtn := uiButton(c, "清除筛选", buttonProps{Variant: buttonText, Size: sizeSmall})
 			if clearBtn.Clicked() {
 				w.ClearJobFilters()
@@ -219,7 +219,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 }
 
 func (w *Workbench) renderJobEmptyState(c *ui.Context) {
-	hasFilter := w.jobSearchQuery != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero()
+	hasFilter := strings.TrimSpace(w.jobSearchQuery) != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero()
 	title := "暂无投递记录"
 	desc := "点击「新增投递」记录你的第一条求职投递，支持后续阶段追踪、结果结束与时间线回溯。"
 	if hasFilter {
