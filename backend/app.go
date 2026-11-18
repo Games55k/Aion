@@ -3,13 +3,11 @@
 package backend
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"time"
 
@@ -105,27 +103,7 @@ func (e *AttachmentCleanupError) Unwrap() error { return e.Err }
 
 // ListTrash aggregates soft-deleted items from all built-in modules ordered newest-deleted first.
 func (a *App) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
-	projectItems, err := a.Projects.ListTrash(ctx)
-	if err != nil {
-		return nil, err
-	}
-	jobItems, err := a.JobApplications.ListTrash(ctx)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]model.TrashItem, 0, len(projectItems)+len(jobItems))
-	items = append(items, projectItems...)
-	items = append(items, jobItems...)
-	slices.SortFunc(items, func(x, y model.TrashItem) int {
-		if c := y.DeletedAt.Compare(x.DeletedAt); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(x.Kind, y.Kind); c != 0 {
-			return c
-		}
-		return cmp.Compare(x.ID, y.ID)
-	})
-	return items, nil
+	return a.s.ListTrash(ctx, projects.TrashQuery+" UNION ALL "+jobapplications.TrashQuery)
 }
 
 // RestoreTrash restores a soft-deleted item by dispatching to the owning module service.

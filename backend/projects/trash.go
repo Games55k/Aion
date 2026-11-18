@@ -3,8 +3,6 @@ package projects
 import (
 	"context"
 	"database/sql"
-	"sort"
-	"time"
 
 	"aion/backend/model"
 )
@@ -14,44 +12,13 @@ const (
 	TrashTask    = "task"
 )
 
-// ListTrash includes deleted projects and independently deleted tasks (including
-// those inside deleted projects). Tasks merely hidden by a deleted project do
-// not acquire their own trash entry.
+// TrashQuery selects independently deleted items, including deleted tasks whose parent is in trash.
+const TrashQuery = `SELECT id,'project',name,'',deleted_at FROM projects WHERE deleted_at IS NOT NULL
+			UNION ALL SELECT id,'task',title,project_id,deleted_at FROM tasks WHERE deleted_at IS NOT NULL`
+
+// ListTrash returns this module's trash, newest deletion first.
 func (s *Service) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
-	result := make([]model.TrashItem, 0)
-	err := s.store.Read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT id,'project',name,'',deleted_at FROM projects WHERE deleted_at IS NOT NULL
-			UNION ALL SELECT id,'task',title,project_id,deleted_at FROM tasks WHERE deleted_at IS NOT NULL`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var item model.TrashItem
-			var deleted string
-			if err = rows.Scan(&item.ID, &item.Kind, &item.Name, &item.ProjectID, &deleted); err != nil {
-				return err
-			}
-			if item.DeletedAt, err = time.Parse(time.RFC3339Nano, deleted); err != nil {
-				return err
-			}
-			result = append(result, item)
-		}
-		return rows.Err()
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if !result[i].DeletedAt.Equal(result[j].DeletedAt) {
-			return result[i].DeletedAt.After(result[j].DeletedAt)
-		}
-		if result[i].Kind != result[j].Kind {
-			return result[i].Kind < result[j].Kind
-		}
-		return result[i].ID < result[j].ID
-	})
-	return result, nil
+	return s.store.ListTrash(ctx, TrashQuery)
 }
 
 func (s *Service) RestoreTrash(ctx context.Context, kind, id string) error {

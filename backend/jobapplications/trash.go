@@ -3,7 +3,6 @@ package jobapplications
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"aion/backend/model"
 )
@@ -52,34 +51,13 @@ func (s *Service) Restore(ctx context.Context, id string) error {
 	})
 }
 
-// ListTrash lists all soft-deleted job applications ordered by deletion timestamp descending.
+// TrashQuery selects recycled applications for the shared trash listing.
+const TrashQuery = `SELECT id,'` + TrashKind + `',company_name || ' / ' || position_name,'',deleted_at
+	FROM job_applications WHERE deleted_at IS NOT NULL`
+
+// ListTrash returns this module's trash, newest deletion first.
 func (s *Service) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
-	var out []model.TrashItem
-	err := s.s.Read(ctx, func(ro *sql.Tx) error {
-		rows, err := ro.QueryContext(ctx, `SELECT id, company_name, position_name, deleted_at FROM job_applications WHERE deleted_at IS NOT NULL`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id, company, position, deletedRaw string
-			if err := rows.Scan(&id, &company, &position, &deletedRaw); err != nil {
-				return err
-			}
-			deletedAt, err := parseTime(deletedRaw)
-			if err != nil {
-				return err
-			}
-			out = append(out, model.TrashItem{
-				ID:        id,
-				Kind:      TrashKind,
-				Name:      fmt.Sprintf("%s / %s", company, position),
-				DeletedAt: deletedAt,
-			})
-		}
-		return rows.Err()
-	})
-	return out, err
+	return s.s.ListTrash(ctx, TrashQuery)
 }
 
 // PermanentlyDelete removes one soft-deleted job application and cascades deletion to its timeline events.
