@@ -270,28 +270,24 @@ func TestTimelineOrderingBackfillDeduplicationAndFieldIsolation(t *testing.T) {
 	svc, _ := openTestService(t, &now)
 
 	app, err := svc.Create(ctx, jobapplications.CreateInput{
-		CompanyName:  "示例科技",
-		PositionName: "Go 后端",
-		AppliedDate:  "2026-11-01",
-		Stage:        model.JobStageInterview3,
+		CompanyName:      "示例科技",
+		PositionName:     "Go 后端",
+		AppliedDate:      "2026-11-01",
+		Stage:            model.JobStageInterview3,
+		NextFollowUpDate: "2026-11-20",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// UpdateFollowUpDate followed by UpdateDetails with NextFollowUpDate=nil must preserve the inline follow-up date.
-	app, err = svc.UpdateFollowUpDate(ctx, app.ID, "2026-11-20")
-	if err != nil || app.NextFollowUpDate != "2026-11-20" {
-		t.Fatalf("inline follow-up update failed: %+v, err=%v", app, err)
-	}
+	// Saving a draft that omits the follow-up date must preserve the stored value.
 	app, err = svc.UpdateDetails(ctx, jobapplications.UpdateDetailsInput{
-		ID:               app.ID,
-		CompanyName:      app.CompanyName,
-		PositionName:     app.PositionName,
-		AppliedDate:      app.AppliedDate,
-		Channel:          "内推",
-		Notes:            "多行备注第一版\n第二版自动保存",
-		NextFollowUpDate: nil, // Simulate detail draft leaving follow-up untouched
+		ID:           app.ID,
+		CompanyName:  app.CompanyName,
+		PositionName: app.PositionName,
+		AppliedDate:  app.AppliedDate,
+		Channel:      "内推",
+		Notes:        "多行备注第一版\n第二版自动保存",
 	})
 	if err != nil || app.NextFollowUpDate != "2026-11-20" || app.Channel != "内推" {
 		t.Fatalf("UpdateDetails clobbered follow-up or failed to save text: %+v, err=%v", app, err)

@@ -451,32 +451,6 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 	return updated, err
 }
 
-// UpdateFollowUpDate updates only next_follow_up_date and updated_at without clobbering other fields or creating timeline events.
-func (s *Service) UpdateFollowUpDate(ctx context.Context, id, followUpDate string) (model.JobApplication, error) {
-	trimmed := strings.TrimSpace(followUpDate)
-	if trimmed != "" {
-		if _, err := model.ParseCalendarDate(trimmed); err != nil {
-			return model.JobApplication{}, fmt.Errorf("%w: 下次跟进日期格式无效", model.ErrInvalid)
-		}
-	}
-	nowTS := s.timestamp()
-	var updated model.JobApplication
-	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE job_applications SET next_follow_up_date = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
-			trimmed, nowTS, id,
-		); err != nil {
-			return err
-		}
-		var err error
-		updated, err = getApplicationTx(ctx, tx, id)
-		return err
-	})
-	return updated, err
-}
-
 // ChangeStage atomically changes stage and records a stage_changed event.
 // Changing stage on a closed application acts as a stage correction without automatically reopening lifecycle.
 func (s *Service) ChangeStage(ctx context.Context, in ChangeStageInput) (model.JobApplication, error) {
