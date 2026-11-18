@@ -176,18 +176,18 @@ type Workbench struct {
 	jobSaving            bool
 	pendingJobSave       *jobSave
 	discardJobAfterSave  bool
-	jobsNeedReload       bool
+	jobWrites            []func()
 
 	// Job Timeline input & retry state
 	jobNoteInput           string
 	jobNoteDate            time.Time
 	jobNoteErr             string
-	jobNoteOpID            string
+	jobNoteRequest         jobapplications.AddNoteInput
 	jobBackfillStage       string
 	jobBackfillDate        time.Time
 	jobBackfillNote        string
 	jobBackfillErr         string
-	jobBackfillOpID        string
+	jobBackfillRequest     jobapplications.BackfillStageInput
 	jobTimelineDesc        bool
 	jobBackfillExpanded    bool
 	editingJobEventID      string
@@ -197,9 +197,6 @@ type Workbench struct {
 	pendingStageOpID       string
 	pendingQuickCloseAppID string
 	pendingQuickCloseOpID  string
-	jobReopenNote          string
-	jobReopenOpID          string
-	jobReopenErr           string
 
 	// Job Close workflow modal state
 	jobCloseOpen         bool
@@ -682,7 +679,7 @@ func (w *Workbench) PrepareClose() bool {
 		w.EnqueueToast(ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: ToastInfo})
 		return false
 	}
-	if w.jobSaving {
+	if w.jobSaving || len(w.jobWrites) > 0 {
 		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再关闭窗口", Type: ToastInfo})
 		return false
 	}
@@ -954,7 +951,7 @@ func (w *Workbench) detailModalOpen() bool {
 }
 
 func (w *Workbench) jobDetailModalOpen() bool {
-	return w.jobDetailOpen && w.selectedJobID != "" && w.detailJob != nil
+	return isJobNavPage(w.navPage) && w.jobDetailOpen && w.jobSelected()
 }
 
 func (w *Workbench) hasOpenModal() bool {
@@ -1153,6 +1150,8 @@ func (w *Workbench) SelectTask(taskID string) {
 		return
 	}
 	if w.selectedTaskID == taskID && w.detailTask != nil {
+		w.loadVersions["selection"]++
+		w.afterSave = nil
 		w.detailExpanded = true
 		return
 	}
@@ -2648,9 +2647,6 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.editingJobEventNote = ""
 	w.pendingQuickCloseAppID = ""
 	w.pendingQuickCloseOpID = ""
-	w.jobReopenNote = ""
-	w.jobReopenOpID = ""
-	w.jobReopenErr = ""
 	w.jobLastSavedAt = time.Time{}
 
 	w.resetSelectedTaskState()
@@ -2679,7 +2675,7 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 
 // TriggerRestoreBackup executes app.Backups.Restore off the UI thread via runAsyncTask.
 func (w *Workbench) TriggerRestoreBackup() {
-	if w.saving || w.jobSaving {
+	if w.saving || w.jobSaving || len(w.jobWrites) > 0 {
 		w.EnqueueToast(ToastProps{Title: "正在保存未完成修改", Description: "保存完成后再恢复备份", Type: ToastInfo})
 		return
 	}

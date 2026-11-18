@@ -498,3 +498,70 @@ func TestJobAsyncRestoreBackupGuardWhileSaving(t *testing.T) {
 	}
 }
 
+// An earlier timeline write must not consume a later submission, clear newer text, or race a restore.
+func TestQueuedTimelineNotesPreserveNewInput(t *testing.T) {
+	for _, tc := range []struct {
+		kind          model.JobEventType
+		input, submit string
+	}{
+		{model.JobEventNoteAdded, "时间线备注输入", "添加备注"},
+		{model.JobEventStageBackfilled, "补录说明", "补录历史事件"},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			s, w, tt, queue, job, _ := asyncJobTestWorkbench(t)
+			if tc.kind == model.JobEventStageBackfilled {
+				if err := tt.Click("切换补录历史节点"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unlock := holdTestStore(t, s)
+			for _, note := range []string{"first", "first", "second"} {
+				typeJobDetailField(t, tt, tc.input, note)
+				if err := tt.Click(tc.submit); err != nil {
+					t.Fatal(err)
+				}
+			}
+			typeJobDetailField(t, tt, tc.input, "third draft")
+			w.RequestRestoreBackup("unused.zip")
+			w.TriggerRestoreBackup()
+			if w.IsRestoring() || w.PrepareClose() {
+				t.Fatal("restore or close raced queued timeline writes")
+			}
+			unlock()
+			drainTestUI(w, queue)
+			draft := w.jobNoteInput
+			if tc.kind == model.JobEventStageBackfilled {
+				draft = w.jobBackfillNote
+			}
+			if draft != "third draft" || !w.PrepareClose() {
+				t.Fatalf("unexpected draft after writes: %q", draft)
+			}
+			events, err := w.app.JobApplications.ListEvents(context.Background(), job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			notes := map[string]int{}
+			for _, event := range events {
+				if event.EventType == tc.kind {
+					notes[event.Note]++
+				}
+			}
+			if len(notes) != 2 || notes["first"] != 1 || notes["second"] != 1 {
+				t.Fatalf("wrong persisted notes: %v", notes)
+			}
+		})
+	}
+}
+
+// A selection queued before a new edit must leave the edited record and its invalid draft open.
+func TestQueuedJobSelectionPreservesNewDraft(t *testing.T) {
+	s, w, tt, queue, first, second := asyncJobTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	w.SelectJobApplication(second.ID)
+	typeJobDetailField(t, tt, "详情投递链接", "ftp://invalid.example")
+	unlock()
+	drainTestUI(w, queue)
+	if w.selectedJobID != first.ID || !w.jobDirty || w.editJobURL != "ftp://invalid.example" {
+		t.Fatal("stale selection replaced the new draft")
+	}
+}

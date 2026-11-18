@@ -65,12 +65,12 @@ func (w *Workbench) resetSelectedJobState() {
 	w.jobNoteInput = ""
 	w.jobNoteDate = time.Time{}
 	w.jobNoteErr = ""
-	w.jobNoteOpID = ""
+	w.jobNoteRequest = jobapplications.AddNoteInput{}
 	w.jobBackfillStage = string(model.JobStageInterview1)
 	w.jobBackfillDate = time.Time{}
 	w.jobBackfillNote = ""
 	w.jobBackfillErr = ""
-	w.jobBackfillOpID = ""
+	w.jobBackfillRequest = jobapplications.BackfillStageInput{}
 	w.jobBackfillExpanded = false
 	w.editingJobEventID = ""
 	w.editingJobEventNote = ""
@@ -98,6 +98,7 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 func (w *Workbench) markJobDirty() {
 	w.jobDirty = true
 	w.jobSaveRevision++
+	w.loadVersions["job_selection"]++
 	w.discardJobAfterSave = false
 }
 
@@ -233,13 +234,7 @@ func (w *Workbench) startJobSave(request jobSave) error {
 		if request.epoch != w.currentDataEpoch() || request.jobID != w.selectedJobID {
 			return
 		}
-		defer func() {
-			if w.jobsNeedReload && !w.jobSaving && isJobNavPage(w.navPage) {
-				w.reloadJobApplications(true)
-			}
-		}()
 		if err == nil {
-			w.loadVersions["jobs"]++
 			w.detailJob = &updated
 			w.jobLastSavedAt = w.now()
 			w.upsertJobInCache(updated)
@@ -276,13 +271,13 @@ func (w *Workbench) startJobSave(request jobSave) error {
 			next()
 		}
 	}
-	if dispatch := w.host.Dispatch; dispatch != nil {
-		w.taskWG.Add(1)
-		go func() {
-			defer w.taskWG.Done()
-			updated, err := work()
-			dispatch(func() { apply(updated, err) })
-		}()
+	if w.host.Dispatch != nil {
+		var updated model.JobApplication
+		w.runJobWorker(func() error {
+			var err error
+			updated, err = work()
+			return err
+		}, func(err error) { apply(updated, err) })
 		return nil
 	}
 	updated, err := work()

@@ -11,30 +11,34 @@ import (
 	"aion/backend/model"
 )
 
+// Job writes and their UI acknowledgements follow input order, including detail auto-saves.
 func (w *Workbench) runJobWorker(work func() error, onDone func(error)) {
 	if w.IsRestoring() {
 		return
 	}
-	epoch := w.currentDataEpoch()
-	if dispatch := w.host.Dispatch; dispatch != nil {
+	dispatch := w.host.Dispatch
+	if dispatch == nil {
+		onDone(work())
+		return
+	}
+	w.jobWrites = append(w.jobWrites, func() {
 		w.taskWG.Add(1)
 		go func() {
 			defer w.taskWG.Done()
 			err := work()
 			dispatch(func() {
-				if epoch != w.currentDataEpoch() {
-					return
-				}
 				onDone(err)
+				w.jobWrites[0] = nil
+				w.jobWrites = w.jobWrites[1:]
+				if len(w.jobWrites) > 0 {
+					w.jobWrites[0]()
+				}
 			})
 		}()
-		return
+	})
+	if len(w.jobWrites) == 1 {
+		w.jobWrites[0]()
 	}
-	err := work()
-	if epoch != w.currentDataEpoch() {
-		return
-	}
-	onDone(err)
 }
 
 // ReloadJobApplications reloads all non-deleted job applications and aggregate stats.
@@ -49,7 +53,6 @@ func (w *Workbench) reloadJobApplications(async bool) {
 				w.enqueueErrorToast("加载投递记录失败", err)
 				return
 			}
-			w.jobsNeedReload = false
 			w.jobApps = apps
 			w.jobStats = jobapplications.ComputeStats(apps)
 			w.rebuildJobDerived()
@@ -119,6 +122,7 @@ func (w *Workbench) pagedJobApps() ([]model.JobApplication, int, int) {
 }
 
 func (w *Workbench) upsertJobInCache(app model.JobApplication) {
+	w.loadVersions["jobs"]++
 	idx := slices.IndexFunc(w.jobApps, func(a model.JobApplication) bool { return a.ID == app.ID })
 	if idx >= 0 {
 		w.jobApps[idx] = app
@@ -130,6 +134,7 @@ func (w *Workbench) upsertJobInCache(app model.JobApplication) {
 }
 
 func (w *Workbench) removeJobFromCache(appID string) {
+	w.loadVersions["jobs"]++
 	idx := slices.IndexFunc(w.jobApps, func(a model.JobApplication) bool { return a.ID == appID })
 	if idx >= 0 {
 		w.jobApps = slices.Delete(w.jobApps, idx, idx+1)
@@ -227,10 +232,10 @@ func (w *Workbench) SubmitJobCreateModal() {
 		return
 	}
 	in := jobapplications.CreateInput{
-		CompanyName:      company,
-		PositionName:     position,
-		AppliedDate:      appliedDate,
-		Stage:            stage,
+		CompanyName:    company,
+		PositionName:   position,
+		AppliedDate:    appliedDate,
+		Stage:          stage,
 		ApplicationURL: appURL,
 		Channel:        strings.TrimSpace(w.jobCreateChannel),
 		Notes:          strings.TrimRight(w.jobCreateNotes, "\r\n"),
@@ -257,6 +262,8 @@ func (w *Workbench) SelectJobApplication(appID string) {
 		return
 	}
 	if w.selectedJobID == appID && w.detailJob != nil {
+		w.loadVersions["job_selection"]++
+		w.afterSave = nil
 		w.jobDetailOpen = true
 		return
 	}
@@ -287,12 +294,12 @@ func (w *Workbench) selectLoadedJob(app model.JobApplication, events []model.Job
 	w.jobNoteInput = ""
 	w.jobNoteDate = w.now().In(time.Local)
 	w.jobNoteErr = ""
-	w.jobNoteOpID = ""
+	w.jobNoteRequest = jobapplications.AddNoteInput{}
 	w.jobBackfillStage = string(model.JobStageInterview1)
 	w.jobBackfillDate = w.now().In(time.Local)
 	w.jobBackfillNote = ""
 	w.jobBackfillErr = ""
-	w.jobBackfillOpID = ""
+	w.jobBackfillRequest = jobapplications.BackfillStageInput{}
 	w.jobBackfillExpanded = false
 	w.editingJobEventID = ""
 	w.editingJobEventNote = ""
@@ -499,13 +506,20 @@ func (w *Workbench) SubmitJobCloseModal() {
 		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
+		current := w.jobCloseAppID == appID && w.jobCloseOpID == opID && w.jobCloseOpen
 		if err != nil {
-			w.jobCloseErr = err.Error()
+			if current {
+				w.jobCloseErr = err.Error()
+			} else {
+				w.enqueueErrorToast("结束流程失败", err)
+			}
 			return
 		}
-		w.jobCloseOpen = false
-		w.jobCloseErr = ""
-		w.jobCloseOpID = ""
+		if current {
+			w.jobCloseOpen = false
+			w.jobCloseErr = ""
+			w.jobCloseOpID = ""
+		}
 		w.upsertJobInCache(updated)
 		w.applyClosedJobToDetail(appID, updated, events)
 		w.EnqueueToast(ToastProps{
@@ -524,21 +538,12 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 	if !w.afterPendingSave(func() { w.ReopenJobApplication(appID) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再重新开启") {
 		return
 	}
-	if w.jobReopenOpID == "" {
-		w.jobReopenOpID = model.NewID()
-	}
-	opID := w.jobReopenOpID
-	note := strings.TrimSpace(w.jobReopenNote)
 	service := w.app.JobApplications
 	var updated model.JobApplication
 	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
 		var err error
-		updated, err = service.Reopen(context.Background(), jobapplications.ReopenInput{
-			ID:      appID,
-			Note:    note,
-			EventID: opID,
-		})
+		updated, err = service.Reopen(context.Background(), jobapplications.ReopenInput{ID: appID})
 		if err != nil {
 			return err
 		}
@@ -546,13 +551,9 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.jobReopenErr = err.Error()
 			w.enqueueErrorToast("重新开启失败", err)
 			return
 		}
-		w.jobReopenNote = ""
-		w.jobReopenOpID = ""
-		w.jobReopenErr = ""
 		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
 			w.detailJob.Lifecycle = updated.Lifecycle
@@ -585,21 +586,22 @@ func (w *Workbench) AddJobTimelineNote(appID string) {
 		w.jobNoteErr = "备注内容不能为空"
 		return
 	}
-	if w.jobNoteOpID == "" {
-		w.jobNoteOpID = model.NewID()
-	}
-	opID := w.jobNoteOpID
 	dateStr := formatCalendarDate(w.jobNoteDate)
+	input := jobapplications.AddNoteInput{
+		ApplicationID: appID,
+		Note:          note,
+		OccurredDate:  dateStr,
+		EventID:       w.jobNoteRequest.EventID,
+	}
+	if input.EventID == "" || input != w.jobNoteRequest {
+		input.EventID = model.NewID()
+	}
+	w.jobNoteRequest = input
 	service := w.app.JobApplications
 	var events []model.JobApplicationEvent
 	var updated model.JobApplication
 	w.runJobWorker(func() error {
-		if _, err := service.AddNoteEvent(context.Background(), jobapplications.AddNoteInput{
-			ApplicationID: appID,
-			Note:          note,
-			OccurredDate:  dateStr,
-			EventID:       opID,
-		}); err != nil {
+		if _, err := service.AddNoteEvent(context.Background(), input); err != nil {
 			return err
 		}
 		var err error
@@ -610,13 +612,22 @@ func (w *Workbench) AddJobTimelineNote(appID string) {
 		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
+		current := w.selectedJobID == appID && w.jobNoteRequest.EventID == input.EventID
 		if err != nil {
-			w.jobNoteErr = err.Error()
+			if current {
+				w.jobNoteErr = err.Error()
+			} else {
+				w.enqueueErrorToast("保存时间线失败", err)
+			}
 			return
 		}
-		w.jobNoteInput = ""
-		w.jobNoteErr = ""
-		w.jobNoteOpID = ""
+		if current {
+			w.jobNoteRequest = jobapplications.AddNoteInput{}
+			w.jobNoteErr = ""
+			if strings.TrimSpace(w.jobNoteInput) == note && formatCalendarDate(w.jobNoteDate) == dateStr {
+				w.jobNoteInput = ""
+			}
+		}
 		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
 			w.detailJob.UpdatedAt = updated.UpdatedAt
@@ -644,22 +655,23 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 		w.jobBackfillErr = "补录日期格式无效"
 		return
 	}
-	if w.jobBackfillOpID == "" {
-		w.jobBackfillOpID = model.NewID()
-	}
-	opID := w.jobBackfillOpID
 	note := strings.TrimSpace(w.jobBackfillNote)
+	input := jobapplications.BackfillStageInput{
+		ApplicationID: appID,
+		Note:          note,
+		Stage:         stage,
+		OccurredDate:  dateStr,
+		EventID:       w.jobBackfillRequest.EventID,
+	}
+	if input.EventID == "" || input != w.jobBackfillRequest {
+		input.EventID = model.NewID()
+	}
+	w.jobBackfillRequest = input
 	service := w.app.JobApplications
 	var updated model.JobApplication
 	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
-		if _, err := service.BackfillStageEvent(context.Background(), jobapplications.BackfillStageInput{
-			ApplicationID: appID,
-			Stage:         stage,
-			OccurredDate:  dateStr,
-			Note:          note,
-			EventID:       opID,
-		}); err != nil {
+		if _, err := service.BackfillStageEvent(context.Background(), input); err != nil {
 			return err
 		}
 		var err error
@@ -670,13 +682,22 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
+		current := w.selectedJobID == appID && w.jobBackfillRequest.EventID == input.EventID
 		if err != nil {
-			w.jobBackfillErr = err.Error()
+			if current {
+				w.jobBackfillErr = err.Error()
+			} else {
+				w.enqueueErrorToast("保存时间线失败", err)
+			}
 			return
 		}
-		w.jobBackfillNote = ""
-		w.jobBackfillErr = ""
-		w.jobBackfillOpID = ""
+		if current {
+			w.jobBackfillRequest = jobapplications.BackfillStageInput{}
+			w.jobBackfillErr = ""
+			if strings.TrimSpace(w.jobBackfillNote) == note && formatCalendarDate(w.jobBackfillDate) == dateStr && model.JobStage(w.jobBackfillStage) == stage {
+				w.jobBackfillNote = ""
+			}
+		}
 		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
 			w.detailJob.ReachedOffer = updated.ReachedOffer
@@ -734,7 +755,7 @@ func (w *Workbench) SaveJobTimelineEventNote(appID, eventID string) {
 			w.detailJob.UpdatedAt = updated.UpdatedAt
 			w.detailJobEvents = events
 		}
-		if w.editingJobEventID == eventID {
+		if w.editingJobEventID == eventID && strings.TrimSpace(w.editingJobEventNote) == note {
 			w.editingJobEventID = ""
 			w.editingJobEventNote = ""
 		}
