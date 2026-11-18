@@ -275,7 +275,7 @@ func (s *Service) Get(ctx context.Context, id string) (model.JobApplication, err
 	var app model.JobApplication
 	err := s.s.Read(ctx, func(ro *sql.Tx) error {
 		var err error
-		app, err = getApplicationTx(ctx, ro, id, false)
+		app, err = getApplicationTx(ctx, ro, id)
 		return err
 	})
 	return app, err
@@ -373,7 +373,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (model.JobApplicat
 			return err
 		}
 		var err error
-		created, err = getApplicationTx(ctx, tx, appID, false)
+		created, err = getApplicationTx(ctx, tx, appID)
 		return err
 	})
 	return created, err
@@ -413,7 +413,7 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 
 	var updated model.JobApplication
 	err = s.s.Write(ctx, func(tx *sql.Tx) error {
-		cur, err := getApplicationTx(ctx, tx, in.ID, false)
+		cur, err := getApplicationTx(ctx, tx, in.ID)
 		if err != nil {
 			return err
 		}
@@ -445,7 +445,7 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 		); err != nil {
 			return err
 		}
-		updated, err = getApplicationTx(ctx, tx, in.ID, false)
+		updated, err = getApplicationTx(ctx, tx, in.ID)
 		return err
 	})
 	return updated, err
@@ -462,7 +462,7 @@ func (s *Service) UpdateFollowUpDate(ctx context.Context, id, followUpDate strin
 	nowTS := s.timestamp()
 	var updated model.JobApplication
 	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, id, false); err != nil {
+		if _, err := getApplicationTx(ctx, tx, id); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE job_applications SET next_follow_up_date = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
@@ -471,7 +471,7 @@ func (s *Service) UpdateFollowUpDate(ctx context.Context, id, followUpDate strin
 			return err
 		}
 		var err error
-		updated, err = getApplicationTx(ctx, tx, id, false)
+		updated, err = getApplicationTx(ctx, tx, id)
 		return err
 	})
 	return updated, err
@@ -492,7 +492,7 @@ func (s *Service) ChangeStage(ctx context.Context, in ChangeStageInput) (model.J
 
 	var updated model.JobApplication
 	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		cur, err := getApplicationTx(ctx, tx, in.ID, false)
+		cur, err := getApplicationTx(ctx, tx, in.ID)
 		if err != nil {
 			return err
 		}
@@ -518,7 +518,7 @@ func (s *Service) ChangeStage(ctx context.Context, in ChangeStageInput) (model.J
 		); err != nil {
 			return err
 		}
-		updated, err = getApplicationTx(ctx, tx, in.ID, false)
+		updated, err = getApplicationTx(ctx, tx, in.ID)
 		return err
 	})
 	return updated, err
@@ -541,7 +541,7 @@ func (s *Service) Close(ctx context.Context, in CloseInput) (model.JobApplicatio
 
 	var updated model.JobApplication
 	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		cur, err := getApplicationTx(ctx, tx, in.ID, false)
+		cur, err := getApplicationTx(ctx, tx, in.ID)
 		if err != nil {
 			return err
 		}
@@ -575,7 +575,7 @@ func (s *Service) Close(ctx context.Context, in CloseInput) (model.JobApplicatio
 		); err != nil {
 			return err
 		}
-		updated, err = getApplicationTx(ctx, tx, in.ID, false)
+		updated, err = getApplicationTx(ctx, tx, in.ID)
 		return err
 	})
 	return updated, err
@@ -592,7 +592,7 @@ func (s *Service) Reopen(ctx context.Context, in ReopenInput) (model.JobApplicat
 
 	var updated model.JobApplication
 	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		cur, err := getApplicationTx(ctx, tx, in.ID, false)
+		cur, err := getApplicationTx(ctx, tx, in.ID)
 		if err != nil {
 			return err
 		}
@@ -620,7 +620,7 @@ func (s *Service) Reopen(ctx context.Context, in ReopenInput) (model.JobApplicat
 		); err != nil {
 			return err
 		}
-		updated, err = getApplicationTx(ctx, tx, in.ID, false)
+		updated, err = getApplicationTx(ctx, tx, in.ID)
 		return err
 	})
 	return updated, err
@@ -630,7 +630,7 @@ func (s *Service) Reopen(ctx context.Context, in ReopenInput) (model.JobApplicat
 func (s *Service) ListEvents(ctx context.Context, applicationID string) ([]model.JobApplicationEvent, error) {
 	var events []model.JobApplicationEvent
 	err := s.s.Read(ctx, func(ro *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, ro, applicationID, false); err != nil {
+		if _, err := getApplicationTx(ctx, ro, applicationID); err != nil {
 			return err
 		}
 		rows, err := ro.QueryContext(ctx, `SELECT
@@ -684,7 +684,7 @@ func (s *Service) AddNoteEvent(ctx context.Context, in AddNoteInput) (model.JobA
 
 	var created model.JobApplicationEvent
 	err = s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, in.ApplicationID, false); err != nil {
+		if _, err := getApplicationTx(ctx, tx, in.ApplicationID); err != nil {
 			return err
 		}
 		if existing, exists, err := findEventByIDTx(ctx, tx, in.ApplicationID, eventID); err != nil {
@@ -735,7 +735,7 @@ func (s *Service) BackfillStageEvent(ctx context.Context, in BackfillStageInput)
 
 	var created model.JobApplicationEvent
 	err = s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, in.ApplicationID, false); err != nil {
+		if _, err := getApplicationTx(ctx, tx, in.ApplicationID); err != nil {
 			return err
 		}
 		if existing, exists, err := findEventByIDTx(ctx, tx, in.ApplicationID, eventID); err != nil {
@@ -770,7 +770,7 @@ func (s *Service) UpdateEventNote(ctx context.Context, in UpdateEventNoteInput) 
 
 	var updated model.JobApplicationEvent
 	err := s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, appID, false); err != nil {
+		if _, err := getApplicationTx(ctx, tx, appID); err != nil {
 			return err
 		}
 		existing, exists, err := findEventByIDTx(ctx, tx, appID, eventID)
@@ -809,7 +809,7 @@ func (s *Service) DeleteEvent(ctx context.Context, applicationID, eventID string
 	nowTS := s.timestamp()
 
 	return s.s.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := getApplicationTx(ctx, tx, appID, false); err != nil {
+		if _, err := getApplicationTx(ctx, tx, appID); err != nil {
 			return err
 		}
 		existing, exists, err := findEventByIDTx(ctx, tx, appID, evID)

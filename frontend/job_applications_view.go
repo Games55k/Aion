@@ -49,13 +49,6 @@ func jobOutcomeTagColor(outcome model.JobOutcome) tagColor {
 	}
 }
 
-func jobStageTagColor(stage model.JobStage) tagColor {
-	if stage == model.JobStageOffer {
-		return tagSuccess
-	}
-	return tagInfo
-}
-
 func briefSingleLineSummary(app model.JobApplication) string {
 	if app.ClosureReason != "" {
 		return "原因：" + strings.ReplaceAll(app.ClosureReason, "\n", " ")
@@ -91,9 +84,9 @@ func (w *Workbench) renderJobApplicationsView(c *ui.Context, tk *uiTokens) {
 
 			// Top Aggregate Stats Strip (counts all non-deleted records independently of active filters)
 			ui.Row(c).Gap(10).Wrap().AlignSelf(ui.Stretch).Children(func() {
-				w.renderJobStatPill(c, tk, "总投递", w.jobStats.Total, tagGray)
-				w.renderJobStatPill(c, tk, "进行中", w.jobStats.Active, tagProcessing)
-				w.renderJobStatPill(c, tk, "已获 Offer", w.jobStats.Offered, tagSuccess)
+				renderJobStatPill(c, tk, "总投递", w.jobStats.Total)
+				renderJobStatPill(c, tk, "进行中", w.jobStats.Active)
+				renderJobStatPill(c, tk, "已获 Offer", w.jobStats.Offered)
 			})
 
 			// Filter & Sort Bar
@@ -103,7 +96,7 @@ func (w *Workbench) renderJobApplicationsView(c *ui.Context, tk *uiTokens) {
 		// Table Area / Empty State
 		ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Padding(16, 28, 16, 28).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			if len(w.filteredJobApps) == 0 {
-				w.renderJobEmptyState(c, tk)
+				w.renderJobEmptyState(c)
 				return
 			}
 			w.renderJobTable(c, tk)
@@ -112,7 +105,7 @@ func (w *Workbench) renderJobApplicationsView(c *ui.Context, tk *uiTokens) {
 	})
 }
 
-func (w *Workbench) renderJobStatPill(c *ui.Context, tk *uiTokens, label string, count int, color tagColor) {
+func renderJobStatPill(c *ui.Context, tk *uiTokens, label string, count int) {
 	ui.Row(c).Padding(8, 14).Gap(10).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgElevated).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, label).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 		ui.Text(c, fmt.Sprint(count)).FontSize(16).FontWeight(700).TextColor(tk.Text).SingleLine()
@@ -225,7 +218,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 	})
 }
 
-func (w *Workbench) renderJobEmptyState(c *ui.Context, tk *uiTokens) {
+func (w *Workbench) renderJobEmptyState(c *ui.Context) {
 	hasFilter := w.jobSearchQuery != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero()
 	title := "暂无投递记录"
 	desc := "点击「新增投递」记录你的第一条求职投递，支持后续阶段追踪、结果结束与时间线回溯。"

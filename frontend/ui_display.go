@@ -33,7 +33,6 @@ const (
 	tagError      tagColor = "error"
 	tagWarning    tagColor = "warning"
 	tagSuccess    tagColor = "success"
-	tagInfo       tagColor = "info"
 	tagProcessing tagColor = "processing"
 )
 
@@ -142,7 +141,7 @@ func tagStatus(tk *uiTokens, color tagColor) ([3]ui.Color, bool) {
 		return [3]ui.Color{tk.Warning, tk.WarningFillTertiary, tk.WarningFillQuaternary}, true
 	case tagSuccess:
 		return [3]ui.Color{tk.Success, tk.SuccessFillTertiary, tk.SuccessFillQuaternary}, true
-	case tagInfo, tagProcessing:
+	case tagProcessing:
 		return [3]ui.Color{tk.Info, tk.InfoFillTertiary, tk.InfoFillQuaternary}, true
 	}
 	return [3]ui.Color{}, false

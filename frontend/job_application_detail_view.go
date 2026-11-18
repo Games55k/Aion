@@ -39,7 +39,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 							FontSize(16).FontWeight(700).TextColor(tk.Text).SingleLine()
 					})
 					ui.Box(c).Shrink(0).Children(func() {
-						w.renderJobSaveStatusBadge(c, tk)
+						w.renderJobSaveStatusBadge(c)
 					})
 				})
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
@@ -96,7 +96,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 					w.renderJobWorkflowSection(c, tk, app)
 					ui.Row(c).Gap(20).AlignItems(ui.Start).AlignSelf(ui.Stretch).Wrap().Children(func() {
 						ui.Column(c).Grow(1).Basis(360).MinWidth(300).Children(func() {
-							w.renderJobMetadataSection(c, tk, app)
+							w.renderJobMetadataSection(c, tk)
 						})
 						ui.Column(c).Grow(1).Basis(420).MinWidth(320).Children(func() {
 							w.renderJobTimelineSection(c, tk, app)
@@ -112,7 +112,7 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 	}
 }
 
-func (w *Workbench) renderJobSaveStatusBadge(c *ui.Context, tk *uiTokens) {
+func (w *Workbench) renderJobSaveStatusBadge(c *ui.Context) {
 	switch w.jobSaveState {
 	case "saving":
 		uiTag(c, "正在保存…", tagProps{Color: tagProcessing, Size: sizeSmall})
@@ -276,7 +276,7 @@ func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *uiTokens, app model
 	})
 }
 
-func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
+func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *uiTokens) {
 	ui.Column(c).Padding(16).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
 		ui.Text(c, "基本信息与备注").FontSize(13).FontWeight(600).TextColor(tk.Text)
 
@@ -560,19 +560,16 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 			})
 		}
 
-		// Vertical Timeline Axis & Events
-		orderedEvents := make([]model.JobApplicationEvent, len(w.detailJobEvents))
-		if w.jobTimelineDesc {
-			for i, ev := range w.detailJobEvents {
-				orderedEvents[len(w.detailJobEvents)-1-i] = ev
-			}
-		} else {
-			copy(orderedEvents, w.detailJobEvents)
-		}
-
+		// Keep this frame on one slice when a row action replaces the timeline.
+		events := w.detailJobEvents
 		ui.Column(c).Gap(0).Padding(4, 0, 0, 0).AlignSelf(ui.Stretch).Children(func() {
-			for i, ev := range orderedEvents {
-				isLast := i == len(orderedEvents)-1
+			for i := range events {
+				index := i
+				if w.jobTimelineDesc {
+					index = len(events) - 1 - i
+				}
+				ev := events[index]
+				isLast := i == len(events)-1
 				headline, sub := formatTimelineSummary(ev, app)
 				ui.Row(c.Key("ev-"+ev.ID)).Gap(10).AlignItems(ui.Stretch).AlignSelf(ui.Stretch).Children(func() {
 					// Left Rail: semantic dot + vertical connector line

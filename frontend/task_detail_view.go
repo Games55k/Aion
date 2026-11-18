@@ -252,7 +252,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 					w.renderSubtasksSection(c, tk, t)
 
 					// Section F: Local Attachments
-					w.renderAttachmentsSection(c, tk, t)
+					w.renderAttachmentsSection(c, tk)
 
 					// Section G: Metadata Timestamps
 					ui.Row(c.Key("detail-sec-timestamps")).Padding(12, 0, 0, 0).Justify(ui.SpaceBetween).AlignItems(ui.Center).
@@ -551,7 +551,7 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 	})
 }
 
-func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens, _ model.Task) {
+func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens) {
 	atts := w.detailAttachments
 
 	ui.Column(c.Key("detail-sec-attachments")).Gap(10).AlignSelf(ui.Stretch).Children(func() {

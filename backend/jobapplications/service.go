@@ -171,11 +171,8 @@ const selectApplicationColumns = `SELECT
 	created_at, updated_at, deleted_at
 FROM job_applications`
 
-func getApplicationTx(ctx context.Context, tx *sql.Tx, id string, includeDeleted bool) (model.JobApplication, error) {
-	query := selectApplicationColumns + ` WHERE id = ?`
-	if !includeDeleted {
-		query += ` AND deleted_at IS NULL`
-	}
+func getApplicationTx(ctx context.Context, tx *sql.Tx, id string) (model.JobApplication, error) {
+	query := selectApplicationColumns + ` WHERE id = ? AND deleted_at IS NULL`
 	app, err := scanApplication(tx.QueryRowContext(ctx, query, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.JobApplication{}, model.ErrNotFound
