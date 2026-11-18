@@ -39,8 +39,6 @@ type Filter struct {
 	Stage       model.JobStage
 	Outcome     model.JobOutcome
 	AppliedDate string
-	AppliedFrom string
-	AppliedTo   string
 }
 
 // CreateInput holds parameters for creating a new job application.
@@ -151,12 +149,6 @@ func (f Filter) Matches(app model.JobApplication) bool {
 	if d := strings.TrimSpace(f.AppliedDate); d != "" && app.AppliedDate != d {
 		return false
 	}
-	if from := strings.TrimSpace(f.AppliedFrom); from != "" && app.AppliedDate < from {
-		return false
-	}
-	if to := strings.TrimSpace(f.AppliedTo); to != "" && app.AppliedDate > to {
-		return false
-	}
 	return true
 }
 
@@ -261,15 +253,6 @@ func (s *Service) List(ctx context.Context) ([]model.JobApplication, error) {
 	return out, nil
 }
 
-// Stats returns aggregate counts across all non-deleted applications.
-func (s *Service) Stats(ctx context.Context) (model.JobApplicationStats, error) {
-	apps, err := s.List(ctx)
-	if err != nil {
-		return model.JobApplicationStats{}, err
-	}
-	return ComputeStats(apps), nil
-}
-
 // Get fetches one non-deleted job application by ID.
 func (s *Service) Get(ctx context.Context, id string) (model.JobApplication, error) {
 	var app model.JobApplication
@@ -281,20 +264,16 @@ func (s *Service) Get(ctx context.Context, id string) (model.JobApplication, err
 	return app, err
 }
 
-// FindActiveDuplicates returns active non-deleted applications matching the same company and position (case-insensitive, trimmed).
-func (s *Service) FindActiveDuplicates(ctx context.Context, companyName, positionName string) ([]model.JobApplication, error) {
+// MatchActiveDuplicates returns active non-deleted applications from apps matching companyName and positionName (case-insensitive, trimmed).
+func MatchActiveDuplicates(apps []model.JobApplication, companyName, positionName string) []model.JobApplication {
 	company := strings.TrimSpace(companyName)
 	position := strings.TrimSpace(positionName)
 	if company == "" || position == "" {
-		return nil, nil
-	}
-	apps, err := s.List(ctx)
-	if err != nil {
-		return nil, err
+		return nil
 	}
 	var dupes []model.JobApplication
 	for _, app := range apps {
-		if app.Lifecycle != model.JobLifecycleActive {
+		if app.DeletedAt != nil || app.Lifecycle != model.JobLifecycleActive {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(app.CompanyName), company) &&
@@ -302,7 +281,19 @@ func (s *Service) FindActiveDuplicates(ctx context.Context, companyName, positio
 			dupes = append(dupes, app)
 		}
 	}
-	return dupes, nil
+	return dupes
+}
+
+// FindActiveDuplicates returns active non-deleted applications matching the same company and position (case-insensitive, trimmed).
+func (s *Service) FindActiveDuplicates(ctx context.Context, companyName, positionName string) ([]model.JobApplication, error) {
+	if strings.TrimSpace(companyName) == "" || strings.TrimSpace(positionName) == "" {
+		return nil, nil
+	}
+	apps, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return MatchActiveDuplicates(apps, companyName, positionName), nil
 }
 
 // Create validates and inserts a new active application along with its creation timeline event.

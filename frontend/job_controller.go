@@ -160,22 +160,7 @@ func (w *Workbench) ClearJobFilters() {
 }
 
 func (w *Workbench) activeDuplicateMatches(company, position string) []model.JobApplication {
-	c := strings.TrimSpace(company)
-	p := strings.TrimSpace(position)
-	if c == "" || p == "" {
-		return nil
-	}
-	var out []model.JobApplication
-	for _, app := range w.jobApps {
-		if app.DeletedAt != nil || app.Lifecycle != model.JobLifecycleActive {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(app.CompanyName), c) &&
-			strings.EqualFold(strings.TrimSpace(app.PositionName), p) {
-			out = append(out, app)
-		}
-	}
-	return out
+	return jobapplications.MatchActiveDuplicates(w.jobApps, company, position)
 }
 
 // OpenJobCreateModal opens the creation dialog with today's local date and Applied stage defaulted.

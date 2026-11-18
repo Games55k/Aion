@@ -206,7 +206,7 @@ func (t JobEventType) Label() string {
 	return string(t)
 }
 
-// JobApplication represents one job application entry tracked in the求职 module.
+// JobApplication represents one job application entry tracked in the 求职 module.
 type JobApplication struct {
 	ID               string       `json:"id"`
 	CompanyName      string       `json:"company_name"`

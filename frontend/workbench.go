@@ -285,7 +285,7 @@ type Workbench struct {
 
 	// Trash view state
 	trashSearch             string
-	trashKindFilter         string // "", "project", "task"
+	trashKindFilter         string // "", "project", "task", "job_application"
 	trashItems              []model.TrashItem
 	trashParentErrModalOpen bool
 	trashOrphanTask         *model.TrashItem

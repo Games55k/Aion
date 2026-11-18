@@ -529,7 +529,7 @@ func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 	v, index := ui.Local(root, "viewer", func() imageViewer { return imageViewer{} }), 0
 	if p.Gallery != nil {
 		v, index = &p.Gallery.viewer, len(p.Gallery.items)
-		p.Gallery.items = append(p.Gallery.items, viewerItem{src: src, alt: p.Alt, bounds: root.Bounds()})
+		p.Gallery.items = append(p.Gallery.items, viewerItem{src: src, bounds: root.Bounds()})
 	}
 	if previewable && root.Clicked() {
 		v.openAt(index, root.Bounds())
@@ -551,7 +551,7 @@ func uiImage(c *ui.Context, src ui.ImageSource, p imageProps) ui.Element {
 		}
 	})
 	if previewable && p.Gallery == nil {
-		v.build(c, tk, root, []viewerItem{{src: src, alt: p.Alt, bounds: root.Bounds()}})
+		v.build(c, tk, root, []viewerItem{{src: src, bounds: root.Bounds()}})
 	}
 	return root
 }
@@ -593,7 +593,6 @@ var (
 
 type viewerItem struct {
 	src    ui.ImageSource
-	alt    string
 	bounds ui.Rect
 }
 

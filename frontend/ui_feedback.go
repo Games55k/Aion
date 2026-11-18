@@ -310,7 +310,7 @@ func uiToastHost(c *ui.Context) ui.Element {
 			depth := n - 1 - k
 			scale := 1 - 0.05*float32(depth)
 			l := toastLayout{
-				depth: depth, y: float32(depth)*toastPeek + (1-scale)*front, scale: scale,
+				y: float32(depth)*toastPeek + (1-scale)*front, scale: scale,
 				collapsed: !expanded && depth > 0, front: front,
 			}
 			if expanded {
@@ -328,7 +328,6 @@ func uiToastHost(c *ui.Context) ui.Element {
 }
 
 type toastLayout struct {
-	depth           int
 	y, scale, front float32
 	collapsed       bool
 }
