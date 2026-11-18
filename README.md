@@ -72,16 +72,16 @@ go tool mygo build
 go run . -data-dir /tmp/aion-snap -snapshot /tmp/aion-snapshot.png
 
 # 渲染带示例数据的看板视觉快照 PNG（1440×900，用于视觉回归检查）
-AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test ./frontend -run TestVisualSnapshotRender
+AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test -count=1 ./frontend -run TestVisualSnapshotRender
 
 # 渲染设置页视觉快照 PNG（1440×1280，可与上一条同时设置）
-AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test ./frontend -run TestVisualSnapshotRender
+AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test -count=1 ./frontend -run TestVisualSnapshotRender
 
 # 渲染求职投递列表、窄窗口表格与投递详情视觉快照 PNG（可与其它快照环境变量组合使用）
 AION_SAVE_JOBS_SNAPSHOT=/tmp/aion-jobs.png \
 AION_SAVE_JOBS_NARROW_SNAPSHOT=/tmp/aion-jobs-narrow.png \
 AION_SAVE_JOB_DETAIL_SNAPSHOT=/tmp/aion-job-detail.png \
-go test ./frontend -run TestVisualSnapshotRender
+go test -count=1 ./frontend -run TestVisualSnapshotRender
 ```
 
 `-snapshot` 的输出路径必须位于当前数据目录之外（包括经符号链接访问的路径）。快照 PNG 完整写入后才会原子替换已有的普通文件，避免误覆盖数据库、附件或备份。
@@ -181,5 +181,7 @@ Aion/
 ```
 
 基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建。
+
+标签构建会先查询 GitHub Release。只有查询成功且该版本尚未创建或仍为草稿时，工作流才会继续。
 
 Apple 公证优先使用完整的 API Key 三项凭据，否则使用已通过校验的 Apple ID 凭据；临时签名钥匙串从创建前即登记清理路径，后续导入或公证失败时也会清理。

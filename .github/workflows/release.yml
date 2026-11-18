@@ -80,16 +80,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft 2>/dev/null)"; then
-            is_draft="$(printf '%s' "$release_json" | jq -r '.isDraft')"
-            if [ "$is_draft" != "true" ]; then
-              echo "::error::Release $GITHUB_REF_NAME is already published. Fix issues with a new version and tag instead of overwriting published assets."
-              exit 1
-            fi
-            echo "Draft release $GITHUB_REF_NAME already exists; retrying build and upload."
-          else
-            echo "Release $GITHUB_REF_NAME does not exist yet; mygo build -upload will create a draft."
-          fi
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | {tag_name, draft}')"
+          drafts="$(jq -sc --arg tag "$GITHUB_REF_NAME" '[.[] | select(.tag_name == $tag) | .draft]' <<<"$releases")"
+          case "$drafts" in
+            '[]') echo "Release $GITHUB_REF_NAME does not exist yet; mygo build -upload will create a draft." ;;
+            '[true]') echo "Draft release $GITHUB_REF_NAME already exists; retrying build and upload." ;;
+            *) echo "::error::Release $GITHUB_REF_NAME is published or its draft status could not be verified."; exit 1 ;;
+          esac
 
       - name: Run test suite and static checks
         run: |
