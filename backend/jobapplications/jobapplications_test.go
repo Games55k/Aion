@@ -41,7 +41,6 @@ func TestValidationAndDefaults(t *testing.T) {
 		{"blank company", jobapplications.CreateInput{CompanyName: "  ", PositionName: "Go", AppliedDate: "2026-11-15"}},
 		{"blank position", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "\t", AppliedDate: "2026-11-15"}},
 		{"invalid applied date", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "Go", AppliedDate: "2026-02-30"}},
-		{"invalid follow up", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "Go", AppliedDate: "2026-11-15", NextFollowUpDate: "tomorrow"}},
 		{"javascript URL", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "Go", ApplicationURL: "javascript:alert(1)"}},
 		{"file URL", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "Go", ApplicationURL: "file:///etc/passwd"}},
 		{"missing host URL", jobapplications.CreateInput{CompanyName: "Acme", PositionName: "Go", ApplicationURL: "https:///jobs/1"}},
@@ -270,17 +269,15 @@ func TestTimelineOrderingBackfillDeduplicationAndFieldIsolation(t *testing.T) {
 	svc, _ := openTestService(t, &now)
 
 	app, err := svc.Create(ctx, jobapplications.CreateInput{
-		CompanyName:      "示例科技",
-		PositionName:     "Go 后端",
-		AppliedDate:      "2026-11-01",
-		Stage:            model.JobStageInterview3,
-		NextFollowUpDate: "2026-11-20",
+		CompanyName:  "示例科技",
+		PositionName: "Go 后端",
+		AppliedDate:  "2026-11-01",
+		Stage:        model.JobStageInterview3,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Saving a draft that omits the follow-up date must preserve the stored value.
 	app, err = svc.UpdateDetails(ctx, jobapplications.UpdateDetailsInput{
 		ID:           app.ID,
 		CompanyName:  app.CompanyName,
@@ -289,8 +286,8 @@ func TestTimelineOrderingBackfillDeduplicationAndFieldIsolation(t *testing.T) {
 		Channel:      "内推",
 		Notes:        "多行备注第一版\n第二版自动保存",
 	})
-	if err != nil || app.NextFollowUpDate != "2026-11-20" || app.Channel != "内推" {
-		t.Fatalf("UpdateDetails clobbered follow-up or failed to save text: %+v, err=%v", app, err)
+	if err != nil || app.Stage != model.JobStageInterview3 || app.Channel != "内推" {
+		t.Fatalf("UpdateDetails clobbered stage or failed to save text: %+v, err=%v", app, err)
 	}
 
 	// Retrying ChangeStage with identical EventID must not insert a duplicate timeline event.

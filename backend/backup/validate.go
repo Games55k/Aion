@@ -12,30 +12,22 @@ import (
 
 // SQLite integrity_check verifies physical pages and SQL constraints. Check the
 // structured strings consumed by Go readers as well, before installing the DB.
-func validateValues(ctx context.Context, db *sql.DB, version int) error {
+func validateValues(ctx context.Context, db *sql.DB) error {
 	tsQuery := `SELECT created_at,updated_at,deleted_at,NULL FROM projects
 		UNION ALL SELECT created_at,updated_at,deleted_at,completed_at FROM tasks
-		UNION ALL SELECT created_at,NULL,NULL,NULL FROM attachments`
-	if version >= 2 {
-		tsQuery += `
+		UNION ALL SELECT created_at,NULL,NULL,NULL FROM attachments
 		UNION ALL SELECT created_at,updated_at,deleted_at,closed_at FROM job_applications
 		UNION ALL SELECT created_at,occurred_at,NULL,NULL FROM job_application_events`
-	}
 	if err := validateTimestampColumns(ctx, db, tsQuery); err != nil {
 		return err
 	}
 	if err := validateTaskRows(ctx, db); err != nil {
 		return err
 	}
-	if version >= 2 {
-		if err := validateJobApplicationRows(ctx, db); err != nil {
-			return err
-		}
-		if err := validateJobApplicationEventRows(ctx, db); err != nil {
-			return err
-		}
+	if err := validateJobApplicationRows(ctx, db); err != nil {
+		return err
 	}
-	return nil
+	return validateJobApplicationEventRows(ctx, db)
 }
 
 func validateTimestampColumns(ctx context.Context, db *sql.DB, query string) error {
@@ -91,15 +83,15 @@ func validateTaskRows(ctx context.Context, db *sql.DB) error {
 }
 
 func validateJobApplicationRows(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx, `SELECT company_name,position_name,applied_date,stage,lifecycle,outcome,closure_reason,closed_at,application_url,next_follow_up_date FROM job_applications`)
+	rows, err := db.QueryContext(ctx, `SELECT company_name,position_name,applied_date,stage,lifecycle,outcome,closure_reason,closed_at,application_url FROM job_applications`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var company, position, appliedDate, stageRaw, lifecycleRaw, outcomeRaw, reason, appURL, followUpDate string
+		var company, position, appliedDate, stageRaw, lifecycleRaw, outcomeRaw, reason, appURL string
 		var closedAt sql.NullString
-		if err = rows.Scan(&company, &position, &appliedDate, &stageRaw, &lifecycleRaw, &outcomeRaw, &reason, &closedAt, &appURL, &followUpDate); err != nil {
+		if err = rows.Scan(&company, &position, &appliedDate, &stageRaw, &lifecycleRaw, &outcomeRaw, &reason, &closedAt, &appURL); err != nil {
 			return err
 		}
 		if strings.TrimSpace(company) == "" || strings.TrimSpace(position) == "" {
@@ -107,11 +99,6 @@ func validateJobApplicationRows(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err = model.ParseCalendarDate(appliedDate); err != nil {
 			return invalid("invalid applied date")
-		}
-		if followUpDate != "" {
-			if _, err = model.ParseCalendarDate(followUpDate); err != nil {
-				return invalid("invalid next follow-up date")
-			}
 		}
 		if appURL != "" {
 			if _, err = model.ValidateJobURL(appURL); err != nil {

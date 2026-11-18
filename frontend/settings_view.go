@@ -417,7 +417,7 @@ func (w *Workbench) renderSettingsModals(c *ui.Context, tk *uiTokens) {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			uiAlert(c, "整包覆盖恢复说明", alertProps{
 				Type:        alertWarning,
-				Description: "从备份包恢复将完整替换当前工作区的全部项目、任务、求职投递、附件、回收站及全局设置。若恢复较早版本且不含求职数据的备份包，当前求职记录将被清空，并在备份目录保留恢复前安全备份。",
+				Description: "从备份包恢复将完整替换当前工作区的全部项目、任务、求职投递、附件、回收站及全局设置。恢复仅支持当前数据库版本的备份包。",
 			})
 			ui.Column(c).Gap(6).Padding(10, 12).Radius(tk.BorderRadius).
 				Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {

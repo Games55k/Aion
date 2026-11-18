@@ -45,27 +45,25 @@ type Filter struct {
 
 // CreateInput holds parameters for creating a new job application.
 type CreateInput struct {
-	CompanyName      string
-	PositionName     string
-	AppliedDate      string
-	Stage            model.JobStage
-	ApplicationURL   string
-	Channel          string
-	NextFollowUpDate string
-	Notes            string
+	CompanyName    string
+	PositionName   string
+	AppliedDate    string
+	Stage          model.JobStage
+	ApplicationURL string
+	Channel        string
+	Notes          string
 }
 
 // UpdateDetailsInput holds editable metadata fields for auto-save without changing workflow state.
 type UpdateDetailsInput struct {
-	ID               string
-	CompanyName      string
-	PositionName     string
-	AppliedDate      string
-	ApplicationURL   string
-	Channel          string
-	NextFollowUpDate *string
-	Notes            string
-	ClosureReason    *string
+	ID             string
+	CompanyName    string
+	PositionName   string
+	AppliedDate    string
+	ApplicationURL string
+	Channel        string
+	Notes          string
+	ClosureReason  *string
 }
 
 // ChangeStageInput transitions an application's stage atomically and records an event.
@@ -333,12 +331,6 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (model.JobApplicat
 	if err != nil {
 		return model.JobApplication{}, err
 	}
-	followUp := strings.TrimSpace(in.NextFollowUpDate)
-	if followUp != "" {
-		if _, err := model.ParseCalendarDate(followUp); err != nil {
-			return model.JobApplication{}, fmt.Errorf("%w: 下次跟进日期格式无效", model.ErrInvalid)
-		}
-	}
 	channel := strings.TrimSpace(in.Channel)
 	notes := strings.TrimRight(in.Notes, "\r\n")
 	nowTS := s.timestamp()
@@ -355,12 +347,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (model.JobApplicat
 		if _, err := tx.ExecContext(ctx, `INSERT INTO job_applications(
 			id, company_name, position_name, applied_date,
 			stage, lifecycle, outcome, closure_reason, closed_at,
-			application_url, channel, next_follow_up_date, notes,
+			application_url, channel, notes,
 			created_at, updated_at, deleted_at
-		) VALUES(?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,NULL)`,
+		) VALUES(?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,NULL)`,
 			appID, company, position, appliedDate,
 			string(stage), string(model.JobLifecycleActive), "", "",
-			appURL, channel, followUp, notes,
+			appURL, channel, notes,
 			nowTS, nowTS,
 		); err != nil {
 			return err
@@ -397,16 +389,6 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 	if err != nil {
 		return model.JobApplication{}, err
 	}
-	var followUp *string
-	if in.NextFollowUpDate != nil {
-		trimmed := strings.TrimSpace(*in.NextFollowUpDate)
-		if trimmed != "" {
-			if _, err := model.ParseCalendarDate(trimmed); err != nil {
-				return model.JobApplication{}, fmt.Errorf("%w: 下次跟进日期格式无效", model.ErrInvalid)
-			}
-		}
-		followUp = &trimmed
-	}
 	channel := strings.TrimSpace(in.Channel)
 	notes := strings.TrimRight(in.Notes, "\r\n")
 	nowTS := s.timestamp()
@@ -416,10 +398,6 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 		cur, err := getApplicationTx(ctx, tx, in.ID)
 		if err != nil {
 			return err
-		}
-		nextFollowUp := cur.NextFollowUpDate
-		if followUp != nil {
-			nextFollowUp = *followUp
 		}
 		closureReason := cur.ClosureReason
 		if in.ClosureReason != nil {
@@ -435,11 +413,11 @@ func (s *Service) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (mod
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE job_applications
 			SET company_name = ?, position_name = ?, applied_date = ?,
-			    application_url = ?, channel = ?, next_follow_up_date = ?,
+			    application_url = ?, channel = ?,
 			    notes = ?, closure_reason = ?, updated_at = ?
 			WHERE id = ? AND deleted_at IS NULL`,
 			company, position, appliedDate,
-			appURL, channel, nextFollowUp,
+			appURL, channel,
 			notes, closureReason, nowTS,
 			in.ID,
 		); err != nil {

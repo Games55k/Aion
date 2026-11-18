@@ -11,14 +11,14 @@ import (
 type JobStage string
 
 const (
-	JobStageApplied     JobStage = "applied"
-	JobStageScreening   JobStage = "screening"
-	JobStageAssessment  JobStage = "assessment"
-	JobStageInterview1  JobStage = "interview_1"
-	JobStageInterview2  JobStage = "interview_2"
-	JobStageInterview3  JobStage = "interview_3"
-	JobStageHR          JobStage = "hr"
-	JobStageOffer       JobStage = "offer"
+	JobStageApplied    JobStage = "applied"
+	JobStageScreening  JobStage = "screening"
+	JobStageAssessment JobStage = "assessment"
+	JobStageInterview1 JobStage = "interview_1"
+	JobStageInterview2 JobStage = "interview_2"
+	JobStageInterview3 JobStage = "interview_3"
+	JobStageHR         JobStage = "hr"
+	JobStageOffer      JobStage = "offer"
 )
 
 type jobStageMeta struct {
@@ -208,23 +208,22 @@ func (t JobEventType) Label() string {
 
 // JobApplication represents one job application entry tracked in the求职 module.
 type JobApplication struct {
-	ID               string       `json:"id"`
-	CompanyName      string       `json:"company_name"`
-	PositionName     string       `json:"position_name"`
-	AppliedDate      string       `json:"applied_date"`
-	Stage            JobStage     `json:"stage"`
-	Lifecycle        JobLifecycle `json:"lifecycle"`
-	Outcome          JobOutcome   `json:"outcome,omitempty"`
-	ClosureReason    string       `json:"closure_reason,omitempty"`
-	ClosedAt         *time.Time   `json:"closed_at,omitempty"`
-	ApplicationURL   string       `json:"application_url,omitempty"`
-	Channel          string       `json:"channel,omitempty"`
-	NextFollowUpDate string       `json:"next_follow_up_date,omitempty"`
-	Notes            string       `json:"notes,omitempty"`
-	ReachedOffer     bool         `json:"reached_offer"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	DeletedAt        *time.Time   `json:"deleted_at,omitempty"`
+	ID             string       `json:"id"`
+	CompanyName    string       `json:"company_name"`
+	PositionName   string       `json:"position_name"`
+	AppliedDate    string       `json:"applied_date"`
+	Stage          JobStage     `json:"stage"`
+	Lifecycle      JobLifecycle `json:"lifecycle"`
+	Outcome        JobOutcome   `json:"outcome,omitempty"`
+	ClosureReason  string       `json:"closure_reason,omitempty"`
+	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
+	ApplicationURL string       `json:"application_url,omitempty"`
+	Channel        string       `json:"channel,omitempty"`
+	Notes          string       `json:"notes,omitempty"`
+	ReachedOffer   bool         `json:"reached_offer"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	DeletedAt      *time.Time   `json:"deleted_at,omitempty"`
 }
 
 // JobApplicationEvent records one immutable workflow or note entry for an application.
