@@ -3,8 +3,9 @@
 package backend
 
 import (
-	"context"
 	"cmp"
+	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -102,9 +103,6 @@ type AttachmentCleanupError struct{ Err error }
 func (e *AttachmentCleanupError) Error() string { return e.Err.Error() }
 func (e *AttachmentCleanupError) Unwrap() error { return e.Err }
 
-// PermanentlyDelete purges a recycled item and then reclaims files that no
-// module references. A cleanup error does not undo the database deletion; GC
-// can be retried safely. The host owns the user confirmation interaction.
 // ListTrash aggregates soft-deleted items from all built-in modules ordered newest-deleted first.
 func (a *App) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
 	projectItems, err := a.Projects.ListTrash(ctx)
@@ -138,6 +136,9 @@ func (a *App) RestoreTrash(ctx context.Context, kind, id string) error {
 	return a.Projects.RestoreTrash(ctx, kind, id)
 }
 
+// PermanentlyDelete purges a recycled item and then reclaims files that no
+// module references. A cleanup error does not undo the database deletion; GC
+// can be retried safely. The host owns the user confirmation interaction.
 func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
 	if kind == jobapplications.TrashKind {
 		return a.JobApplications.PermanentlyDelete(ctx, id)
@@ -153,10 +154,12 @@ func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
 
 // ClearTrash purges recycle-bin contents across all modules, then collects unused project files.
 func (a *App) ClearTrash(ctx context.Context) error {
-	if err := a.Projects.ClearTrash(ctx); err != nil {
-		return err
-	}
-	if err := a.JobApplications.ClearTrash(ctx); err != nil {
+	if err := a.s.Write(ctx, func(tx *sql.Tx) error {
+		if err := projects.ClearTrashTx(ctx, tx); err != nil {
+			return err
+		}
+		return jobapplications.ClearTrashTx(ctx, tx)
+	}); err != nil {
 		return err
 	}
 	if _, err := a.Attachments.GC(ctx); err != nil {

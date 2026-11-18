@@ -99,11 +99,14 @@ func (s *Service) PermanentlyDelete(ctx context.Context, kind, id string) error 
 // ClearTrash atomically purges deleted projects (with their children) and
 // independently deleted tasks. Live and archived projects remain untouched.
 func (s *Service) ClearTrash(ctx context.Context) error {
-	return s.store.Write(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE deleted_at IS NOT NULL`); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE deleted_at IS NOT NULL`)
+	return s.store.Write(ctx, func(tx *sql.Tx) error { return ClearTrashTx(ctx, tx) })
+}
+
+// ClearTrashTx purges this module's recycled records in the caller's transaction.
+func ClearTrashTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE deleted_at IS NOT NULL`); err != nil {
 		return err
-	})
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE deleted_at IS NOT NULL`)
+	return err
 }

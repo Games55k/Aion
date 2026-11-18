@@ -2,6 +2,7 @@ package backend_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -257,10 +258,29 @@ func TestCrossModuleTrashDispatchAndAttachmentCleanup(t *testing.T) {
 		t.Fatalf("expected app2 deleted, err=%v", err)
 	}
 
-	// Re-delete app1, lock attachments dir to simulate GC failure, and verify ClearTrash reports partial cleanup error after clearing DB metadata.
+	// Re-delete app1 and inject a failure in the job module after project cleanup starts.
 	if err := a.JobApplications.Delete(ctx, app1.ID); err != nil {
 		t.Fatal(err)
 	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, "aion.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER fail_clear BEFORE DELETE ON job_applications BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ClearTrash(ctx); err == nil {
+		t.Fatal("expected metadata deletion failure")
+	}
+	if items, err := a.ListTrash(ctx); err != nil || len(items) != 2 {
+		t.Fatalf("failed clear lost trash entries: %+v, %v", items, err)
+	}
+	if _, err := db.Exec("DROP TRIGGER fail_clear"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later GC failure still reports committed metadata deletion.
 	attDir := filepath.Join(dir, "attachments")
 	if err := os.Chmod(attDir, 0500); err != nil {
 		t.Fatal(err)

@@ -16,7 +16,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 - Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
 - Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
 - Round-trip a closed Offer application after a stage correction. When restoring from an old safety archive repeatedly, verify rotation retains the source and the latest five safety archives.
-- Cover partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
+- Cover cross-module rollback when clearing trash fails, partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
 
 ## Documentation
 

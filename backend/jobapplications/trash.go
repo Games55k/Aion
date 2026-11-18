@@ -102,8 +102,11 @@ func (s *Service) PermanentlyDelete(ctx context.Context, id string) error {
 
 // ClearTrash permanently deletes all soft-deleted job applications and cascades deletion to their timeline events.
 func (s *Service) ClearTrash(ctx context.Context) error {
-	return s.s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM job_applications WHERE deleted_at IS NOT NULL`)
-		return err
-	})
+	return s.s.Write(ctx, func(tx *sql.Tx) error { return ClearTrashTx(ctx, tx) })
+}
+
+// ClearTrashTx purges this module's recycled records in the caller's transaction.
+func ClearTrashTx(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM job_applications WHERE deleted_at IS NOT NULL`)
+	return err
 }
