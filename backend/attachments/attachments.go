@@ -217,43 +217,51 @@ func (s *Service) ExportOverwrite(ctx context.Context, attachmentID, destination
 }
 
 func (s *Service) export(ctx context.Context, attachmentID, destinationPath string, allowOverwrite bool) error {
-	return s.store.Read(ctx, func(tx *sql.Tx) error {
-		a, err := visibleAttachment(ctx, tx, attachmentID)
+	var a model.Attachment
+	var source *os.File
+	var resolvedDest string
+	err := s.store.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		a, err = visibleAttachment(ctx, tx, attachmentID)
 		if err != nil {
 			return err
 		}
-		source, err := s.openManaged(a.StorageName)
+		source, err = s.openManaged(a.StorageName)
 		if err != nil {
 			return err
 		}
+		resolvedDest, err = s.store.ValidateExportTarget(destinationPath, allowOverwrite)
+		return err
+	})
+	// The open descriptor pins the original contents across GC and restore.
+	if source != nil {
 		defer source.Close()
-		resolvedDest, err := s.store.ValidateExportTarget(destinationPath, allowOverwrite)
-		if err != nil {
-			return err
-		}
-		target, err := os.CreateTemp(filepath.Dir(resolvedDest), ".aion-attachment-export-*.tmp")
-		if err != nil {
-			return err
-		}
-		stagePath := target.Name()
-		defer func() {
-			_ = os.Remove(stagePath)
-		}()
-		hash := sha256.New()
-		limit := min(max(a.Size, 0), MaxFileBytes) + 1
-		size, copyErr := io.Copy(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, source}, limit))
-		if copyErr == nil && (size != a.Size || hex.EncodeToString(hash.Sum(nil)) != a.SHA256) {
-			copyErr = fmt.Errorf("%w: attachment content mismatch", model.ErrInvalid)
-		}
-		if copyErr == nil {
-			copyErr = target.Sync()
-		}
-		if err = errors.Join(copyErr, target.Close()); err != nil {
-			return err
-		}
-		if err = ctx.Err(); err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
+	}
+
+	target, err := os.CreateTemp(filepath.Dir(resolvedDest), ".aion-attachment-export-*.tmp")
+	if err != nil {
+		return err
+	}
+	stagePath := target.Name()
+	defer func() {
+		_ = os.Remove(stagePath)
+	}()
+	hash := sha256.New()
+	limit := min(max(a.Size, 0), MaxFileBytes) + 1
+	size, copyErr := io.Copy(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, source}, limit))
+	if copyErr == nil && (size != a.Size || hex.EncodeToString(hash.Sum(nil)) != a.SHA256) {
+		copyErr = fmt.Errorf("%w: attachment content mismatch", model.ErrInvalid)
+	}
+	if copyErr == nil {
+		copyErr = target.Sync()
+	}
+	if err = errors.Join(copyErr, target.Close()); err != nil {
+		return err
+	}
+	return s.store.Exclusive(ctx, func(_ *sql.DB) error {
 		return s.store.PublishExportFile(stagePath, resolvedDest, allowOverwrite)
 	})
 }

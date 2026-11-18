@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 
 	"aion/backend/attachments"
@@ -477,5 +478,61 @@ func TestListByProjectGroupsLiveTaskAttachments(t *testing.T) {
 	exec(t, s, `UPDATE projects SET deleted_at=? WHERE id='p'`, now)
 	if _, err := service.ListByProject(ctx, "p"); !errors.Is(err, model.ErrParentDeleted) {
 		t.Fatalf("deleted project error = %v", err)
+	}
+}
+
+// pauseCopyContext stops the first copy read after Export has created its staging file.
+type pauseCopyContext struct {
+	context.Context
+	outputDir string
+	started   chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func (c *pauseCopyContext) Err() error {
+	entries, _ := os.ReadDir(c.outputDir)
+	if len(entries) != 0 {
+		c.once.Do(func() {
+			close(c.started)
+			<-c.release
+		})
+	}
+	return c.Context.Err()
+}
+
+// A slow export used to block deletion and GC until its last byte reached disk.
+func TestExportDuringGarbageCollection(t *testing.T) {
+	s, service := fixture(t)
+	a, err := service.Import(ctx, "t", source(t, "original.txt", "original contents"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyCtx := &pauseCopyContext{Context: ctx, outputDir: t.TempDir(), started: make(chan struct{}), release: make(chan struct{})}
+	resume := sync.OnceFunc(func() { close(copyCtx.release) })
+	defer resume()
+	destination := filepath.Join(copyCtx.outputDir, "exported.txt")
+	done := make(chan error, 1)
+	go func() { done <- service.Export(copyCtx, a.ID, destination) }()
+	select {
+	case <-copyCtx.started:
+	case err := <-done:
+		t.Fatalf("export ended before copying: %v", err)
+	}
+	if err := service.Remove(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := service.GC(ctx); n != 1 || err != nil {
+		t.Fatalf("GC removed %d files, error %v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.AttachmentsDir(), a.StorageName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed file still present: %v", err)
+	}
+	resume()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, destination); got != "original contents" {
+		t.Fatalf("exported contents = %q", got)
 	}
 }
