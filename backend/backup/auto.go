@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -220,7 +219,8 @@ func truncateUTF8(s string, maxBytes int) string {
 // lose ownership and are preserved (a user may have replaced a file manually).
 // The current restore source is retained in addition to the newest keep entries.
 func (s *Service) rotate(ctx context.Context, files []ownedBackup, keep int, keepFile os.FileInfo) ([]ownedBackup, error) {
-	sort.SliceStable(files, func(i, j int) bool { return files[i].CreatedAt.Before(files[j].CreatedAt) })
+	// Ownership is appended in creation order. Sorting by wall time could
+	// prune the archive we just made after the system clock moves backwards.
 	var protected []ownedBackup
 	for len(files) > keep {
 		if err := ctx.Err(); err != nil {

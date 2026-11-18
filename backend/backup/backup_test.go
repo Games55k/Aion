@@ -941,6 +941,12 @@ func TestRestoreRotatesOwnedSafetyBackups(t *testing.T) {
 			t.Fatalf("restore removed %s: %v", path, err)
 		}
 	}
+	// The rollback archive returned to the user must survive a backwards clock adjustment.
+	clock.Advance(-24 * time.Hour)
+	restore(archive)
+	if _, err := os.Stat(safety[len(safety)-1]); err != nil {
+		t.Fatalf("new safety archive was immediately pruned: %v", err)
+	}
 	assertSeed(t, s, "live", "payload")
 }
 

@@ -94,7 +94,7 @@ go test -count=1 ./frontend -run TestVisualSnapshotRender
 ~/Library/Application Support/Aion/
 ├── aion.sqlite     # SQLite 主数据库（Schema v2：项目、任务、子任务、求职投递与时间线、回收站、设置）
 ├── attachments/    # 受管本地附件存储
-└── backups/        # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip，保留最近 5 份，另保护本次恢复所用的源文件）
+└── backups/        # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip，按生成顺序保留最近 5 份，另保护本次恢复所用的源文件）
 ```
 
 在左侧导航底部的**设置**（全局设置与数据管理，也可按 `⌘,` 打开）中可以管理数据生命周期：
