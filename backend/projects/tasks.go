@@ -24,7 +24,7 @@ func (s *Service) CreateTask(ctx context.Context, projectID string, in TaskInput
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
+		now := s.nowUTC()
 		nowStr := now.Format(time.RFC3339Nano)
 		t = model.Task{ID: model.NewID(), ProjectID: projectID, Title: in.Title, Description: in.Description,
 			Status: in.Status, Priority: in.Priority, Tags: in.Tags, Subtasks: in.Subtasks, DueDate: in.DueDate,
@@ -199,7 +199,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, in TaskInput) (mode
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
+		now := s.nowUTC()
 		statusChanged := in.Status != t.Status
 		var mv columnMove
 		if statusChanged {
@@ -340,7 +340,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, status model.Status, 
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
+		now := s.nowUTC()
 		var mv columnMove
 		t, mv, err = prepareColumnMove(ctx, tx, t, status, index, false, now)
 		if err != nil {
@@ -393,7 +393,7 @@ func (s *Service) ReorderTasks(ctx context.Context, projectID string, status mod
 		for i, slot := range slots {
 			column[slot] = ids[i]
 		}
-		return writeColumn(ctx, tx, column, time.Now().UTC())
+		return writeColumn(ctx, tx, column, s.nowUTC())
 	})
 }
 
@@ -411,7 +411,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		if _, err = visibleProject(ctx, tx, t.ProjectID); err != nil {
 			return err
 		}
-		now := time.Now().UTC()
+		now := s.nowUTC()
 		nowStr := now.Format(time.RFC3339Nano)
 		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET deleted_at=?,updated_at=? WHERE id=?`, nowStr, nowStr, id); err != nil {
 			return err
@@ -424,7 +424,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	})
 }
 
-func restoreTask(ctx context.Context, tx *sql.Tx, id string) error {
+func (s *Service) restoreTask(ctx context.Context, tx *sql.Tx, id string) error {
 	t, err := taskByID(ctx, tx, id)
 	if err != nil {
 		return err
@@ -440,7 +440,7 @@ func restoreTask(ctx context.Context, tx *sql.Tx, id string) error {
 		return err
 	}
 	index := max(0, min(t.Position, len(ids)))
-	now := time.Now().UTC()
+	now := s.nowUTC()
 	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET deleted_at=NULL,updated_at=? WHERE id=?`, now.Format(time.RFC3339Nano), id); err != nil {
 		return err
 	}
@@ -448,5 +448,5 @@ func restoreTask(ctx context.Context, tx *sql.Tx, id string) error {
 }
 
 func (s *Service) RestoreTask(ctx context.Context, id string) error {
-	return s.store.Write(ctx, func(tx *sql.Tx) error { return restoreTask(ctx, tx, id) })
+	return s.store.Write(ctx, func(tx *sql.Tx) error { return s.restoreTask(ctx, tx, id) })
 }

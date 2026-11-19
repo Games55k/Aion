@@ -15,7 +15,7 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (model.Pro
 	if in.Name == "" {
 		return model.Project{}, invalid("project name is required")
 	}
-	now := time.Now().UTC()
+	now := s.nowUTC()
 	nowStr := now.Format(time.RFC3339Nano)
 	p := model.Project{ID: model.NewID(), Name: in.Name, Icon: in.Icon, Description: in.Description, CreatedAt: now, UpdatedAt: now}
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {
@@ -82,7 +82,7 @@ func (s *Service) UpdateProject(ctx context.Context, id string, in ProjectInput)
 			return model.ErrNotFound
 		}
 		p.Name, p.Icon, p.Description = in.Name, in.Icon, in.Description
-		p.UpdatedAt = time.Now().UTC()
+		p.UpdatedAt = s.nowUTC()
 		_, err = tx.ExecContext(ctx, `UPDATE projects SET name=?,icon=?,description=?,updated_at=? WHERE id=?`,
 			p.Name, p.Icon, p.Description, p.UpdatedAt.Format(time.RFC3339Nano), id)
 		return err
@@ -104,7 +104,7 @@ func (s *Service) ArchiveProject(ctx context.Context, id string, archived bool) 
 		if p.DeletedAt != nil {
 			return model.ErrNotFound
 		}
-		p.Archived, p.UpdatedAt = archived, time.Now().UTC()
+		p.Archived, p.UpdatedAt = archived, s.nowUTC()
 		_, err = tx.ExecContext(ctx, `UPDATE projects SET archived=?,updated_at=? WHERE id=?`, archived, p.UpdatedAt.Format(time.RFC3339Nano), id)
 		return err
 	})
@@ -125,13 +125,13 @@ func (s *Service) DeleteProject(ctx context.Context, id string) error {
 		if p.DeletedAt != nil {
 			return model.ErrConflict
 		}
-		now := model.Timestamp()
+		now := s.nowUTC().Format(time.RFC3339Nano)
 		_, err = tx.ExecContext(ctx, `UPDATE projects SET deleted_at=?,updated_at=? WHERE id=?`, now, now, id)
 		return err
 	})
 }
 
-func restoreProject(ctx context.Context, tx *sql.Tx, id string) error {
+func (s *Service) restoreProject(ctx context.Context, tx *sql.Tx, id string) error {
 	p, err := projectByID(ctx, tx, id)
 	if err != nil {
 		return err
@@ -139,10 +139,10 @@ func restoreProject(ctx context.Context, tx *sql.Tx, id string) error {
 	if p.DeletedAt == nil {
 		return model.ErrConflict
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE projects SET deleted_at=NULL,updated_at=? WHERE id=?`, model.Timestamp(), id)
+	_, err = tx.ExecContext(ctx, `UPDATE projects SET deleted_at=NULL,updated_at=? WHERE id=?`, s.nowUTC().Format(time.RFC3339Nano), id)
 	return err
 }
 
 func (s *Service) RestoreProject(ctx context.Context, id string) error {
-	return s.store.Write(ctx, func(tx *sql.Tx) error { return restoreProject(ctx, tx, id) })
+	return s.store.Write(ctx, func(tx *sql.Tx) error { return s.restoreProject(ctx, tx, id) })
 }

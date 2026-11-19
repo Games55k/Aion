@@ -15,9 +15,30 @@ import (
 	"aion/backend/store"
 )
 
-type Service struct{ store *store.Store }
+// Options configures optional dependencies for the projects service.
+type Options struct {
+	// Now supplies timestamps for project and task writes. Defaults to time.Now.
+	Now func() time.Time
+}
 
-func New(s *store.Store) *Service { return &Service{store: s} }
+type Service struct {
+	store *store.Store
+	now   func() time.Time
+}
+
+func New(s *store.Store, opts ...Options) *Service {
+	now := time.Now
+	for _, opt := range opts {
+		if opt.Now != nil {
+			now = opt.Now
+		}
+	}
+	return &Service{store: s, now: now}
+}
+
+func (s *Service) nowUTC() time.Time {
+	return s.now().UTC()
+}
 
 // ProjectInput replaces editable project content. Identity and lifecycle fields
 // are changed only by their dedicated operations.
