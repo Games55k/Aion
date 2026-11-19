@@ -123,8 +123,6 @@ go test -count=1 ./frontend -run TestVisualSnapshotRender
 
 ## 开发
 
-开发方案：[开发自动化与 UI 封装精简](docs/plans/automation-and-ui-simplification.md)（已完成开发用 Automation 接入与未用 UI 封装精简）。
-
 后端测试可通过 `backend.Options.Now` 注入项目、任务、求职和备份使用的时钟，默认使用 `time.Now`。项目和任务以 UTC 存储时间戳，同一次任务移动或排序使用同一时间更新所有位置发生变化的任务。
 
 | 命令 | 用途 |
@@ -165,7 +163,6 @@ Aion/
 ├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
-├── docs/plans/                             # 开发与重构方案及验收记录（状态以各文档为准）
 ├── .github/
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置

@@ -30,7 +30,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 
 ## Documentation
 
-Implementation plans live in `docs/plans/`. Keep each plan's status explicit; planned commands and capabilities are not current workflows until implemented. The Automation and UI simplification plan is in `docs/plans/automation-and-ui-simplification.md`.
+Write implementation plans in `docs/plans/` and state each plan's status. Document commands and capabilities as current workflows once implemented.
 
 Keep documentation in sync with code changes. Whenever you add, modify, or remove user-facing behaviour, shortcuts, CLI flags, data or backup layouts, build/test workflows, or repository structure, update the affected sections of `README.md`, `AGENTS.md`, and relevant comments in the same change. Update `CHANGELOG.md` when preparing a release, and refresh the headless screenshot in `README.md` (`assets/screenshot.png`) before each release via `AION_SAVE_SNAPSHOT="$PWD/assets/screenshot.png" go test -count=1 ./frontend -run TestVisualSnapshotRender`.
 
