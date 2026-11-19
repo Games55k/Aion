@@ -1297,30 +1297,27 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 // resetDetailEditFields copies a task's content into the draft inputs without
 // replacing detailTask, so the last committed task stays the failure baseline.
 func (w *Workbench) resetDetailEditFields(t model.Task) {
-	w.copyDetailEditFields(t)
+	w.editTitle = t.Title
+	w.editStatus = string(t.Status)
+	w.editPriority = string(t.Priority)
+	w.editDueDate = parseTaskDueDate(t.DueDate)
+	w.editTags = slices.Clone(t.Tags)
+	w.editDescription = t.Description
+	w.editSubtasks = slices.Clone(t.Subtasks)
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
 }
 
-// copyDetailEditFields copies a task's content into the draft inputs and leaves the
-// save state untouched, for rebasing drafts that are still invalid or in flight.
-func (w *Workbench) copyDetailEditFields(t model.Task) {
-	w.editTitle = t.Title
-	w.editStatus = string(t.Status)
-	w.editPriority = string(t.Priority)
-	if strings.TrimSpace(t.DueDate) != "" {
-		if parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(t.DueDate), time.Local); err == nil {
-			w.editDueDate = parsed
-		} else {
-			w.editDueDate = time.Time{}
-		}
-	} else {
-		w.editDueDate = time.Time{}
+// parseTaskDueDate parses a persisted YYYY-MM-DD due date for the editor.
+func parseTaskDueDate(due string) time.Time {
+	if strings.TrimSpace(due) == "" {
+		return time.Time{}
 	}
-	w.editTags = slices.Clone(t.Tags)
-	w.editDescription = t.Description
-	w.editSubtasks = slices.Clone(t.Subtasks)
+	if parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(due), time.Local); err == nil {
+		return parsed
+	}
+	return time.Time{}
 }
 
 // taskInputFromDraft snapshots the current draft inputs as a save input, without
@@ -1416,33 +1413,43 @@ func rebaseTagsOnCommitted(in, snap, committed []string) []string {
 	return out
 }
 
-// rebaseSubtasksOnCommitted merges post-discard subtask edits by stable ID: added or
-// modified subtasks survive, post-discard removals drop the committed copies, and
-// untouched ones fall back to the committed version.
+// rebaseSubtasksOnCommitted merges post-discard subtask edits into the committed list.
+// The draft's order survives (a reorder is an edit like any other); titles and done
+// flags fall back to the committed values field by field unless the user changed them
+// after the discard; additions stay; and subtasks the failed write deleted come back.
 func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subtask {
-	inByID := make(map[string]model.Subtask, len(in))
-	for _, st := range in {
-		inByID[st.ID] = st
-	}
 	snapByID := make(map[string]model.Subtask, len(snap))
 	for _, st := range snap {
 		snapByID[st.ID] = st
 	}
-	out := make([]model.Subtask, 0, len(committed)+len(in))
+	committedByID := make(map[string]model.Subtask, len(committed))
 	for _, st := range committed {
-		s, wasInSnap := snapByID[st.ID]
-		cur, inDraft := inByID[st.ID]
-		switch {
-		case wasInSnap && !inDraft:
-			// Removed after the discard.
-		case inDraft && cur != s:
-			out = append(out, cur)
-		default:
-			out = append(out, st)
-		}
+		committedByID[st.ID] = st
 	}
+	out := make([]model.Subtask, 0, len(committed)+len(in))
 	for _, st := range in {
-		if _, wasInSnap := snapByID[st.ID]; !wasInSnap && st.ID != "" {
+		s, wasInSnap := snapByID[st.ID]
+		c, inCommitted := committedByID[st.ID]
+		if wasInSnap && !inCommitted {
+			// Added by the failed write; it never committed, so it is dropped. A
+			// post-discard re-add gets a fresh ID and survives as an addition.
+			continue
+		}
+		merged := st
+		if wasInSnap {
+			if st.Title == s.Title {
+				merged.Title = c.Title
+			}
+			if st.Done == s.Done {
+				merged.Done = c.Done
+			}
+		}
+		out = append(out, merged)
+	}
+	for _, st := range committed {
+		// Deleted by the failed write (absent from snap) and not re-added: the
+		// rollback restored it, so it comes back.
+		if _, wasInSnap := snapByID[st.ID]; !wasInSnap {
 			if !slices.ContainsFunc(out, func(o model.Subtask) bool { return o.ID == st.ID }) {
 				out = append(out, st)
 			}
@@ -1483,16 +1490,33 @@ func (w *Workbench) SaveSelectedTask() error {
 	return w.startTaskSave(request)
 }
 
-// rebaseInvalidDraftOnCommitted resets the fields the current draft still shares with
-// the failed discard baseline (snap) to the committed values. The draft itself stays
-// untouched in its invalid state: the user's newer input and the validation error
-// must survive until a valid save can be built from them.
+// rebaseInvalidDraftOnCommitted resets only the fields the current draft still shares
+// with the failed discard baseline (snap) to the committed values, field by field.
+// The draft stays invalid: the user's newer input — including raw spacing a save input
+// would trim — and the validation error survive until a valid save can be built.
 func (w *Workbench) rebaseInvalidDraftOnCommitted(snap projects.TaskInput) {
 	if w.detailTask == nil {
 		return
 	}
-	rebased := rebaseTaskInputOnCommitted(w.taskInputFromDraft(), snap, taskInputFromTask(*w.detailTask))
-	w.copyDetailEditFields(overlayTaskInput(*w.detailTask, rebased))
+	committed := *w.detailTask
+	draft := w.taskInputFromDraft()
+	if draft.Title == snap.Title {
+		w.editTitle = committed.Title
+	}
+	if draft.Description == snap.Description {
+		w.editDescription = committed.Description
+	}
+	if draft.Status == snap.Status {
+		w.editStatus = string(committed.Status)
+	}
+	if draft.Priority == snap.Priority {
+		w.editPriority = string(committed.Priority)
+	}
+	if draft.DueDate == snap.DueDate {
+		w.editDueDate = parseTaskDueDate(committed.DueDate)
+	}
+	w.editTags = rebaseTagsOnCommitted(draft.Tags, snap.Tags, committed.Tags)
+	w.editSubtasks = rebaseSubtasksOnCommitted(draft.Subtasks, snap.Subtasks, committed.Subtasks)
 }
 
 // SetTaskPriority updates a task's priority directly from a board card and refreshes board filters in place.

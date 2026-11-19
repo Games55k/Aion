@@ -403,6 +403,100 @@ func TestAsyncDiscardThenTagEditExcludesFailedTags(t *testing.T) {
 	}
 }
 
+// Ticking a subtask after the discard must not resurrect the failed rename: only the
+// tick survives, the title falls back to the committed one.
+func TestAsyncDiscardThenSubtaskTickExcludesFailedRename(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_rename BEFORE UPDATE ON tasks
+			WHEN NEW.subtasks LIKE '%Tentative%'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	w.editSubtasks[0].Title = "Tentative"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.editSubtasks[0].Done = true
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 2 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	if saved.Subtasks[0].Title != "Alpha" || !saved.Subtasks[0].Done || saved.Subtasks[1].Title != "Beta" || saved.Subtasks[1].Done {
+		t.Fatalf("tick resurrected the failed rename: %+v", saved.Subtasks)
+	}
+}
+
+// Reordering subtasks after the discard must survive an unrelated failed write: the
+// committed order must not silently win through the rebase.
+func TestAsyncDiscardThenSubtaskReorderSurvivesFailedWrite(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc2 BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	w.editDescription = "注定失败的描述"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.editSubtasks[0], w.editSubtasks[1] = w.editSubtasks[1], w.editSubtasks[0]
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 2 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	if saved.Subtasks[0].Title != "Beta" || saved.Subtasks[1].Title != "Alpha" || saved.Description != "" {
+		t.Fatalf("reorder lost or failed write leaked: %+v", saved.Subtasks)
+	}
+}
+
 // Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
 func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
@@ -698,6 +792,50 @@ func TestJobAsyncDiscardThenInvalidDraftExcludesFailedSave(t *testing.T) {
 	if err != nil || saved.CompanyName != "初始公司A" || saved.PositionName != "补齐的新岗位" {
 		t.Fatalf("follow-up save leaked the failed write: %+v %v", saved, err)
 	}
+}
+
+// Rebase of an invalid draft must only replace fields that fall back; the user's raw
+// input (including trailing newlines the save input would trim) stays in the editor.
+func TestJobAsyncInvalidDraftRebaseKeepsRawNotesInput(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER jobs_reject_failed_company3 BEFORE UPDATE ON job_applications
+			WHEN NEW.company_name = '注定失败的新公司'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "注定失败的新公司")
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("详情岗位名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	w.editJobNotes = "新备注\n\n"
+	w.TouchJobDetailField()
+	if w.jobSaveState != "validation_error" || w.pendingJobSave != nil {
+		t.Fatalf("expected invalid draft without queued save, state=%q", w.jobSaveState)
+	}
+	unlock()
+	drainTestUI(w, queue)
+	if w.editJobNotes != "新备注\n\n" {
+		t.Fatalf("rebase trimmed the user's raw input: %q", w.editJobNotes)
+	}
+	if w.editJobCompany != "初始公司A" || w.editJobPosition != "" || w.jobSaveState != "validation_error" {
+		t.Fatalf("rebase mishandled fields: company=%q position=%q state=%q",
+			w.editJobCompany, w.editJobPosition, w.jobSaveState)
+	}
+	_ = job1
 }
 
 // A closure reason queued by the rebase must stay pending until a write carrying it is

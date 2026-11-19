@@ -90,16 +90,6 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 // resetJobEditFields copies an application's details into the draft inputs without
 // replacing detailJob, so the last committed record stays the failure baseline.
 func (w *Workbench) resetJobEditFields(app model.JobApplication) {
-	w.copyJobEditFields(app)
-	w.editJobReasonDirty = false
-	w.jobDirty = false
-	w.jobSaveState = "saved"
-	w.jobSaveErr = ""
-}
-
-// copyJobEditFields copies an application's details into the draft inputs and leaves
-// the save state untouched, for rebasing drafts that are still invalid or in flight.
-func (w *Workbench) copyJobEditFields(app model.JobApplication) {
 	w.editJobCompany = app.CompanyName
 	w.editJobPosition = app.PositionName
 	w.editJobAppliedDate = parseCalendarDateValue(app.AppliedDate)
@@ -107,19 +97,57 @@ func (w *Workbench) copyJobEditFields(app model.JobApplication) {
 	w.editJobChannel = app.Channel
 	w.editJobNotes = app.Notes
 	w.editJobClosureReason = app.ClosureReason
+	w.editJobReasonDirty = false
+	w.jobDirty = false
+	w.jobSaveState = "saved"
+	w.jobSaveErr = ""
+}
+
+// rebaseInvalidJobDraftOnCommitted resets only the fields the current draft still
+// shares with the failed discard baseline (snap) to the committed values, field by
+// field. The draft stays invalid: the user's newer input — including raw whitespace a
+// save input would trim — and the validation error survive until a valid save can be
+// built.
+func (w *Workbench) rebaseInvalidJobDraftOnCommitted(snap jobapplications.UpdateDetailsInput) {
+	if w.detailJob == nil {
+		return
+	}
+	committed := *w.detailJob
+	draft := w.jobInputFromDraft()
+	if draft.CompanyName == snap.CompanyName {
+		w.editJobCompany = committed.CompanyName
+	}
+	if draft.PositionName == snap.PositionName {
+		w.editJobPosition = committed.PositionName
+	}
+	if draft.AppliedDate == snap.AppliedDate {
+		w.editJobAppliedDate = parseCalendarDateValue(committed.AppliedDate)
+	}
+	if draft.ApplicationURL == snap.ApplicationURL {
+		w.editJobURL = committed.ApplicationURL
+	}
+	if draft.Channel == snap.Channel {
+		w.editJobChannel = committed.Channel
+	}
+	if draft.Notes == snap.Notes {
+		w.editJobNotes = committed.Notes
+	}
+	if !w.editJobReasonDirty {
+		w.editJobClosureReason = committed.ClosureReason
+	}
 }
 
 // jobInputFromDraft snapshots the current draft inputs as a save input without
 // validating them, for rebasing drafts that do not pass validation yet.
 func (w *Workbench) jobInputFromDraft() jobapplications.UpdateDetailsInput {
 	in := jobapplications.UpdateDetailsInput{
-		ID:              w.selectedJobID,
-		CompanyName:     strings.TrimSpace(w.editJobCompany),
-		PositionName:    strings.TrimSpace(w.editJobPosition),
-		AppliedDate:     formatCalendarDate(w.editJobAppliedDate),
-		ApplicationURL:  strings.TrimSpace(w.editJobURL),
-		Channel:         strings.TrimSpace(w.editJobChannel),
-		Notes:           strings.TrimRight(w.editJobNotes, "\r\n"),
+		ID:             w.selectedJobID,
+		CompanyName:    strings.TrimSpace(w.editJobCompany),
+		PositionName:   strings.TrimSpace(w.editJobPosition),
+		AppliedDate:    formatCalendarDate(w.editJobAppliedDate),
+		ApplicationURL: strings.TrimSpace(w.editJobURL),
+		Channel:        strings.TrimSpace(w.editJobChannel),
+		Notes:          strings.TrimRight(w.editJobNotes, "\r\n"),
 	}
 	if w.editJobReasonDirty && w.detailJob != nil && w.detailJob.Lifecycle == model.JobLifecycleClosed {
 		r := strings.TrimSpace(w.editJobClosureReason)
@@ -389,9 +417,8 @@ func (w *Workbench) startJobSave(request jobSave) error {
 		if request.revision != w.jobSaveRevision {
 			// A newer invalid draft must not be marked saved by an older completion,
 			// but a failed discard baseline must not linger in it either.
-			if err != nil && rebase && w.detailJob != nil {
-				rebased := rebaseJobInputOnCommitted(w.jobInputFromDraft(), request.input, jobInputFromJob(*w.detailJob))
-				w.copyJobEditFields(overlayJobInput(*w.detailJob, rebased))
+			if err != nil && rebase {
+				w.rebaseInvalidJobDraftOnCommitted(request.input)
 			}
 			w.afterSave = nil
 			return
