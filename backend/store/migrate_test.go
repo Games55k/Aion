@@ -9,7 +9,7 @@ import (
 )
 
 func TestIncrementalMigrationFromV1PreservesDataAndMatchesFreshSchema(t *testing.T) {
-	// Upgrading a populated v1 database must apply only v2 DDL, preserve v1 data, and yield identical schema to a fresh v2 store.
+	// Upgrading a populated v1 database must preserve v1 data and yield the same schema as a fresh store.
 	ctx := context.Background()
 	v1Dir := t.TempDir()
 	dbPath := filepath.Join(v1Dir, "aion.sqlite")
@@ -17,7 +17,7 @@ func TestIncrementalMigrationFromV1PreservesDataAndMatchesFreshSchema(t *testing
 	if err != nil {
 		t.Fatalf("open v1 db: %v", err)
 	}
-	if err := ApplySchemaUpTo(ctx, db, MinSchemaVersion); err != nil {
+	if err := migrateDB(ctx, db, 1); err != nil {
 		t.Fatalf("apply v1 schema: %v", err)
 	}
 	ts := "2026-11-01T10:00:00Z"
@@ -33,7 +33,7 @@ func TestIncrementalMigrationFromV1PreservesDataAndMatchesFreshSchema(t *testing
 
 	s, err := Open(v1Dir)
 	if err != nil {
-		t.Fatalf("reopen v1 store as v2: %v", err)
+		t.Fatalf("upgrade v1 store: %v", err)
 	}
 	defer s.Close()
 
@@ -61,7 +61,7 @@ func TestIncrementalMigrationFromV1PreservesDataAndMatchesFreshSchema(t *testing
 	freshDir := t.TempDir()
 	fresh, err := Open(freshDir)
 	if err != nil {
-		t.Fatalf("open fresh v2 store: %v", err)
+		t.Fatalf("open fresh store: %v", err)
 	}
 	defer fresh.Close()
 
@@ -102,7 +102,7 @@ func TestFailedMigrationRollsBackWithoutCorruptingV1Data(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := ApplySchemaUpTo(ctx, db, MinSchemaVersion); err != nil {
+	if err := migrateDB(ctx, db, 1); err != nil {
 		t.Fatalf("apply v1 schema: %v", err)
 	}
 	ts := "2026-11-01T10:00:00Z"
@@ -130,8 +130,8 @@ func TestFailedMigrationRollsBackWithoutCorruptingV1Data(t *testing.T) {
 	if err := recheck.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("scan version: %v", err)
 	}
-	if version != MinSchemaVersion {
-		t.Fatalf("version after rollback = %d, want %d", version, MinSchemaVersion)
+	if version != 1 {
+		t.Fatalf("version after rollback = %d, want 1", version)
 	}
 	var name string
 	if err := recheck.QueryRow("SELECT name FROM projects WHERE id='p1'").Scan(&name); err != nil || name != "Intact" {
@@ -143,29 +143,48 @@ func TestFailedMigrationRollsBackWithoutCorruptingV1Data(t *testing.T) {
 	}
 }
 
-func TestMigrateDatabaseFileRejectsUnversionedOrFutureDB(t *testing.T) {
-	// MigrateDatabaseFile must reject empty unversioned files and future schema versions before modifying anything.
+// Opening a v2 store drops the obsolete column while preserving the job and its timeline.
+func TestMigrationFromV2DropsFollowUpDate(t *testing.T) {
 	ctx := context.Background()
-	unversioned := filepath.Join(t.TempDir(), "empty.sqlite")
-	db, err := openDB(unversioned, "rwc")
+	root := t.TempDir()
+	db, err := openDB(filepath.Join(root, "aion.sqlite"), "rwc")
 	if err != nil {
-		t.Fatalf("open empty db: %v", err)
+		t.Fatal(err)
 	}
-	db.Close()
-	if err := MigrateDatabaseFile(ctx, unversioned); err == nil {
-		t.Fatal("expected error migrating user_version=0 file")
+	if err := migrateDB(ctx, db, 2); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	ts := "2026-11-01T10:00:00Z"
+	_, err = db.Exec(`INSERT INTO job_applications(id,company_name,position_name,applied_date,stage,lifecycle,next_follow_up_date,notes,created_at,updated_at)
+		VALUES('job','Acme','Engineer','2026-11-01','applied','active','2026-11-10','keep me',?,?)`, ts, ts)
+	if err == nil {
+		_, err = db.Exec(`INSERT INTO job_application_events(id,application_id,event_type,note,occurred_at,created_at)
+			VALUES('event','job','note_added','timeline note',?,?)`, ts, ts)
+	}
+	if closeErr := db.Close(); err != nil || closeErr != nil {
+		t.Fatalf("seed legacy store: %v, close: %v", err, closeErr)
 	}
 
-	future := filepath.Join(t.TempDir(), "future.sqlite")
-	db2, err := openDB(future, "rwc")
+	s, err := Open(root)
 	if err != nil {
-		t.Fatalf("open future db: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := db2.Exec("PRAGMA user_version=99"); err != nil {
-		t.Fatalf("set future version: %v", err)
-	}
-	db2.Close()
-	if err := MigrateDatabaseFile(ctx, future); err == nil {
-		t.Fatal("expected error migrating future schema version 99")
+	defer s.Close()
+	if err := s.Read(ctx, func(tx *sql.Tx) error {
+		var remaining int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('job_applications') WHERE name = 'next_follow_up_date'").Scan(&remaining); err != nil {
+			return err
+		}
+		var notes, eventNote string
+		if err := tx.QueryRowContext(ctx, `SELECT j.notes, e.note FROM job_applications j JOIN job_application_events e ON e.application_id=j.id WHERE j.id='job' AND e.id='event'`).Scan(&notes, &eventNote); err != nil {
+			return err
+		}
+		if remaining != 0 || notes != "keep me" || eventNote != "timeline note" {
+			t.Fatalf("migration left %d obsolete columns, job notes %q and event note %q", remaining, notes, eventNote)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

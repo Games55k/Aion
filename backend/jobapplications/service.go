@@ -100,7 +100,6 @@ func scanApplication(scanner interface {
 		&closedAtRaw,
 		&app.ApplicationURL,
 		&app.Channel,
-		&app.NextFollowUpDate,
 		&app.Notes,
 		&reachedOfferInt,
 		&createdAtRaw,
@@ -166,7 +165,7 @@ func scanEvent(scanner interface {
 const selectApplicationColumns = `SELECT
 	id, company_name, position_name, applied_date,
 	stage, lifecycle, outcome, closure_reason, closed_at,
-	application_url, channel, next_follow_up_date, notes,
+	application_url, channel, notes,
 	CASE WHEN stage = 'offer' OR outcome IN ('offer_accepted', 'offer_declined') THEN 1 ELSE 0 END AS reached_offer,
 	created_at, updated_at, deleted_at
 FROM job_applications`

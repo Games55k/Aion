@@ -204,6 +204,11 @@ func uiCopyButton(c *ui.Context, content string) ui.Element {
 	return styleActionIcon(c, b, icon, actionIconProps{Title: title, Active: copied})
 }
 
+type segmentedOption struct {
+	Label string
+	Icon  *ui.SVG
+}
+
 type segmentedProps struct {
 	Size uiSize
 }
@@ -212,11 +217,11 @@ type segmentedMatch struct{ selected *int }
 
 var segmentPress = ui.Animation{Duration: 120 * time.Millisecond, Ease: easeOut}
 
-func uiSegmented(c *ui.Context, selected *int, options []string, p segmentedProps) ui.Element {
+func uiSegmented(c *ui.Context, selected *int, options []segmentedOption, p segmentedProps) ui.Element {
 	tk := tokensOf(c)
-	height, padding, fontSize := float32(32), float32(12), float32(13)
+	height, padding, fontSize, iconSize, gap := float32(32), float32(12), float32(13), float32(14), float32(6)
 	if p.Size == sizeSmall {
-		height, padding, fontSize = 26, 10, 12
+		height, padding, fontSize, iconSize, gap = 26, 10, 12, 13, 5
 	}
 
 	parts := ui.SegmentedBase(c, selected, len(options))
@@ -227,7 +232,7 @@ func uiSegmented(c *ui.Context, selected *int, options []string, p segmentedProp
 
 	track.Children(func() {
 		for i, option := range options {
-			seg := parts.Segment(i).Height(height).PaddingX(padding).Radius(tk.BorderRadius).
+			seg := parts.Segment(i).Height(height).PaddingX(padding).Gap(gap).Radius(tk.BorderRadius).
 				FontSize(fontSize).FontWeight(500).Cursor(ui.CursorPointer)
 			text := tk.TextSecondary
 			if i == *selected || seg.Hovered() {
@@ -243,7 +248,12 @@ func uiSegmented(c *ui.Context, selected *int, options []string, p segmentedProp
 					ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).
 						Radius(tk.BorderRadius).Background(tk.BgElevated).ZIndex(-1).Transition(slide)
 				}
-				ui.Text(c, option).SingleLine()
+				if option.Icon != nil {
+					ui.Icon(c, option.Icon).FontSize(iconSize).Shrink(0)
+				}
+				if option.Label != "" {
+					ui.Text(c, option.Label).SingleLine()
+				}
 			})
 		}
 	})

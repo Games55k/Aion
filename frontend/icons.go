@@ -299,6 +299,14 @@ func iconLayoutGrid() *ui.SVG {
 	return loadIcon("layout-grid", `<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>`)
 }
 
+func iconMonitor() *ui.SVG {
+	return loadIcon("monitor", `<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>`)
+}
+
+func iconMoon() *ui.SVG {
+	return loadIcon("moon", `<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>`)
+}
+
 func iconOption() *ui.SVG {
 	return loadIcon("option", `<path d="M14 3h7"/><path d="M3 3h5.28a1 1 0 0 1 .948.684l5.544 16.632a1 1 0 0 0 .949.684H21"/>`)
 }
@@ -361,6 +369,10 @@ func iconSquareCheckBig() *ui.SVG {
 
 func iconSquarePen() *ui.SVG {
 	return loadIcon("square-pen", `<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>`)
+}
+
+func iconSun() *ui.SVG {
+	return loadIcon("sun", `<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>`)
 }
 
 func iconTarget() *ui.SVG {

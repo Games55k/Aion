@@ -18,6 +18,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 - Open each test with a one-sentence comment describing the behaviour. For regressions, explain what broke.
 - Run `go test ./...` before committing and run new UI tests with `-count=5`. Fix or remove flaky tests.
 - After a failed restore, verify that reopening cannot create a missing database and that Settings reports any completed safety archive. Round-trip a closed Offer application after a stage correction. When restoring from an old safety archive repeatedly, verify rotation retains the source and the latest five safety archives, including after a backwards clock adjustment.
+- Restore accepts only the current database schema and rejects older archives before creating a safety backup. Keep local database migrations independent of restore. Verify that upgrading a v2 local database removes the follow-up column and preserves job records and their timeline.
 - Keep the global trash list in a single read snapshot and sort parsed deletion timestamps. Cover cross-module rollback when clearing trash fails, partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
 
 ## Documentation

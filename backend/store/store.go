@@ -20,10 +20,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const (
-	MinSchemaVersion = 1
-	SchemaVersion    = 2
-)
+const SchemaVersion = 3
 
 type Store struct {
 	// All backup Service instances share this gate; ordinary transactions do not.
@@ -113,26 +110,11 @@ func (s *Store) DBPath() string         { return filepath.Join(s.root, "aion.sql
 func (s *Store) AttachmentsDir() string { return filepath.Join(s.root, "attachments") }
 
 func (s *Store) migrate() error {
-	return migrateDB(context.Background(), s.db, SchemaVersion, true)
+	return migrateDB(context.Background(), s.db, SchemaVersion)
 }
 
-// ApplySchemaUpTo initializes an empty or older database connection up to targetVersion.
-func ApplySchemaUpTo(ctx context.Context, db *sql.DB, targetVersion int) error {
-	return migrateDB(ctx, db, targetVersion, true)
-}
-
-// MigrateDatabaseFile upgrades an isolated SQLite file from an older supported schema version to SchemaVersion.
-func MigrateDatabaseFile(ctx context.Context, path string) error {
-	db, err := openDB(path, "rw")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	return migrateDB(ctx, db, SchemaVersion, false)
-}
-
-func migrateDB(ctx context.Context, db *sql.DB, targetVersion int, allowEmpty bool) error {
-	if targetVersion < MinSchemaVersion || targetVersion > SchemaVersion {
+func migrateDB(ctx context.Context, db *sql.DB, targetVersion int) error {
+	if targetVersion < 1 || targetVersion > SchemaVersion {
 		return fmt.Errorf("unsupported target schema version %d", targetVersion)
 	}
 	var version int
@@ -140,9 +122,6 @@ func migrateDB(ctx context.Context, db *sql.DB, targetVersion int, allowEmpty bo
 		return err
 	}
 	if version < 0 || version > SchemaVersion {
-		return fmt.Errorf("unsupported database version %d", version)
-	}
-	if !allowEmpty && version < MinSchemaVersion {
 		return fmt.Errorf("unsupported database version %d", version)
 	}
 	if version == targetVersion {
@@ -172,6 +151,7 @@ func migrateDB(ctx context.Context, db *sql.DB, targetVersion int, allowEmpty bo
 var schemaSteps = [][]string{
 	schemaV1,
 	schemaV2,
+	{"ALTER TABLE job_applications DROP COLUMN next_follow_up_date"},
 }
 
 var schemaV1 = []string{

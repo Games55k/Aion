@@ -1,13 +1,9 @@
 package frontend
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -3202,95 +3198,6 @@ func openTestWorkbenchAt(t *testing.T, dataDir string, now func() time.Time, hos
 	return app, wb, tt
 }
 
-func buildFrontendV1BackupZip(t *testing.T, createdAt time.Time, mutate func(*sql.DB)) string {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "v1.sqlite")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ApplySchemaUpTo(context.Background(), db, store.MinSchemaVersion); err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	ts := createdAt.UTC().Format(time.RFC3339Nano)
-	if _, err := db.Exec(`INSERT INTO projects(id,name,icon,description,archived,created_at,updated_at) VALUES('v1-proj','旧版项目','folder','v1 backup',0,?,?)`, ts, ts); err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO tasks(id,project_id,title,description,status,priority,tags,subtasks,due_date,position,created_at,updated_at) VALUES('v1-task','v1-proj','旧版任务','','planned','medium','[]','[]','2026-12-01',0,?,?)`, ts, ts); err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	if mutate != nil {
-		mutate(db)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	dbBytes, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(dbBytes)
-	type fileRec struct {
-		Path   string `json:"path"`
-		Size   int64  `json:"size"`
-		SHA256 string `json:"sha256"`
-	}
-	type manifestRec struct {
-		Version       int       `json:"version"`
-		SchemaVersion int       `json:"schema_version"`
-		CreatedAt     time.Time `json:"created_at"`
-		Kind          string    `json:"kind"`
-		Files         []fileRec `json:"files"`
-	}
-	m := manifestRec{
-		Version:       backup.FormatVersion,
-		SchemaVersion: store.MinSchemaVersion,
-		CreatedAt:     createdAt.UTC(),
-		Kind:          "manual",
-		Files: []fileRec{{
-			Path:   "database.sqlite",
-			Size:   int64(len(dbBytes)),
-			SHA256: hex.EncodeToString(sum[:]),
-		}},
-	}
-	manifestBytes, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zipPath := filepath.Join(t.TempDir(), "v1-backup.zip")
-	f, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zw := zip.NewWriter(f)
-	for _, entry := range []struct {
-		name string
-		data []byte
-	}{
-		{name: "manifest.json", data: manifestBytes},
-		{name: "database.sqlite", data: dbBytes},
-	} {
-		w, err := zw.Create(entry.name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write(entry.data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return zipPath
-}
-
 func typeIntoJobField(t *testing.T, tt *ui.Tester, label, value string) {
 	t.Helper()
 	if err := tt.Click(label); err != nil {
@@ -3985,8 +3892,8 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 	}
 }
 
-// Job applications integrate with the global Recycle Bin (filter, restore with events, permanent cascade delete) and older v1 backups upgrade cleanly upon restore.
-func TestJobGlobalRecycleBinAndRestoreCompatibility(t *testing.T) {
+// The global Recycle Bin filters jobs, restores their timelines, and cascades permanent deletions.
+func TestJobGlobalRecycleBin(t *testing.T) {
 	nowVal := time.Date(2026, 11, 15, 12, 0, 0, 0, time.Local)
 	nowFn := func() time.Time { return nowVal }
 	app, wb, tt := openTestWorkbenchAt(t, t.TempDir(), nowFn, Host{})
@@ -4082,31 +3989,6 @@ func TestJobGlobalRecycleBinAndRestoreCompatibility(t *testing.T) {
 	db.Close()
 	if eventCount != 0 {
 		t.Fatalf("expected permanent delete to cascade job_application_events, got %d", eventCount)
-	}
-
-	// Seed a new live job, then restore an older v1 backup zip (no job tables); expect schema upgraded to v2, old live jobs cleared, safety backup retained.
-	if _, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:  "恢复前投递",
-		PositionName: "会被旧备份覆盖",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	wb.ReloadJobApplications()
-	v1Zip := buildFrontendV1BackupZip(t, nowVal.Add(-24*time.Hour), nil)
-	wb.RequestRestoreBackup(v1Zip)
-	wb.TriggerRestoreBackup()
-	tt.Frame()
-	if wb.jobStats.Total != 0 || len(wb.jobApps) != 0 {
-		t.Fatalf("expected restoring v1 backup to clear pre-restore live jobs, got len=%d stats=%+v", len(wb.jobApps), wb.jobStats)
-	}
-	if len(wb.activeProjects) != 1 || wb.activeProjects[0].Name != "旧版项目" {
-		t.Fatalf("expected v1 project restored after upgrade, got %+v", wb.activeProjects)
-	}
-	if wb.lastRestoreResult == nil || wb.lastRestoreResult.SafetyBackupPath == "" {
-		t.Fatalf("expected safety backup recorded before restoring v1 archive, result=%+v", wb.lastRestoreResult)
-	}
-	if _, err := os.Stat(wb.lastRestoreResult.SafetyBackupPath); err != nil {
-		t.Fatalf("expected safety backup archive on disk: %v", err)
 	}
 }
 
@@ -4352,5 +4234,62 @@ func TestSubtaskMoveButtonsDoNotMutateDuringRender(t *testing.T) {
 	saved, err := app.Projects.GetTask(ctx, task.ID)
 	if err != nil || len(saved.Subtasks) != 2 || saved.Subtasks[0].Title != "Beta" {
 		t.Fatalf("move was not persisted: %+v %v", saved, err)
+	}
+}
+
+// Theme segmented control renders supported SVG icons and switches between system, light, and dark modes by label.
+func TestThemeSegmentedControlSwitchesAllModesWithIcons(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		svg  *ui.SVG
+	}{
+		{name: "monitor", svg: iconMonitor()},
+		{name: "sun", svg: iconSun()},
+		{name: "moon", svg: iconMoon()},
+	} {
+		if missing := tc.svg.Unsupported(); len(missing) > 0 {
+			t.Fatalf("%s icon has unsupported SVG features: %v", tc.name, missing)
+		}
+	}
+
+	var appliedThemes []string
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		SetTheme: func(theme string) {
+			appliedThemes = append(appliedThemes, theme)
+		},
+	})
+	wb.NavigateTo(NavSettings)
+	tt.Frame()
+
+	for _, step := range []struct {
+		label   string
+		want    string
+		wantIdx int
+	}{
+		{label: "浅色", want: ThemeLight, wantIdx: 1},
+		{label: "深色", want: ThemeDark, wantIdx: 2},
+		{label: "跟随系统", want: ThemeSystem, wantIdx: 0},
+	} {
+		if err := tt.Click(step.label); err != nil {
+			t.Fatalf("click %s: %v", step.label, err)
+		}
+		if wb.themeSetting != step.want {
+			t.Fatalf("after clicking %s: expected themeSetting %q, got %q", step.label, step.want, wb.themeSetting)
+		}
+		if wb.themeSegmentIdx != step.wantIdx {
+			t.Fatalf("after clicking %s: expected themeSegmentIdx %d, got %d", step.label, step.wantIdx, wb.themeSegmentIdx)
+		}
+		gotPersisted, err := app.Settings.Theme(context.Background())
+		if err != nil {
+			t.Fatalf("read persisted theme after %s: %v", step.label, err)
+		}
+		if gotPersisted != step.want {
+			t.Fatalf("after clicking %s: expected persisted theme %q, got %q", step.label, step.want, gotPersisted)
+		}
+	}
+
+	wantApplied := []string{ThemeLight, ThemeDark, ThemeSystem}
+	if !slices.Equal(appliedThemes, wantApplied) {
+		t.Fatalf("expected Host.SetTheme calls %v, got %v", wantApplied, appliedThemes)
 	}
 }
