@@ -160,22 +160,7 @@ func (w *Workbench) ClearJobFilters() {
 }
 
 func (w *Workbench) activeDuplicateMatches(company, position string) []model.JobApplication {
-	c := strings.TrimSpace(company)
-	p := strings.TrimSpace(position)
-	if c == "" || p == "" {
-		return nil
-	}
-	var out []model.JobApplication
-	for _, app := range w.jobApps {
-		if app.DeletedAt != nil || app.Lifecycle != model.JobLifecycleActive {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(app.CompanyName), c) &&
-			strings.EqualFold(strings.TrimSpace(app.PositionName), p) {
-			out = append(out, app)
-		}
-	}
-	return out
+	return jobapplications.MatchActiveDuplicates(w.jobApps, company, position)
 }
 
 // OpenJobCreateModal opens the creation dialog with today's local date and Applied stage defaulted.
@@ -668,17 +653,12 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 	}
 	w.jobBackfillRequest = input
 	service := w.app.JobApplications
-	var updated model.JobApplication
 	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
 		if _, err := service.BackfillStageEvent(context.Background(), input); err != nil {
 			return err
 		}
 		var err error
-		updated, err = service.Get(context.Background(), appID)
-		if err != nil {
-			return err
-		}
 		events, err = service.ListEvents(context.Background(), appID)
 		return err
 	}, func(err error) {
@@ -698,9 +678,7 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 				w.jobBackfillNote = ""
 			}
 		}
-		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
-			w.detailJob.ReachedOffer = updated.ReachedOffer
 			w.detailJobEvents = events
 		}
 	})
@@ -815,9 +793,10 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再移入回收站", Type: ToastInfo})
 		return
 	}
-	if w.selectedJobID == appID && (w.jobDirty || w.hasUnsavedChangesFromDetailJob()) {
+	if w.selectedJobID == appID {
 		// Explicit delete supersedes unsaved text edits cleanly instead of trapping the user on validation errors.
 		w.pendingJobSave = nil
+		w.discardJobAfterSave = false
 		w.afterSave = nil
 	}
 	service := w.app.JobApplications

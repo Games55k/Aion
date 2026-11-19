@@ -174,9 +174,13 @@ type Workbench struct {
 	jobDirty             bool
 	jobSaveRevision      uint64
 	jobSaving            bool
+	inFlightJobSave      *jobSave
 	pendingJobSave       *jobSave
 	discardJobAfterSave  bool
-	jobWrites            []func()
+	// discardJobRebase marks that the in-flight write is a discard baseline: if it
+	// fails, the queued follow-up save must rebase on the committed application.
+	discardJobRebase bool
+	jobWrites        []func()
 
 	// Job Timeline input & retry state
 	jobNoteInput           string
@@ -247,11 +251,15 @@ type Workbench struct {
 	lastSavedAt         time.Time
 	dirty               bool
 	// UI-thread owned generations and one coalesced autosave behind the active write.
-	saveRevision      uint64
-	saving            bool
-	pendingSave       *taskSave
-	afterSave         func()
-	discardAfterSave  bool
+	saveRevision     uint64
+	saving           bool
+	inFlightSave     *taskSave
+	pendingSave      *taskSave
+	afterSave        func()
+	discardAfterSave bool
+	// discardRebase marks that the in-flight write is a discard baseline: if it fails,
+	// the queued follow-up save must rebase on the committed task instead.
+	discardRebase     bool
 	loadVersions      map[string]uint64
 	navigationVersion uint64
 	boardNeedsReload  bool
@@ -285,7 +293,7 @@ type Workbench struct {
 
 	// Trash view state
 	trashSearch             string
-	trashKindFilter         string // "", "project", "task"
+	trashKindFilter         string // "", "project", "task", "job_application"
 	trashItems              []model.TrashItem
 	trashParentErrModalOpen bool
 	trashOrphanTask         *model.TrashItem
@@ -1209,6 +1217,10 @@ func (w *Workbench) resetSelectedTaskState() {
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
+	w.pendingSave = nil
+	w.inFlightSave = nil
+	w.discardAfterSave = false
+	w.discardRebase = false
 	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
 	w.attachmentPaths = make(map[string]string)
@@ -1219,15 +1231,28 @@ func (w *Workbench) resetSelectedTaskState() {
 }
 
 // DiscardSelectedTaskDraft explicitly discards unsaved edits on the currently selected task
-// and restores its fields from the last saved version.
+// and restores its fields from the last saved version. While a background write is in
+// flight, the draft rebases on that write's result — it is already committing — and the
+// form only previews the last committed task when no write matches the selection.
 func (w *Workbench) DiscardSelectedTaskDraft() {
-	w.afterSave = nil
-	if w.saving {
-		w.pendingSave = nil
-		w.discardAfterSave = true
+	if w.IsRestoring() {
 		return
 	}
-	if w.IsRestoring() {
+	w.afterSave = nil
+	w.pendingSave = nil
+	w.saveRevision++
+	if w.saving {
+		w.clearDetailTransientInputs()
+		if baseline, ok := w.inFlightSaveBaseline(); ok {
+			w.resetDetailEditFields(baseline)
+		} else if w.detailTask != nil {
+			w.resetDetailEditFields(*w.detailTask)
+		}
+		// The previewed baseline is still being written; it must not read as saved
+		// before the acknowledgement lands (and it may still roll back on failure).
+		w.saveState = "saving"
+		w.discardAfterSave = true
+		w.discardRebase = true
 		return
 	}
 	if w.detailTask != nil {
@@ -1266,24 +1291,296 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 		w.taskAttachments[t.ID] = atts
 		w.cacheAttachments(atts)
 	}
+	w.resetDetailEditFields(t)
+}
+
+// resetDetailEditFields copies a task's content into the draft inputs without
+// replacing detailTask, so the last committed task stays the failure baseline.
+func (w *Workbench) resetDetailEditFields(t model.Task) {
 	w.editTitle = t.Title
 	w.editStatus = string(t.Status)
 	w.editPriority = string(t.Priority)
-	if strings.TrimSpace(t.DueDate) != "" {
-		if parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(t.DueDate), time.Local); err == nil {
-			w.editDueDate = parsed
-		} else {
-			w.editDueDate = time.Time{}
-		}
-	} else {
-		w.editDueDate = time.Time{}
-	}
+	w.editDueDate = parseTaskDueDate(t.DueDate)
 	w.editTags = slices.Clone(t.Tags)
 	w.editDescription = t.Description
 	w.editSubtasks = slices.Clone(t.Subtasks)
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
+}
+
+// parseTaskDueDate parses a persisted YYYY-MM-DD due date for the editor.
+func parseTaskDueDate(due string) time.Time {
+	if strings.TrimSpace(due) == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(due), time.Local); err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+// taskInputFromDraft snapshots the current draft inputs as a save input, without
+// validating them.
+func (w *Workbench) taskInputFromDraft() projects.TaskInput {
+	dueStr := ""
+	if !w.editDueDate.IsZero() {
+		dueStr = w.editDueDate.Format("2006-01-02")
+	}
+	return projects.TaskInput{
+		Title:       strings.TrimSpace(w.editTitle),
+		Description: w.editDescription,
+		Status:      model.Status(w.editStatus),
+		Priority:    model.Priority(w.editPriority),
+		Tags:        slices.Clone(w.editTags),
+		Subtasks:    slices.Clone(w.editSubtasks),
+		DueDate:     dueStr,
+	}
+}
+
+// inFlightSaveBaseline predicts the selected task as it will read once the active
+// background write lands. Discard must rebase on that result, because the write is
+// already committing and cannot be unsaved.
+func (w *Workbench) inFlightSaveBaseline() (model.Task, bool) {
+	if w.detailTask == nil || w.inFlightSave == nil || w.inFlightSave.taskID != w.selectedTaskID {
+		return model.Task{}, false
+	}
+	return overlayTaskInput(*w.detailTask, w.inFlightSave.input), true
+}
+
+// overlayTaskInput projects a save input onto a task's content fields.
+func overlayTaskInput(t model.Task, in projects.TaskInput) model.Task {
+	t.Title, t.Description, t.Status, t.Priority = in.Title, in.Description, in.Status, in.Priority
+	t.Tags, t.Subtasks, t.DueDate = in.Tags, in.Subtasks, in.DueDate
+	return t
+}
+
+// rebaseTagsOnCommitted merges post-discard tag additions and removals into the
+// committed set. Comparing whole slices would resurrect failed tags whenever any
+// later edit changed the slice.
+func rebaseTagsOnCommitted(in, snap, committed []string) []string {
+	out := slices.Clone(committed)
+	for _, tag := range in {
+		if !slices.Contains(snap, tag) && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	for _, tag := range snap {
+		if !slices.Contains(in, tag) {
+			if i := slices.Index(out, tag); i >= 0 {
+				out = slices.Delete(out, i, i+1)
+			}
+		}
+	}
+	return out
+}
+
+// rebaseSubtasksOnCommitted merges post-discard subtask edits into the committed list.
+// Titles and done flags fall back to the committed values field by field unless the
+// user changed them after the discard. Additions and edits to unsaved additions stay,
+// failed deletions roll back, and post-discard order edits take precedence.
+func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subtask {
+	snapByID := make(map[string]model.Subtask, len(snap))
+	for _, st := range snap {
+		snapByID[st.ID] = st
+	}
+	committedByID := make(map[string]model.Subtask, len(committed))
+	for _, st := range committed {
+		committedByID[st.ID] = st
+	}
+	mergedByID := make(map[string]model.Subtask, len(in)+len(committed))
+	var draftOrder []string
+	for _, st := range in {
+		s, wasInSnap := snapByID[st.ID]
+		c, inCommitted := committedByID[st.ID]
+		if wasInSnap && !inCommitted && st == s {
+			// The failed write added this row and the user left it untouched.
+			continue
+		}
+		merged := st
+		if wasInSnap && inCommitted {
+			if st.Title == s.Title {
+				merged.Title = c.Title
+			}
+			if st.Done == s.Done {
+				merged.Done = c.Done
+			}
+		}
+		mergedByID[merged.ID] = merged
+		draftOrder = append(draftOrder, merged.ID)
+	}
+	for _, st := range committed {
+		// Deleted by the failed write (absent from snap) and not re-added: the
+		// rollback restored it. Its committed position is a preference in the merge.
+		if _, wasInSnap := snapByID[st.ID]; !wasInSnap {
+			if _, ok := mergedByID[st.ID]; !ok {
+				mergedByID[st.ID] = st
+			}
+		}
+	}
+	var snapIDs, committedIDs []string
+	for _, st := range snap {
+		// An edited row from a failed addition keeps its position as a new row.
+		_, inCommitted := committedByID[st.ID]
+		if _, ok := mergedByID[st.ID]; ok && inCommitted {
+			snapIDs = append(snapIDs, st.ID)
+		}
+	}
+	for _, st := range committed {
+		if _, ok := mergedByID[st.ID]; ok {
+			committedIDs = append(committedIDs, st.ID)
+		}
+	}
+	out := make([]model.Subtask, 0, len(mergedByID))
+	for _, id := range rebaseSubtaskOrder(draftOrder, snapIDs, committedIDs) {
+		out = append(out, mergedByID[id])
+	}
+	return out
+}
+
+// rebaseSubtaskOrder preserves post-discard swaps and the order of additions relative to
+// visible subtasks. It then keeps compatible pairs in committed order. Placement of
+// restored subtasks relative to additions comes last.
+func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
+	if slices.Equal(inIDs, snapIDs) {
+		return slices.Clone(committedIDs)
+	}
+	if slices.Equal(snapIDs, committedIDs) {
+		// The failed write did not change the order or hide a subtask.
+		return slices.Clone(inIDs)
+	}
+
+	items := slices.Clone(committedIDs)
+	index := make(map[string]int, len(committedIDs)+len(inIDs))
+	for i, id := range committedIDs {
+		index[id] = i
+	}
+	for _, id := range inIDs {
+		if _, ok := index[id]; !ok {
+			index[id] = len(items)
+			items = append(items, id)
+		}
+	}
+	if len(inIDs) >= len(snapIDs) && slices.Equal(inIDs[:len(snapIDs)], snapIDs) &&
+		slices.Equal(inIDs[len(snapIDs):], items[len(committedIDs):]) {
+		// Only new trailing items changed, so committed order followed by those
+		// additions already satisfies every constraint, including restored positions.
+		return items
+	}
+
+	positions := make([]subtaskOrderPosition, len(items))
+	for i, id := range snapIDs {
+		positions[index[id]].snapshot = i + 1
+	}
+	draft := make([]int, len(inIDs))
+	for i, id := range inIDs {
+		item := index[id]
+		draft[i] = item
+		positions[item].draft = i + 1
+	}
+	if order := compatibleSubtaskOrder(items, positions); order != nil {
+		return order
+	}
+
+	// Required edges all follow draft order, so they cannot form a cycle.
+	predecessors := make([][]int, len(items))
+	for j, to := range draft {
+		for _, from := range draft[:j] {
+			if positions[from].usesDraftOrder(positions[to]) {
+				predecessors[to] = append(predecessors[to], from)
+			}
+		}
+	}
+
+	seen := make([]bool, len(items))
+	var markPredecessors func(int)
+	markPredecessors = func(i int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		for _, prev := range predecessors[i] {
+			markPredecessors(prev)
+		}
+	}
+	preferBefore := func(from, start, end int) {
+		clear(seen)
+		markPredecessors(from)
+		// Edges leaving from cannot change which items already precede it.
+		for to := start; to < end; to++ {
+			if !seen[to] && !slices.Contains(predecessors[to], from) {
+				predecessors[to] = append(predecessors[to], from)
+			}
+		}
+	}
+	for i := range committedIDs {
+		preferBefore(i, i+1, len(committedIDs))
+	}
+	if len(items) > len(committedIDs) {
+		for i := range committedIDs {
+			if positions[i].draft == 0 {
+				preferBefore(i, len(committedIDs), len(items))
+			}
+		}
+	}
+
+	clear(seen)
+	out := make([]string, 0, len(items))
+	var emit func(int)
+	emit = func(i int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		for _, prev := range predecessors[i] {
+			emit(prev)
+		}
+		out = append(out, items[i])
+	}
+	for i := range items {
+		emit(i)
+	}
+	return out
+}
+
+type subtaskOrderPosition struct {
+	draft, snapshot int // one-based, zero if absent
+}
+
+// usesDraftOrder reports whether a pair includes a visible addition or was swapped
+// after the discard. These are the pairs that take precedence in a conflict.
+func (p subtaskOrderPosition) usesDraftOrder(other subtaskOrderPosition) bool {
+	return p.draft != 0 && other.draft != 0 &&
+		(p.snapshot == 0 || other.snapshot == 0 || (p.draft < other.draft) != (p.snapshot < other.snapshot))
+}
+
+// compatibleSubtaskOrder returns the order satisfying every pair, or nil if they
+// conflict. One item precedes the other in every pair. Distinct predecessor counts
+// therefore give the unique ranks: remove rank zero and repeat on the remaining items.
+func compatibleSubtaskOrder(items []string, positions []subtaskOrderPosition) []string {
+	counts := make([]int, len(items))
+	for left, pos := range positions {
+		for right := left + 1; right < len(positions); right++ {
+			other := positions[right]
+			// By default, committed items stay in order and restored items precede
+			// additions. items already lists committed items first.
+			if other.draft < pos.draft && pos.usesDraftOrder(other) {
+				counts[left]++
+			} else {
+				counts[right]++
+			}
+		}
+	}
+	order := make([]string, len(items))
+	occupied := make([]bool, len(items))
+	for i, rank := range counts {
+		if occupied[rank] {
+			return nil
+		}
+		order[rank] = items[i]
+		occupied[rank] = true
+	}
+	return order
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when
@@ -1299,27 +1596,12 @@ func (w *Workbench) SaveSelectedTask() error {
 	w.saveRevision++
 	w.pendingSave = nil
 	w.discardAfterSave = false
-	title := strings.TrimSpace(w.editTitle)
-	if title == "" {
+	input := w.taskInputFromDraft()
+	if input.Title == "" {
 		w.dirty = true
 		w.saveState = "validation_error"
 		w.saveErr = "任务标题不能为空"
 		return model.ErrInvalid
-	}
-
-	dueStr := ""
-	if !w.editDueDate.IsZero() {
-		dueStr = w.editDueDate.Format("2006-01-02")
-	}
-
-	input := projects.TaskInput{
-		Title:       title,
-		Description: w.editDescription,
-		Status:      model.Status(w.editStatus),
-		Priority:    model.Priority(w.editPriority),
-		Tags:        slices.Clone(w.editTags),
-		Subtasks:    slices.Clone(w.editSubtasks),
-		DueDate:     dueStr,
 	}
 
 	request := taskSave{taskID: w.selectedTaskID, revision: w.saveRevision, epoch: w.currentDataEpoch(), input: input}
@@ -1331,6 +1613,33 @@ func (w *Workbench) SaveSelectedTask() error {
 		return nil
 	}
 	return w.startTaskSave(request)
+}
+
+// rebaseTaskDraftOnCommitted rolls back fields inherited from the failed write
+// while preserving newer input and any validation error.
+func (w *Workbench) rebaseTaskDraftOnCommitted(snap projects.TaskInput) {
+	if w.detailTask == nil {
+		return
+	}
+	committed := *w.detailTask
+	draft := w.taskInputFromDraft()
+	if draft.Title == snap.Title && draft.Title != committed.Title {
+		w.editTitle = committed.Title
+	}
+	if draft.Description == snap.Description {
+		w.editDescription = committed.Description
+	}
+	if draft.Status == snap.Status {
+		w.editStatus = string(committed.Status)
+	}
+	if draft.Priority == snap.Priority {
+		w.editPriority = string(committed.Priority)
+	}
+	if draft.DueDate == snap.DueDate {
+		w.editDueDate = parseTaskDueDate(committed.DueDate)
+	}
+	w.editTags = rebaseTagsOnCommitted(draft.Tags, snap.Tags, committed.Tags)
+	w.editSubtasks = rebaseSubtasksOnCommitted(draft.Subtasks, snap.Subtasks, committed.Subtasks)
 }
 
 // SetTaskPriority updates a task's priority directly from a board card and refreshes board filters in place.
@@ -1775,10 +2084,20 @@ func (w *Workbench) QuickCreateTask(status model.Status, title string) (*model.T
 
 // SoftDeleteTask moves a task to the Recycle Bin.
 func (w *Workbench) SoftDeleteTask(taskID string) {
-	if w.IsRestoring() {
+	if w.IsRestoring() || taskID == "" {
 		return
 	}
-	if w.selectedTaskID != taskID {
+	if w.saving && w.selectedTaskID == taskID {
+		w.EnqueueToast(ToastProps{Title: "正在保存任务", Description: "保存完成后再移入回收站", Type: ToastInfo})
+		return
+	}
+	if w.selectedTaskID == taskID {
+		w.pendingSave = nil
+		w.inFlightSave = nil
+		w.discardAfterSave = false
+		w.discardRebase = false
+		w.afterSave = nil
+	} else {
 		if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再删除其他任务"); err != nil {
 			return
 		}
@@ -2578,6 +2897,8 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.mu.Unlock()
 
 	// Reset all pre-restore UI/filter/modal/draft state WITHOUT flushing old drafts into the restored DB.
+	w.afterSave = nil
+	w.boardNeedsReload = false
 	w.activeProjectID = ""
 	w.boardTasks = nil
 	w.filteredTasks = nil
@@ -2729,9 +3050,9 @@ func (w *Workbench) View(c *ui.Context) {
 	// Apply theme according to saved setting (system / light / dark)
 	switch w.themeSetting {
 	case ThemeLight:
-		c.SetTheme(lightPalette().Theme())
+		c.SetTheme(uiLightTheme)
 	case ThemeDark:
-		c.SetTheme(darkPalette().Theme())
+		c.SetTheme(uiDarkTheme)
 	default:
 		applyUITheme(c)
 	}

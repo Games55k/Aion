@@ -16,7 +16,7 @@ body:
     id: app_version
     attributes:
       label: Aion 版本
-      placeholder: 例如：v0.1.1（可在「设置 → 应用版本与更新」查看）
+      placeholder: 例如：v0.1.5（可在「设置 → 应用版本与更新」查看）
 
   - type: input
     id: os_version

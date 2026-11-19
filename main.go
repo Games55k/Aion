@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"aion/assets/icon"
 	"aion/backend"
@@ -43,19 +44,10 @@ func run(dataDir, snapshotPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open backend: %w", err)
 	}
-	defer func() {
-		if err := app.Close(); err != nil {
-			log.Printf("aion: failed to close backend cleanly: %v", err)
-		}
-	}()
 
 	wb := frontend.New(app, frontend.Host{})
-	defer func() {
-		wb.WaitForTasks()
-		if err := wb.FlushPending(); err != nil {
-			log.Printf("aion: failed to flush pending edits: %v", err)
-		}
-	}()
+	shutdown := newShutdownFunc(wb, app)
+	defer shutdown()
 
 	// Headless snapshot rendering mode for verification
 	if snapshotPath != "" {
@@ -203,13 +195,7 @@ func run(dataDir, snapshotPath string) error {
 
 		mygo.App.OnQuit(func() {
 			offUpdaterChange()
-			wb.WaitForTasks()
-			if err := wb.FlushPending(); err != nil {
-				log.Printf("aion: failed to flush pending edits on quit: %v", err)
-			}
-			if err := app.Close(); err != nil {
-				log.Printf("aion: failed to close backend cleanly on quit: %v", err)
-			}
+			shutdown()
 		})
 
 		// Listen for background scheduler errors and surface them in the UI
@@ -229,6 +215,19 @@ func run(dataDir, snapshotPath string) error {
 		return fmt.Errorf("app run error: %w", err)
 	}
 	return nil
+}
+
+func newShutdownFunc(wb *frontend.Workbench, app *backend.App) func() {
+	return sync.OnceFunc(func() {
+		wb.WaitForTasks()
+		if err := wb.FlushPending(); err != nil {
+			log.Printf("aion: failed to flush pending edits: %v", err)
+		}
+		wb.WaitForTasks()
+		if err := app.Close(); err != nil {
+			log.Printf("aion: failed to close backend cleanly: %v", err)
+		}
+	})
 }
 
 // writeSnapshot keeps diagnostic output outside managed data and publishes only

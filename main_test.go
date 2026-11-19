@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"aion/backend"
+	"aion/backend/model"
 	"aion/backend/projects"
+	"aion/frontend"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -93,5 +97,70 @@ func TestSnapshotPublishesWithoutTruncatingLinkedFile(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(outputDir); err != nil || len(entries) != 1 {
 		t.Fatalf("snapshot left staging files: %v, %v", entries, err)
+	}
+}
+
+// Regression: OnQuit closed the backend before run's deferred cleanup flushed pending edits a second time against the closed store.
+func TestShutdownFlushesAndClosesOnce(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	app, err := backend.Open(ctx, backend.Options{DataDir: root, DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Shutdown"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := app.Projects.CreateTask(ctx, p.ID, projects.TaskInput{
+		Title:    "Initial",
+		Status:   model.Planned,
+		Priority: model.Medium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queue := make(chan func(), 32)
+	drain := func(w *frontend.Workbench) {
+		for {
+			w.WaitForTasks()
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	wb := frontend.New(app, frontend.Host{
+		Dispatch: func(fn func()) { queue <- fn },
+	})
+	wb.SelectProject(p.ID)
+	drain(wb)
+	wb.SelectTask(task.ID)
+	drain(wb)
+	tt := ui.NewTester(wb.View, 1320, 840)
+	tt.Frame()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("   ")
+
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(origOut) })
+
+	shutdown := newShutdownFunc(wb, app)
+	shutdown()
+	shutdown()
+
+	if got := strings.Count(buf.String(), "failed to flush pending edits"); got != 1 {
+		t.Fatalf("expected exactly 1 flush log across OnQuit and defer, got %d (%q)", got, buf.String())
+	}
+	if strings.Contains(buf.String(), "closed") {
+		t.Fatalf("unexpected closed-store error during shutdown: %q", buf.String())
 	}
 }

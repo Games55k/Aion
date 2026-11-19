@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"slices"
 	"strconv"
 	"time"
 
@@ -249,8 +250,12 @@ func uiShowToast(c *ui.Context, o ToastProps) string {
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
+	typ := "info"
+	if int(o.Type) >= 0 && int(o.Type) < len(toastTypeNames) {
+		typ = toastTypeNames[o.Type]
+	}
 	return c.AddToast(ui.Toast{
-		ID: o.ID, Title: o.Title, Description: o.Description, Type: toastTypeNames[o.Type],
+		ID: o.ID, Title: o.Title, Description: o.Description, Type: typ,
 		Timeout: timeout, Action: o.Action, OnAction: o.OnAction,
 	})
 }
@@ -274,6 +279,15 @@ func uiToastHost(c *ui.Context) ui.Element {
 
 		stack := ui.Box(c).Width(toastWidth).MaxWidthPercent(100)
 		heights := *ui.Local(stack, "heights", func() map[string]float32 { return map[string]float32{} })
+		if len(toasts) == 0 {
+			clear(heights)
+		} else if len(heights) > len(toasts) {
+			for id := range heights {
+				if !slices.ContainsFunc(toasts, func(t ui.Toast) bool { return t.ID == id }) {
+					delete(heights, id)
+				}
+			}
+		}
 		expanded := stack.Hovered()
 		n := len(toasts)
 		front := float32(0)
@@ -296,7 +310,7 @@ func uiToastHost(c *ui.Context) ui.Element {
 			depth := n - 1 - k
 			scale := 1 - 0.05*float32(depth)
 			l := toastLayout{
-				depth: depth, y: float32(depth)*toastPeek + (1-scale)*front, scale: scale,
+				y: float32(depth)*toastPeek + (1-scale)*front, scale: scale,
 				collapsed: !expanded && depth > 0, front: front,
 			}
 			if expanded {
@@ -314,7 +328,6 @@ func uiToastHost(c *ui.Context) ui.Element {
 }
 
 type toastLayout struct {
-	depth           int
 	y, scale, front float32
 	collapsed       bool
 }
