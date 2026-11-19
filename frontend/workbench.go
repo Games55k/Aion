@@ -1454,52 +1454,140 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	}
 	for _, st := range committed {
 		// Deleted by the failed write (absent from snap) and not re-added: the
-		// rollback restored it. In place when the committed order stands, appended
-		// after a post-discard reorder.
+		// rollback restored it, at its committed position.
 		if _, wasInSnap := snapByID[st.ID]; !wasInSnap {
 			if _, ok := mergedByID[st.ID]; !ok {
 				mergedByID[st.ID] = st
 			}
 		}
 	}
-	order := draftOrder
-	if sameSubtaskSequence(in, snap) {
-		// The user did not reorder after the discard, so the committed order stands.
-		order = nil
-		for _, st := range committed {
-			if _, ok := mergedByID[st.ID]; ok {
-				order = append(order, st.ID)
-			}
-		}
-	}
-	out := make([]model.Subtask, 0, len(mergedByID))
-	inOrder := make(map[string]bool, len(order))
-	for _, id := range order {
-		if st, ok := mergedByID[id]; ok && !inOrder[id] {
-			out = append(out, st)
-			inOrder[id] = true
+	var snapIDs, committedIDs []string
+	for _, st := range snap {
+		if _, ok := mergedByID[st.ID]; ok {
+			snapIDs = append(snapIDs, st.ID)
 		}
 	}
 	for _, st := range committed {
-		if m, ok := mergedByID[st.ID]; ok && !inOrder[st.ID] {
-			out = append(out, m)
-			inOrder[st.ID] = true
+		if _, ok := mergedByID[st.ID]; ok {
+			committedIDs = append(committedIDs, st.ID)
 		}
+	}
+	out := make([]model.Subtask, 0, len(mergedByID))
+	for _, id := range rebaseSubtaskOrder(draftOrder, snapIDs, committedIDs) {
+		out = append(out, mergedByID[id])
 	}
 	return out
 }
 
-// sameSubtaskSequence reports whether two subtask lists share the same ID sequence.
-func sameSubtaskSequence(a, b []model.Subtask) bool {
-	if len(a) != len(b) {
-		return false
+// rebaseSubtaskOrder merges the order edits the user made after the discard into the
+// committed sequence. Items whose relative order the draft still shares with the failed
+// baseline (the longest common subsequence of the two sequences) keep their committed
+// positions, so a failed reorder or deletion cannot leak; items the user actually moved
+// are reinserted next to the neighbor they were left by; additions land at the end.
+func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
+	snapSet := make(map[string]bool, len(snapIDs))
+	for _, id := range snapIDs {
+		snapSet[id] = true
 	}
-	for i := range a {
-		if a[i].ID != b[i].ID {
-			return false
+	inSet := make(map[string]bool, len(inIDs))
+	for _, id := range inIDs {
+		inSet[id] = true
+	}
+	var snapCommon, inCommon []string
+	for _, id := range snapIDs {
+		if inSet[id] {
+			snapCommon = append(snapCommon, id)
 		}
 	}
-	return true
+	for _, id := range inIDs {
+		if snapSet[id] {
+			inCommon = append(inCommon, id)
+		}
+	}
+	lcsSet := make(map[string]bool, len(inCommon))
+	for _, id := range lcsOfIDs(snapCommon, inCommon) {
+		lcsSet[id] = true
+	}
+	out := slices.Clone(committedIDs)
+	placed := make(map[string]bool, len(out))
+	for _, id := range out {
+		placed[id] = true
+	}
+	var additions []string
+	for _, id := range inIDs {
+		if !placed[id] {
+			// Added after the discard.
+			additions = append(additions, id)
+			continue
+		}
+		if lcsSet[id] {
+			continue
+		}
+		// Moved after the discard: reinsert after the nearest placed predecessor the
+		// user left it by, or at the front when it was moved to the top.
+		at := slices.Index(inIDs, id)
+		out = slices.DeleteFunc(out, func(x string) bool { return x == id })
+		anchor := -1
+		for j := at - 1; j >= 0 && anchor < 0; j-- {
+			if placed[inIDs[j]] {
+				anchor = slices.Index(out, inIDs[j])
+			}
+		}
+		if anchor >= 0 {
+			out = slices.Insert(out, anchor+1, id)
+		} else {
+			out = slices.Insert(out, 0, id)
+		}
+		placed[id] = true
+	}
+	return append(out, additions...)
+}
+
+// lcsOfIDs returns one longest common subsequence of a and b, anchored at the shared
+// prefix and suffix so untouched heads and tails stay stable.
+func lcsOfIDs(a, b []string) []string {
+	p := 0
+	for p < len(a) && p < len(b) && a[p] == b[p] {
+		p++
+	}
+	s := 0
+	for s < len(a)-p && s < len(b)-p && a[len(a)-1-s] == b[len(b)-1-s] {
+		s++
+	}
+	ma, mb := a[p:len(a)-s], b[p:len(b)-s]
+	dp := make([][]int, len(ma)+1)
+	for i := range dp {
+		dp[i] = make([]int, len(mb)+1)
+	}
+	for i := len(ma) - 1; i >= 0; i-- {
+		for j := len(mb) - 1; j >= 0; j-- {
+			if ma[i] == mb[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	mid := make([]string, 0, len(ma))
+	for i, j := 0, 0; i < len(ma) && j < len(mb); {
+		switch {
+		case ma[i] == mb[j]:
+			mid = append(mid, ma[i])
+			i++
+			j++
+		case dp[i+1][j] >= dp[i][j+1]:
+			i++
+		default:
+			j++
+		}
+	}
+	out := make([]string, 0, p+len(mid)+s)
+	out = append(out, a[:p]...)
+	out = append(out, mid...)
+	out = append(out, a[len(a)-s:]...)
+	return out
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when

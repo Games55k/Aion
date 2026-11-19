@@ -132,9 +132,10 @@ func (w *Workbench) rebaseInvalidJobDraftOnCommitted(snap jobapplications.Update
 	if draft.Notes == snap.Notes {
 		w.editJobNotes = committed.Notes
 	}
-	// A reason equal to the failed baseline counts as untouched by the same rule as
-	// every other field and falls back together with its dirty marker.
-	if jobClosureReasonEqual(draft.ClosureReason, snap.ClosureReason) {
+	// A reason without a pending edit is untouched, and a reason equal to the failed
+	// baseline counts as untouched by the same rule as every other field; both fall
+	// back together with the dirty marker.
+	if !w.editJobReasonDirty || jobClosureReasonEqual(draft.ClosureReason, snap.ClosureReason) {
 		w.editJobClosureReason = committed.ClosureReason
 		w.editJobReasonDirty = false
 	}
