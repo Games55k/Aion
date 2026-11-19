@@ -649,7 +649,7 @@ func (w *Workbench) AddJobTimelineNote(appID string) {
 	})
 }
 
-// BackfillJobStageEvent records a past-date stage event without altering current stage or lifecycle.
+// BackfillJobStageEvent saves a historical stage and refreshes the application sort order.
 func (w *Workbench) BackfillJobStageEvent(appID string) {
 	if w.IsRestoring() || appID == "" {
 		return
@@ -681,13 +681,19 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 	}
 	w.jobBackfillRequest = input
 	service := w.app.JobApplications
+	ctx := context.Background()
 	var events []model.JobApplicationEvent
+	var updated model.JobApplication
 	w.runJobWorker(func() error {
-		if _, err := service.BackfillStageEvent(context.Background(), input); err != nil {
+		if _, err := service.BackfillStageEvent(ctx, input); err != nil {
 			return err
 		}
 		var err error
-		events, err = service.ListEvents(context.Background(), appID)
+		updated, err = service.Get(ctx, appID)
+		if err != nil {
+			return err
+		}
+		events, err = service.ListEvents(ctx, appID)
 		return err
 	}, func(err error) {
 		current := w.selectedJobID == appID && w.jobBackfillRequest.EventID == input.EventID
@@ -706,7 +712,9 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 				w.jobBackfillNote = ""
 			}
 		}
+		w.upsertJobInCache(updated)
 		if w.selectedJobID == appID && w.detailJob != nil {
+			w.detailJob.UpdatedAt = updated.UpdatedAt
 			w.detailJobEvents = events
 		}
 	})

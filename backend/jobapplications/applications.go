@@ -643,7 +643,8 @@ func (s *Service) AddNoteEvent(ctx context.Context, in AddNoteInput) (model.JobA
 	return created, err
 }
 
-// BackfillStageEvent appends a historical stage event with a calendar date without mutating current stage or lifecycle.
+// BackfillStageEvent records a stage on its historical date and updates the
+// application's modification time. The current workflow is controlled separately.
 func (s *Service) BackfillStageEvent(ctx context.Context, in BackfillStageInput) (model.JobApplicationEvent, error) {
 	if !in.Stage.Valid() {
 		return model.JobApplicationEvent{}, fmt.Errorf("%w: 无效的补录阶段 %q", model.ErrInvalid, in.Stage)
@@ -661,7 +662,6 @@ func (s *Service) BackfillStageEvent(ctx context.Context, in BackfillStageInput)
 		eventID = model.NewID()
 	}
 	note := strings.TrimSpace(in.Note)
-	nowTS := s.timestamp()
 	occurredTS := occurredTime.Format(time.RFC3339Nano)
 
 	var created model.JobApplicationEvent
@@ -675,10 +675,16 @@ func (s *Service) BackfillStageEvent(ctx context.Context, in BackfillStageInput)
 			created = existing
 			return nil
 		}
+		nowTS := s.timestamp()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO job_application_events(
 			id, application_id, event_type, from_stage, to_stage, outcome, reason, note, occurred_at, created_at
 		) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 			eventID, in.ApplicationID, string(model.JobEventStageBackfilled), "", string(in.Stage), "", "", note, occurredTS, nowTS,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE job_applications SET updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
+			nowTS, in.ApplicationID,
 		); err != nil {
 			return err
 		}

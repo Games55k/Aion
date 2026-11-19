@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"aion/backend/attachments"
 	"aion/backend/backup"
@@ -1684,6 +1685,61 @@ func TestJobAsyncRestoreBackupGuardWhileSaving(t *testing.T) {
 	drainTestUI(w, queue)
 	if w.IsRestoring() || w.jobDetailOpen {
 		t.Fatalf("expected completed restore to reset restoring & job detail state, restoring=%v open=%v", w.IsRestoring(), w.jobDetailOpen)
+	}
+}
+
+// Regression: a saved historical stage did not move the application in the recently updated list.
+func TestBackfillRefreshesRecentlyUpdatedList(t *testing.T) {
+	s, w, tt, queue, _, _ := asyncTestWorkbench(t)
+	w.ClearSelectedTask()
+	ctx := context.Background()
+	history := time.Date(2026, 11, 5, 12, 0, 0, 0, time.Local)
+	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	w.host.Now = func() time.Time { return history }
+	service := jobapplications.New(s, jobapplications.Options{Now: func() time.Time { return now }})
+	w.app.JobApplications = service
+	first, err := service.Create(ctx, jobapplications.CreateInput{
+		CompanyName: "Earlier company", PositionName: "Engineer", Stage: model.JobStageInterview3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	second, err := service.Create(ctx, jobapplications.CreateInput{CompanyName: "Recently updated", PositionName: "Engineer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SwitchModule("job_applications")
+	drainTestUI(w, queue)
+	tt.Frame()
+	chooseSelectOption(t, tt, "排序方式", "排序：最近更新 ↓")
+	if len(w.filteredJobApps) != 2 || w.filteredJobApps[0].ID != second.ID {
+		t.Fatalf("expected the more recent application first: %+v", w.filteredJobApps)
+	}
+	clickWriteControl(t, tt, "查看详情 Earlier company Engineer")
+	drainTestUI(w, queue)
+	tt.Frame()
+	clickWriteControl(t, tt, "切换补录历史节点")
+	chooseSelectOption(t, tt, "补录阶段", "一面")
+	typeJobDetailField(t, tt, "补录说明", "Earlier interview")
+
+	now = now.Add(time.Minute)
+	unlock := holdTestStore(t, s)
+	clickWriteControl(t, tt, "补录历史事件")
+	clickWriteControl(t, tt, "补录历史事件")
+	typeJobDetailField(t, tt, "补录说明", "Next draft")
+	unlock()
+	drainTestUI(w, queue)
+
+	if len(w.filteredJobApps) != 2 || w.filteredJobApps[0].ID != first.ID || !w.filteredJobApps[0].UpdatedAt.Equal(now) {
+		t.Fatalf("backfill failed to refresh recently updated list: %+v", w.filteredJobApps)
+	}
+	if w.detailJob == nil || w.detailJob.Stage != first.Stage || !w.detailJob.UpdatedAt.Equal(now) || w.jobBackfillNote != "Next draft" {
+		t.Fatalf("backfill acknowledgement changed the workflow or newer draft: %+v, %q", w.detailJob, w.jobBackfillNote)
+	}
+	events, err := service.ListEvents(ctx, first.ID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("duplicate click changed the history: %+v, %v", events, err)
 	}
 }
 

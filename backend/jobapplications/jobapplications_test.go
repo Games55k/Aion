@@ -270,6 +270,87 @@ func TestStageLifecycleSeparationCloseReopenAndOfferRules(t *testing.T) {
 	}
 }
 
+// Regression: backfilling a stage did not update the application's sort timestamp, and retries must preserve any newer edits.
+func TestBackfillUpdatesApplicationOnceAndPreservesClosedWorkflow(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	svc, _ := openTestService(t, &now)
+	job, err := svc.Create(ctx, jobapplications.CreateInput{
+		CompanyName: "Example Corp", PositionName: "Backend Engineer", Stage: model.JobStageOffer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := svc.Close(ctx, jobapplications.CloseInput{
+		ID: job.ID, Outcome: model.JobOutcomeOfferAccepted, Reason: "Accepted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := jobapplications.BackfillStageInput{
+		ApplicationID: job.ID, Stage: model.JobStageInterview1,
+		OccurredDate: "2026-11-05", EventID: model.NewID(),
+	}
+	ev, err := svc.BackfillStageEvent(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.UpdatedAt.Equal(ev.CreatedAt) || !updated.UpdatedAt.After(closed.UpdatedAt) {
+		t.Fatalf("backfill saved at %v but application updated_at = %v (previously %v)", ev.CreatedAt, updated.UpdatedAt, closed.UpdatedAt)
+	}
+	if got := ev.OccurredAt.In(time.Local).Format("2006-01-02"); got != request.OccurredDate {
+		t.Fatalf("historical date = %s, want %s", got, request.OccurredDate)
+	}
+	if updated.Stage != closed.Stage || updated.Lifecycle != closed.Lifecycle ||
+		updated.Outcome != closed.Outcome || updated.ClosureReason != closed.ClosureReason ||
+		updated.ReachedOffer != closed.ReachedOffer || updated.ClosedAt == nil || !updated.ClosedAt.Equal(*closed.ClosedAt) {
+		t.Fatalf("backfill altered the closed workflow: %+v", updated)
+	}
+
+	note, err := svc.AddNoteEvent(ctx, jobapplications.AddNoteInput{ApplicationID: job.ID, Note: "A newer update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := svc.BackfillStageEvent(ctx, request)
+	if err != nil || replayed.ID != ev.ID || !replayed.CreatedAt.Equal(ev.CreatedAt) {
+		t.Fatalf("duplicate submission = %+v, %v", replayed, err)
+	}
+	afterRetry, err := svc.Get(ctx, job.ID)
+	if err != nil || !afterRetry.UpdatedAt.Equal(note.CreatedAt) {
+		t.Fatalf("retry changed the latest update time: %v, %v", afterRetry.UpdatedAt, err)
+	}
+}
+
+// Failure to update the application's timestamp rolls back the new history event.
+func TestBackfillRollsBackWhenUpdatingTimestampFails(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.Local)
+	svc, st := openTestService(t, &now)
+	job, err := svc.Create(ctx, jobapplications.CreateInput{CompanyName: "Example Corp", PositionName: "Backend Engineer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `CREATE TRIGGER reject_job_timestamp BEFORE UPDATE OF updated_at ON job_applications
+			BEGIN SELECT RAISE(ABORT, 'timestamp update failed'); END`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BackfillStageEvent(ctx, jobapplications.BackfillStageInput{
+		ApplicationID: job.ID, Stage: model.JobStageInterview1, OccurredDate: "2026-11-05",
+	}); err == nil {
+		t.Fatal("backfill succeeded despite timestamp update failure")
+	}
+	if events, err := svc.ListEvents(ctx, job.ID); err != nil || len(events) != 1 || events[0].EventType != model.JobEventCreated {
+		t.Fatalf("failed backfill left a history event: %+v, %v", events, err)
+	}
+}
+
 func TestTimelineOrderingBackfillDeduplicationAndFieldIsolation(t *testing.T) {
 	// Text auto-saves and historical backfills must not overwrite workflow state or duplicate events across retries.
 	ctx := context.Background()
