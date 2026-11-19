@@ -32,7 +32,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 
 Write implementation plans in `docs/plans/` and state each plan's status. Document commands and capabilities as current workflows once implemented.
 
-Keep documentation in sync with code changes. Whenever you add, modify, or remove user-facing behaviour, shortcuts, CLI flags, data or backup layouts, build/test workflows, or repository structure, update the affected sections of `README.md`, `AGENTS.md`, and relevant comments in the same change. Update `CHANGELOG.md` when preparing a release, and refresh the headless screenshot in `README.md` (`assets/screenshot.png`) before each release via `AION_SAVE_SNAPSHOT="$PWD/assets/screenshot.png" go test -count=1 ./frontend -run TestVisualSnapshotRender`.
+Keep documentation in sync with code changes. Keep `README.md` concise (overview, core features, quick start, and links to `docs/`) and place detailed specifications and workflows in `docs/` (`docs/behavior.md`, `docs/data-and-backup.md`, `docs/development.md`). Whenever you add, modify, or remove user-facing behaviour, shortcuts, CLI flags, data or backup layouts, build/test workflows, or repository structure, update the affected files among `README.md`, `docs/`, `AGENTS.md`, and relevant comments in the same change. Update `CHANGELOG.md` when preparing a release, and refresh the headless screenshot in `README.md` (`assets/screenshot.png`) before each release via `AION_SAVE_SNAPSHOT="$PWD/assets/screenshot.png" go test -count=1 ./frontend -run TestVisualSnapshotRender`.
 
 Release uploads require a successful lookup confirming an absent tag release or an existing draft. A failed lookup must stop the workflow.
 
