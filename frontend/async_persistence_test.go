@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -637,7 +639,9 @@ func TestAsyncDiscardThenAdditionKeepsCommittedSubtaskOrder(t *testing.T) {
 	if err != nil || len(saved.Subtasks) != 3 {
 		t.Fatalf("subtasks lost: %+v %v", saved, err)
 	}
-	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Beta" || saved.Subtasks[2].Title != "Epsilon" {
+	// The failed Beta/Alpha order is rolled back and the addition stays behind the
+	// neighbor the user left it by (the discard preview ended in Alpha).
+	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Epsilon" || saved.Subtasks[2].Title != "Beta" {
 		t.Fatalf("addition adopted the failed order: %+v", saved.Subtasks)
 	}
 }
@@ -749,6 +753,121 @@ func TestAsyncDiscardThenPartialReorderKeepsUntouchedPairs(t *testing.T) {
 	}
 	if pos["Alpha"] > pos["Beta"] || pos["Gamma"] > pos["Delta"] {
 		t.Fatalf("failed pair order leaked or user reorder lost: %+v", saved.Subtasks)
+	}
+}
+
+// An addition the user moved after the discard keeps its position: additions anchor to
+// the neighbor the user left them by instead of always landing at the end.
+func TestAsyncDiscardThenMovedAdditionKeepsPosition(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{
+			{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"},
+			{ID: "d", Title: "Delta"}, {ID: "g", Title: "Gamma"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc8 BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	w.editDescription = "注定失败的描述"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	// After the discard the user adds Epsilon and moves it above Delta.
+	w.editSubtasks = slices.Insert(w.editSubtasks, 2, model.Subtask{Title: "Epsilon"})
+	w.editDescription = "落地前补充的描述"
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 5 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	titles := make([]string, 0, 5)
+	for _, st := range saved.Subtasks {
+		titles = append(titles, st.Title)
+	}
+	if strings.Join(titles, ",") != "Alpha,Beta,Epsilon,Delta,Gamma" {
+		t.Fatalf("moved addition landed elsewhere: %v", titles)
+	}
+}
+
+// Relative orders the user actually changed survive even when the LCS treats the
+// crossed items as untouched: moving Delta and Gamma above Beta must keep Delta before
+// both of them.
+func TestAsyncDiscardThenCrossedMoveKeepsChangedPairs(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{
+			{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"},
+			{ID: "g", Title: "Gamma"}, {ID: "d", Title: "Delta"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc9 BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	// Failed write moves Delta above Gamma.
+	w.editSubtasks[2], w.editSubtasks[3] = w.editSubtasks[3], w.editSubtasks[2]
+	w.editDescription = "注定失败的描述"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	// After the discard the user moves Delta and then Gamma above Beta.
+	w.editSubtasks = []model.Subtask{w.editSubtasks[0], w.editSubtasks[2], w.editSubtasks[3], w.editSubtasks[1]}
+	w.editDescription = "落地前补充的描述"
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 4 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	pos := map[string]int{}
+	for i, st := range saved.Subtasks {
+		pos[st.Title] = i
+	}
+	if !(pos["Delta"] < pos["Beta"] && pos["Gamma"] < pos["Beta"] && pos["Delta"] < pos["Gamma"] && pos["Alpha"] < pos["Beta"]) {
+		t.Fatalf("crossed moves lost: %+v", saved.Subtasks)
 	}
 }
 

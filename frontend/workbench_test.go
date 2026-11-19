@@ -4318,3 +4318,39 @@ func TestWhitespaceJobSearchEmptyStateAndToastLifecycle(t *testing.T) {
 	tt.Advance(200 * time.Millisecond)
 	tt.Frame()
 }
+
+// Moving a subtask down must not swap the slice mid-render: repeating a row's key in
+// the same frame panics the renderer.
+func TestSubtaskMoveButtonsDoNotMutateDuringRender(t *testing.T) {
+	app, w, tt := openTestWorkbench(t, t.TempDir(), Host{})
+	ctx := context.Background()
+	p, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "P"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := app.Projects.CreateTask(ctx, p.ID, projects.TaskInput{Title: "Original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Projects.UpdateTask(ctx, task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ReloadProjects()
+	w.SelectProject(p.ID)
+	w.SelectTask(task.ID)
+	tt.Frame()
+	if err := tt.Click("下移子任务 Alpha"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	tt.Frame()
+	if w.editSubtasks[0].Title != "Beta" || w.editSubtasks[1].Title != "Alpha" {
+		t.Fatalf("move down lost or reordered wrongly: %+v", w.editSubtasks)
+	}
+	saved, err := app.Projects.GetTask(ctx, task.ID)
+	if err != nil || len(saved.Subtasks) != 2 || saved.Subtasks[0].Title != "Beta" {
+		t.Fatalf("move was not persisted: %+v %v", saved, err)
+	}
+}

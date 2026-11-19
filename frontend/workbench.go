@@ -1480,10 +1480,11 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 }
 
 // rebaseSubtaskOrder merges the order edits the user made after the discard into the
-// committed sequence. Items whose relative order the draft still shares with the failed
-// baseline (the longest common subsequence of the two sequences) keep their committed
-// positions, so a failed reorder or deletion cannot leak; items the user actually moved
-// are reinserted next to the neighbor they were left by; additions land at the end.
+// committed sequence. An item whose relative order to some other item actually flipped
+// between the failed baseline and the draft (or that was added after the discard) was
+// touched by the user and is reinserted next to the neighbor it was left by; every
+// other item keeps its committed position, so failed reorders and deletions cannot
+// leak and rollback-restored subtasks return in place.
 func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 	snapSet := make(map[string]bool, len(snapIDs))
 	for _, id := range snapIDs {
@@ -1493,39 +1494,47 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 	for _, id := range inIDs {
 		inSet[id] = true
 	}
-	var snapCommon, inCommon []string
-	for _, id := range snapIDs {
-		if inSet[id] {
-			snapCommon = append(snapCommon, id)
-		}
-	}
+	var common []string
 	for _, id := range inIDs {
 		if snapSet[id] {
-			inCommon = append(inCommon, id)
+			common = append(common, id)
 		}
 	}
-	lcsSet := make(map[string]bool, len(inCommon))
-	for _, id := range lcsOfIDs(snapCommon, inCommon) {
-		lcsSet[id] = true
+	posSnap := make(map[string]int, len(snapIDs))
+	for i, id := range snapIDs {
+		posSnap[id] = i
+	}
+	posIn := make(map[string]int, len(inIDs))
+	for i, id := range inIDs {
+		posIn[id] = i
+	}
+	// An item is moved when any pairwise order it takes part in flipped after the
+	// discard; pairwise comparison catches crossings a longest common subsequence
+	// silently absorbs.
+	moved := make(map[string]bool, len(common))
+	for _, x := range common {
+		for _, y := range common {
+			if x == y {
+				continue
+			}
+			if (posSnap[x] < posSnap[y]) != (posIn[x] < posIn[y]) {
+				moved[x] = true
+				break
+			}
+		}
 	}
 	out := slices.Clone(committedIDs)
 	placed := make(map[string]bool, len(out))
 	for _, id := range out {
 		placed[id] = true
 	}
-	var additions []string
 	for _, id := range inIDs {
-		if !placed[id] {
-			// Added after the discard.
-			additions = append(additions, id)
+		if placed[id] && !moved[id] {
 			continue
 		}
-		if lcsSet[id] {
-			continue
-		}
-		// Moved after the discard: reinsert after the nearest placed predecessor the
-		// user left it by, or at the front when it was moved to the top.
-		at := slices.Index(inIDs, id)
+		// Added or moved after the discard: (re)insert after the nearest placed
+		// predecessor the user left it by, or at the front when it belongs at the top.
+		at := posIn[id]
 		out = slices.DeleteFunc(out, func(x string) bool { return x == id })
 		anchor := -1
 		for j := at - 1; j >= 0 && anchor < 0; j-- {
@@ -1540,53 +1549,6 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 		}
 		placed[id] = true
 	}
-	return append(out, additions...)
-}
-
-// lcsOfIDs returns one longest common subsequence of a and b, anchored at the shared
-// prefix and suffix so untouched heads and tails stay stable.
-func lcsOfIDs(a, b []string) []string {
-	p := 0
-	for p < len(a) && p < len(b) && a[p] == b[p] {
-		p++
-	}
-	s := 0
-	for s < len(a)-p && s < len(b)-p && a[len(a)-1-s] == b[len(b)-1-s] {
-		s++
-	}
-	ma, mb := a[p:len(a)-s], b[p:len(b)-s]
-	dp := make([][]int, len(ma)+1)
-	for i := range dp {
-		dp[i] = make([]int, len(mb)+1)
-	}
-	for i := len(ma) - 1; i >= 0; i-- {
-		for j := len(mb) - 1; j >= 0; j-- {
-			if ma[i] == mb[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
-			}
-		}
-	}
-	mid := make([]string, 0, len(ma))
-	for i, j := 0, 0; i < len(ma) && j < len(mb); {
-		switch {
-		case ma[i] == mb[j]:
-			mid = append(mid, ma[i])
-			i++
-			j++
-		case dp[i+1][j] >= dp[i][j+1]:
-			i++
-		default:
-			j++
-		}
-	}
-	out := make([]string, 0, p+len(mid)+s)
-	out = append(out, a[:p]...)
-	out = append(out, mid...)
-	out = append(out, a[len(a)-s:]...)
 	return out
 }
 

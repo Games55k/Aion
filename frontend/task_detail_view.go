@@ -416,6 +416,10 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 		// Subtask Rows
 		if totalCount > 0 {
 			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+				// Structural edits are deferred to the end of the pass: swapping or
+				// deleting rows mid-render re-renders a row in the same frame and
+				// panics the renderer on a duplicate key.
+				moveFrom, moveTo, deleteAt := -1, -1, -1
 				for i, st := range w.editSubtasks {
 					idx := i
 					sub := st
@@ -489,28 +493,32 @@ func (w *Workbench) renderSubtasksSection(c *ui.Context, tk *uiTokens, t model.T
 									if uiActionIcon(c.Key("up-btn-"+keyID), iconArrowUp(), actionIconProps{
 										Title: "上移子任务 " + sub.Title,
 									}).Clicked() {
-										w.editSubtasks[idx-1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx-1]
-										_ = w.SaveSelectedTask()
+										moveFrom, moveTo = idx, idx-1
 									}
 								}
 								if idx < totalCount-1 {
 									if uiActionIcon(c.Key("down-btn-"+keyID), iconArrowDown(), actionIconProps{
 										Title: "下移子任务 " + sub.Title,
 									}).Clicked() {
-										w.editSubtasks[idx+1], w.editSubtasks[idx] = w.editSubtasks[idx], w.editSubtasks[idx+1]
-										_ = w.SaveSelectedTask()
+										moveFrom, moveTo = idx, idx+1
 									}
 								}
 								if uiActionIcon(c.Key("del-btn-"+keyID), iconTrash2(), actionIconProps{
 									Danger: true,
 									Title:  "删除子任务 " + sub.Title,
 								}).Clicked() {
-									w.editSubtasks = slices.Delete(w.editSubtasks, idx, idx+1)
-									_ = w.SaveSelectedTask()
+									deleteAt = idx
 								}
 							})
 						}
 					})
+				}
+				if deleteAt >= 0 && deleteAt < len(w.editSubtasks) {
+					w.editSubtasks = slices.Delete(w.editSubtasks, deleteAt, deleteAt+1)
+					_ = w.SaveSelectedTask()
+				} else if moveFrom >= 0 && moveFrom < len(w.editSubtasks) && moveTo >= 0 && moveTo < len(w.editSubtasks) {
+					w.editSubtasks[moveFrom], w.editSubtasks[moveTo] = w.editSubtasks[moveTo], w.editSubtasks[moveFrom]
+					_ = w.SaveSelectedTask()
 				}
 			})
 		}
