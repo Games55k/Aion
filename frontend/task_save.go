@@ -43,15 +43,18 @@ func (w *Workbench) afterPendingSave(next func(), title, suffix string) bool {
 }
 
 // startTaskSave permits only one database write at a time. New keystrokes retain
-// one latest immutable request, so backlog and write order stay bounded.
+// one latest immutable request, so backlog and write order stay bounded. The active
+// request stays linked as the baseline a discard must rebase edits on.
 func (w *Workbench) startTaskSave(request taskSave) error {
 	service := w.app.Projects
 	w.saving = true
+	w.inFlightSave = &request
 	work := func() (model.Task, error) {
 		return service.UpdateTask(context.Background(), request.taskID, request.input)
 	}
 	apply := func(updated model.Task, err error) {
 		w.saving = false
+		w.inFlightSave = nil
 		if request.epoch != w.currentDataEpoch() || request.taskID != w.selectedTaskID {
 			return
 		}
@@ -79,7 +82,8 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 		}
 		if w.discardAfterSave {
 			w.discardAfterSave = false
-			w.clearDetailTransientInputs()
+			// Transient inputs were already cleared when 放弃修改 was clicked; skip
+			// clearing again so text typed while this write was blocked survives.
 			w.syncDetailFromTask(*w.detailTask)
 			if next := w.afterSave; next != nil {
 				w.afterSave = nil

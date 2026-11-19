@@ -61,6 +61,7 @@ func (w *Workbench) resetSelectedJobState() {
 	w.jobDirty = false
 	w.jobSaving = false
 	w.pendingJobSave = nil
+	w.inFlightJobSave = nil
 	w.discardJobAfterSave = false
 	w.jobNoteInput = ""
 	w.jobNoteDate = time.Time{}
@@ -81,6 +82,13 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 	w.selectedJobID = app.ID
 	w.detailJob = &copyApp
 	w.detailJobEpoch = w.currentDataEpoch()
+	w.resetJobEditFields(app)
+	w.discardJobAfterSave = false
+}
+
+// resetJobEditFields copies an application's details into the draft inputs without
+// replacing detailJob, so the last committed record stays the failure baseline.
+func (w *Workbench) resetJobEditFields(app model.JobApplication) {
 	w.editJobCompany = app.CompanyName
 	w.editJobPosition = app.PositionName
 	w.editJobAppliedDate = parseCalendarDateValue(app.AppliedDate)
@@ -92,7 +100,23 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 	w.jobDirty = false
 	w.jobSaveState = "saved"
 	w.jobSaveErr = ""
-	w.discardJobAfterSave = false
+}
+
+// inFlightJobBaseline predicts the selected application as it will read once the active
+// background write lands. Discard must rebase on that result, because the write is
+// already committing and cannot be unsaved.
+func (w *Workbench) inFlightJobBaseline() (model.JobApplication, bool) {
+	if w.detailJob == nil || w.inFlightJobSave == nil || w.inFlightJobSave.jobID != w.selectedJobID {
+		return model.JobApplication{}, false
+	}
+	app := *w.detailJob
+	in := w.inFlightJobSave.input
+	app.CompanyName, app.PositionName, app.AppliedDate = in.CompanyName, in.PositionName, in.AppliedDate
+	app.ApplicationURL, app.Channel, app.Notes = in.ApplicationURL, in.Channel, in.Notes
+	if in.ClosureReason != nil && app.Lifecycle == model.JobLifecycleClosed {
+		app.ClosureReason = *in.ClosureReason
+	}
+	return app, true
 }
 
 func (w *Workbench) markJobDirty() {
@@ -207,6 +231,9 @@ func (w *Workbench) SaveSelectedJob() error {
 }
 
 // DiscardJobChanges reverts unsaved job detail edits back to the last persisted state.
+// While a background write is in flight, the draft rebases on that write's result — it
+// is already committing — and the form only reverts to the last committed record when
+// no write matches the selection.
 func (w *Workbench) DiscardJobChanges() {
 	if w.IsRestoring() || !w.jobSelected() {
 		return
@@ -214,23 +241,28 @@ func (w *Workbench) DiscardJobChanges() {
 	w.afterSave = nil
 	w.pendingJobSave = nil
 	w.jobSaveRevision++
-	wasSaving := w.jobSaving
-	if w.detailJob != nil {
-		w.syncDetailFromJob(*w.detailJob)
-	}
-	if wasSaving {
+	if w.jobSaving {
+		if baseline, ok := w.inFlightJobBaseline(); ok {
+			w.resetJobEditFields(baseline)
+		} else {
+			w.resetJobEditFields(*w.detailJob)
+		}
 		w.discardJobAfterSave = true
+		return
 	}
+	w.syncDetailFromJob(*w.detailJob)
 }
 
 func (w *Workbench) startJobSave(request jobSave) error {
 	service := w.app.JobApplications
 	w.jobSaving = true
+	w.inFlightJobSave = &request
 	work := func() (model.JobApplication, error) {
 		return service.UpdateDetails(context.Background(), request.input)
 	}
 	apply := func(updated model.JobApplication, err error) {
 		w.jobSaving = false
+		w.inFlightJobSave = nil
 		if request.epoch != w.currentDataEpoch() || request.jobID != w.selectedJobID {
 			return
 		}

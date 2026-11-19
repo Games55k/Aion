@@ -245,6 +245,68 @@ func TestAsyncDiscardWhileSaving(t *testing.T) {
 	}
 }
 
+// Discarding while a save is in flight must rebase later edits on that write's result, keeping its title.
+func TestAsyncDiscardThenEditKeepsInFlightSaveAsBaseline(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeTaskTitle(t, tt, "飞行中的新标题")
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if w.editTitle != "" || w.saveState != "validation_error" {
+		t.Fatalf("title not cleared before discard: %q %q", w.editTitle, w.saveState)
+	}
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("任务详情描述输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("落地前补充的描述")
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || saved.Title != "飞行中的新标题" || saved.Description != "落地前补充的描述" {
+		t.Fatalf("post-discard edit reverted the in-flight save: %+v %v", saved, err)
+	}
+	if w.editTitle != saved.Title || w.editDescription != saved.Description || w.dirty || w.saving {
+		t.Fatalf("draft diverged from persisted task: title=%q desc=%q dirty=%v saving=%v", w.editTitle, w.editDescription, w.dirty, w.saving)
+	}
+}
+
+// Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
+func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeTaskTitle(t, tt, "飞行中的新标题")
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if w.newTagInput != "" {
+		t.Fatalf("discard left a tag draft: %q", w.newTagInput)
+	}
+	if err := tt.Click("添加标签输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("未提交的新标签")
+	unlock()
+	drainTestUI(w, queue)
+	if w.newTagInput != "未提交的新标签" {
+		t.Fatalf("save callback wiped the tag draft typed after discard: %q", w.newTagInput)
+	}
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || saved.Title != "飞行中的新标题" {
+		t.Fatalf("in-flight save lost: %+v %v", saved, err)
+	}
+}
+
 // Closing details during a status save must still refresh the board after the deferred close invalidates old loads.
 func TestAsyncStatusSaveThenCloseRefreshesBoard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
@@ -428,6 +490,34 @@ func TestJobAsyncSaveErrorRetryAndDiscardDuringFlight(t *testing.T) {
 	}
 	if w2.jobDirty || w2.editJobCompany != "在途写入" {
 		t.Fatalf("expected local detail reverted to persisted baseline, dirty=%v company=%q", w2.jobDirty, w2.editJobCompany)
+	}
+}
+
+// Discarding job changes while a save is in flight must rebase later edits on that write's result, keeping its company.
+func TestJobAsyncDiscardThenEditKeepsInFlightSaveAsBaseline(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "飞行中的新公司")
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if w.editJobCompany != "" || w.jobSaveState != "validation_error" {
+		t.Fatalf("company not cleared before discard: %q %q", w.editJobCompany, w.jobSaveState)
+	}
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	typeJobDetailField(t, tt, "详情通用备注", "落地前补充的备注")
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "飞行中的新公司" || saved.Notes != "落地前补充的备注" {
+		t.Fatalf("post-discard edit reverted the in-flight save: %+v %v", saved, err)
+	}
+	if w.editJobCompany != saved.CompanyName || w.editJobNotes != saved.Notes || w.jobDirty || w.jobSaving {
+		t.Fatalf("draft diverged from persisted application: company=%q notes=%q dirty=%v saving=%v", w.editJobCompany, w.editJobNotes, w.jobDirty, w.jobSaving)
 	}
 }
 

@@ -174,6 +174,7 @@ type Workbench struct {
 	jobDirty             bool
 	jobSaveRevision      uint64
 	jobSaving            bool
+	inFlightJobSave      *jobSave
 	pendingJobSave       *jobSave
 	discardJobAfterSave  bool
 	jobWrites            []func()
@@ -247,11 +248,12 @@ type Workbench struct {
 	lastSavedAt         time.Time
 	dirty               bool
 	// UI-thread owned generations and one coalesced autosave behind the active write.
-	saveRevision      uint64
-	saving            bool
-	pendingSave       *taskSave
-	afterSave         func()
-	discardAfterSave  bool
+	saveRevision     uint64
+	saving           bool
+	inFlightSave     *taskSave
+	pendingSave      *taskSave
+	afterSave        func()
+	discardAfterSave bool
 	loadVersions      map[string]uint64
 	navigationVersion uint64
 	boardNeedsReload  bool
@@ -1210,6 +1212,7 @@ func (w *Workbench) resetSelectedTaskState() {
 	w.saveState = "saved"
 	w.saveErr = ""
 	w.pendingSave = nil
+	w.inFlightSave = nil
 	w.discardAfterSave = false
 	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
@@ -1221,7 +1224,9 @@ func (w *Workbench) resetSelectedTaskState() {
 }
 
 // DiscardSelectedTaskDraft explicitly discards unsaved edits on the currently selected task
-// and restores its fields from the last saved version.
+// and restores its fields from the last saved version. While a background write is in
+// flight, the draft rebases on that write's result — it is already committing — and the
+// form only previews the last committed task when no write matches the selection.
 func (w *Workbench) DiscardSelectedTaskDraft() {
 	if w.IsRestoring() {
 		return
@@ -1231,8 +1236,10 @@ func (w *Workbench) DiscardSelectedTaskDraft() {
 	w.saveRevision++
 	if w.saving {
 		w.clearDetailTransientInputs()
-		if w.detailTask != nil {
-			w.syncDetailFromTask(*w.detailTask)
+		if baseline, ok := w.inFlightSaveBaseline(); ok {
+			w.resetDetailEditFields(baseline)
+		} else if w.detailTask != nil {
+			w.resetDetailEditFields(*w.detailTask)
 		}
 		w.discardAfterSave = true
 		return
@@ -1273,6 +1280,12 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 		w.taskAttachments[t.ID] = atts
 		w.cacheAttachments(atts)
 	}
+	w.resetDetailEditFields(t)
+}
+
+// resetDetailEditFields copies a task's content into the draft inputs without
+// replacing detailTask, so the last committed task stays the failure baseline.
+func (w *Workbench) resetDetailEditFields(t model.Task) {
 	w.editTitle = t.Title
 	w.editStatus = string(t.Status)
 	w.editPriority = string(t.Priority)
@@ -1291,6 +1304,20 @@ func (w *Workbench) syncDetailFromTask(t model.Task) {
 	w.dirty = false
 	w.saveState = "saved"
 	w.saveErr = ""
+}
+
+// inFlightSaveBaseline predicts the selected task as it will read once the active
+// background write lands. Discard must rebase on that result, because the write is
+// already committing and cannot be unsaved.
+func (w *Workbench) inFlightSaveBaseline() (model.Task, bool) {
+	if w.detailTask == nil || w.inFlightSave == nil || w.inFlightSave.taskID != w.selectedTaskID {
+		return model.Task{}, false
+	}
+	t := *w.detailTask
+	in := w.inFlightSave.input
+	t.Title, t.Description, t.Status, t.Priority = in.Title, in.Description, in.Status, in.Priority
+	t.Tags, t.Subtasks, t.DueDate = in.Tags, in.Subtasks, in.DueDate
+	return t, true
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when
@@ -1791,6 +1818,7 @@ func (w *Workbench) SoftDeleteTask(taskID string) {
 	}
 	if w.selectedTaskID == taskID {
 		w.pendingSave = nil
+		w.inFlightSave = nil
 		w.discardAfterSave = false
 		w.afterSave = nil
 	} else {
