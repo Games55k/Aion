@@ -31,87 +31,119 @@ const MaxFileBytes int64 = 256 << 20
 
 func New(s *store.Store) *Service { return &Service{store: s} }
 
-// Import copies a regular source file into managed storage. A failed import
-// rolls back its row and removes its new file before releasing the shared lock.
+// Import prepares the file outside the Store lock, then publishes it with its
+// metadata. If publication fails, any managed link is removed under the lock.
 func (s *Service) Import(ctx context.Context, taskID, sourcePath string) (model.Attachment, error) {
-	var attachment model.Attachment
 	name := filepath.Base(sourcePath)
 	if strings.TrimSpace(taskID) == "" || !safeName(name) {
-		return attachment, model.ErrInvalid
+		return model.Attachment{}, model.ErrInvalid
 	}
-	err := s.store.Exclusive(ctx, func(db *sql.DB) error {
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
+	var originalDB *sql.DB
+	if err := s.store.Exclusive(ctx, func(db *sql.DB) error {
+		originalDB = db
+		return visibleTask(ctx, db, taskID)
+	}); err != nil {
+		return model.Attachment{}, err
+	}
+
+	// Staging is a sibling of attachments on the same store filesystem.
+	// Restore swaps the live attachment directory and GC scans only that directory.
+	stageDir, err := os.MkdirTemp(s.store.Root(), ".attachment-import-*")
+	if err != nil {
+		return model.Attachment{}, err
+	}
+	defer os.RemoveAll(stageDir)
+	stagedPath := filepath.Join(stageDir, "payload")
+	attachment, err := prepareImport(ctx, sourcePath, stagedPath)
+	if err != nil {
+		return model.Attachment{}, err
+	}
+	attachment.ID, attachment.TaskID, attachment.Name = model.NewID(), taskID, name
+	attachment.StorageName = model.NewID()
+
+	err = s.store.Exclusive(ctx, func(db *sql.DB) error {
+		if db != originalDB {
+			return fmt.Errorf("%w: database changed during attachment import", model.ErrConflict)
 		}
-		defer tx.Rollback()
-		if err = visibleTask(ctx, tx, taskID); err != nil {
-			return err
-		}
-		source, err := openRegular(sourcePath)
-		if err != nil {
-			return fmt.Errorf("open attachment source: %w", err)
-		}
-		defer source.Close()
-		info, err := source.Stat()
-		if err != nil {
-			return err
-		}
-		if info.Size() > MaxFileBytes {
-			return fmt.Errorf("%w: attachment exceeds 256 MiB", model.ErrInvalid)
-		}
-		root, err := managedRoot(s.store.AttachmentsDir())
-		if err != nil {
-			return err
-		}
-		defer root.Close()
-		storageName := model.NewID()
-		target, err := root.OpenFile(storageName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return err
-		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = root.Remove(storageName)
-			}
-		}()
-		header := make([]byte, 512)
-		n, readErr := io.ReadFull(contextReader{ctx, source}, header)
-		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
-			return errors.Join(readErr, target.Close())
-		}
-		header = header[:n]
-		hash := sha256.New()
-		size, copyErr := io.Copy(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, io.MultiReader(bytes.NewReader(header), source)}, MaxFileBytes+1))
-		if copyErr == nil && size > MaxFileBytes {
-			copyErr = fmt.Errorf("%w: attachment exceeds 256 MiB", model.ErrInvalid)
-		}
-		if copyErr == nil {
-			copyErr = target.Sync()
-		}
-		if err = errors.Join(copyErr, target.Close()); err != nil {
-			return err
-		}
-		attachment = model.Attachment{
-			ID: model.NewID(), TaskID: taskID, Name: name, StorageName: storageName,
-			MediaType: http.DetectContentType(header), Size: size,
-			SHA256: hex.EncodeToString(hash.Sum(nil)), CreatedAt: time.Now().UTC(),
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO attachments(id,task_id,name,storage_name,media_type,size,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)`, attachment.ID, taskID, name, storageName, attachment.MediaType, size, attachment.SHA256, attachment.CreatedAt.Format(time.RFC3339Nano))
-		if err != nil {
-			return err
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		committed = true
-		return nil
+		return s.publishImport(ctx, db, stagedPath, &attachment)
 	})
 	if err != nil {
 		return model.Attachment{}, err
 	}
 	return attachment, nil
+}
+
+func prepareImport(ctx context.Context, sourcePath, stagedPath string) (model.Attachment, error) {
+	source, err := openRegular(sourcePath)
+	if err != nil {
+		return model.Attachment{}, fmt.Errorf("open attachment source: %w", err)
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil {
+		return model.Attachment{}, err
+	}
+	if info.Size() > MaxFileBytes {
+		return model.Attachment{}, fmt.Errorf("%w: attachment exceeds 256 MiB", model.ErrInvalid)
+	}
+	target, err := os.OpenFile(stagedPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return model.Attachment{}, err
+	}
+	header := make([]byte, 512)
+	n, readErr := io.ReadFull(contextReader{ctx, source}, header)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return model.Attachment{}, errors.Join(readErr, target.Close())
+	}
+	header = header[:n]
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, io.MultiReader(bytes.NewReader(header), source)}, MaxFileBytes+1))
+	if copyErr == nil && size > MaxFileBytes {
+		copyErr = fmt.Errorf("%w: attachment exceeds 256 MiB", model.ErrInvalid)
+	}
+	if copyErr == nil {
+		copyErr = target.Sync()
+	}
+	if err := errors.Join(copyErr, target.Close()); err != nil {
+		return model.Attachment{}, err
+	}
+	return model.Attachment{
+		MediaType: http.DetectContentType(header), Size: size, SHA256: hex.EncodeToString(hash.Sum(nil)),
+	}, nil
+}
+
+func (s *Service) publishImport(ctx context.Context, db *sql.DB, stagedPath string, a *model.Attachment) (err error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := visibleTask(ctx, tx, a.TaskID); err != nil {
+		return err
+	}
+	dir, err := s.openManagedDir()
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	// A hard link publishes the already-synced file without replacing a name
+	// that exists. Use the open directory to keep publication and rollback rooted.
+	fd := int(dir.Fd())
+	if err := unix.Linkat(unix.AT_FDCWD, stagedPath, fd, a.StorageName, 0); err != nil {
+		return &os.LinkError{Op: "link", Old: stagedPath, New: filepath.Join(dir.Name(), a.StorageName), Err: err}
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, unix.Unlinkat(fd, a.StorageName, 0))
+		}
+	}()
+	a.CreatedAt = time.Now().UTC()
+	_, err = tx.ExecContext(ctx, `INSERT INTO attachments(id,task_id,name,storage_name,media_type,size,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		a.ID, a.TaskID, a.Name, a.StorageName, a.MediaType, a.Size, a.SHA256, a.CreatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // List returns metadata for a visible task, in import order.
@@ -318,9 +350,11 @@ func (s *Service) GC(ctx context.Context) (int, error) {
 	return removed, err
 }
 
-func visibleTask(ctx context.Context, tx *sql.Tx, taskID string) error {
+func visibleTask(ctx context.Context, query interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, taskID string) error {
 	var taskDeleted, projectDeleted sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT t.deleted_at,p.deleted_at FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, taskID).Scan(&taskDeleted, &projectDeleted)
+	err := query.QueryRowContext(ctx, `SELECT t.deleted_at,p.deleted_at FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?`, taskID).Scan(&taskDeleted, &projectDeleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ErrNotFound
 	}
@@ -406,15 +440,20 @@ func openRegular(path string) (*os.File, error) {
 	return file, nil
 }
 
+func (s *Service) openManagedDir() (*os.File, error) {
+	dir, err := os.OpenFile(s.store.AttachmentsDir(), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+	if errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
+		return nil, errors.Join(model.ErrInvalid, err)
+	}
+	return dir, err
+}
+
 func (s *Service) openManaged(name string) (*os.File, error) {
 	if !safeName(name) {
 		return nil, model.ErrInvalid
 	}
-	dir, err := os.OpenFile(s.store.AttachmentsDir(), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+	dir, err := s.openManagedDir()
 	if err != nil {
-		if errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
-			return nil, errors.Join(model.ErrInvalid, err)
-		}
 		return nil, err
 	}
 	defer dir.Close()

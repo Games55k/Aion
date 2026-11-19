@@ -151,13 +151,7 @@ func TestFailedImportsLeaveNoFilesOrRows(t *testing.T) {
 	if _, err := service.Import(ctx, "t", regular); err == nil {
 		t.Fatal("insert failure succeeded")
 	}
-	if n := entries(t, s); n != 0 {
-		t.Fatalf("failed imports left %d files", n)
-	}
-	list, err := service.List(ctx, "t")
-	if err != nil || len(list) != 0 {
-		t.Fatalf("failed imports left rows: %+v %v", list, err)
-	}
+	expectEmptyImportStorage(t, s)
 }
 
 // Soft-deleted parent tasks and projects block attachment operations while retaining managed files until permanent deletion.
@@ -474,15 +468,14 @@ func TestListByProjectGroupsLiveTaskAttachments(t *testing.T) {
 // pauseCopyContext stops the first copy read after Export has created its staging file.
 type pauseCopyContext struct {
 	context.Context
-	outputDir string
-	started   chan struct{}
-	release   chan struct{}
-	once      sync.Once
+	ready   func() bool
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
 }
 
 func (c *pauseCopyContext) Err() error {
-	entries, _ := os.ReadDir(c.outputDir)
-	if len(entries) != 0 {
+	if c.ready() {
 		c.once.Do(func() {
 			close(c.started)
 			<-c.release
@@ -498,10 +491,14 @@ func TestExportDuringGarbageCollection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copyCtx := &pauseCopyContext{Context: ctx, outputDir: t.TempDir(), started: make(chan struct{}), release: make(chan struct{})}
+	outputDir := t.TempDir()
+	copyCtx := &pauseCopyContext{Context: ctx, started: make(chan struct{}), release: make(chan struct{}), ready: func() bool {
+		entries, _ := os.ReadDir(outputDir)
+		return len(entries) != 0
+	}}
 	resume := sync.OnceFunc(func() { close(copyCtx.release) })
 	defer resume()
-	destination := filepath.Join(copyCtx.outputDir, "exported.txt")
+	destination := filepath.Join(outputDir, "exported.txt")
 	done := make(chan error, 1)
 	go func() { done <- service.Export(copyCtx, a.ID, destination) }()
 	select {
