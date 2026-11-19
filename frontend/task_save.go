@@ -106,7 +106,11 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 			return
 		}
 		if request.revision != w.saveRevision {
-			// A newer invalid draft must not be marked saved by an older completion.
+			// A newer invalid draft must not be marked saved by an older completion,
+			// but a failed discard baseline must not linger in it either.
+			if err != nil && rebase {
+				w.rebaseInvalidDraftOnCommitted(request.input)
+			}
 			w.afterSave = nil
 			return
 		}

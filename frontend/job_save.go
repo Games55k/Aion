@@ -90,6 +90,16 @@ func (w *Workbench) syncDetailFromJob(app model.JobApplication) {
 // resetJobEditFields copies an application's details into the draft inputs without
 // replacing detailJob, so the last committed record stays the failure baseline.
 func (w *Workbench) resetJobEditFields(app model.JobApplication) {
+	w.copyJobEditFields(app)
+	w.editJobReasonDirty = false
+	w.jobDirty = false
+	w.jobSaveState = "saved"
+	w.jobSaveErr = ""
+}
+
+// copyJobEditFields copies an application's details into the draft inputs and leaves
+// the save state untouched, for rebasing drafts that are still invalid or in flight.
+func (w *Workbench) copyJobEditFields(app model.JobApplication) {
 	w.editJobCompany = app.CompanyName
 	w.editJobPosition = app.PositionName
 	w.editJobAppliedDate = parseCalendarDateValue(app.AppliedDate)
@@ -97,10 +107,25 @@ func (w *Workbench) resetJobEditFields(app model.JobApplication) {
 	w.editJobChannel = app.Channel
 	w.editJobNotes = app.Notes
 	w.editJobClosureReason = app.ClosureReason
-	w.editJobReasonDirty = false
-	w.jobDirty = false
-	w.jobSaveState = "saved"
-	w.jobSaveErr = ""
+}
+
+// jobInputFromDraft snapshots the current draft inputs as a save input without
+// validating them, for rebasing drafts that do not pass validation yet.
+func (w *Workbench) jobInputFromDraft() jobapplications.UpdateDetailsInput {
+	in := jobapplications.UpdateDetailsInput{
+		ID:              w.selectedJobID,
+		CompanyName:     strings.TrimSpace(w.editJobCompany),
+		PositionName:    strings.TrimSpace(w.editJobPosition),
+		AppliedDate:     formatCalendarDate(w.editJobAppliedDate),
+		ApplicationURL:  strings.TrimSpace(w.editJobURL),
+		Channel:         strings.TrimSpace(w.editJobChannel),
+		Notes:           strings.TrimRight(w.editJobNotes, "\r\n"),
+	}
+	if w.editJobReasonDirty && w.detailJob != nil && w.detailJob.Lifecycle == model.JobLifecycleClosed {
+		r := strings.TrimSpace(w.editJobClosureReason)
+		in.ClosureReason = &r
+	}
+	return in
 }
 
 // inFlightJobBaseline predicts the selected application as it will read once the active
@@ -351,12 +376,23 @@ func (w *Workbench) startJobSave(request jobSave) error {
 				// committed application, keeping only fields edited after the discard.
 				next.input = rebaseJobInputOnCommitted(next.input, request.input, jobInputFromJob(*w.detailJob))
 				w.resetJobEditFields(overlayJobInput(*w.detailJob, next.input))
+				if next.input.ClosureReason != nil {
+					// The queued request still carries the pending closure reason; keep
+					// its dirty marker until a write containing it is acknowledged.
+					w.editJobReasonDirty = true
+				}
 				w.jobSaveState, w.jobSaveErr = "saving", ""
 			}
 			_ = w.startJobSave(*next)
 			return
 		}
 		if request.revision != w.jobSaveRevision {
+			// A newer invalid draft must not be marked saved by an older completion,
+			// but a failed discard baseline must not linger in it either.
+			if err != nil && rebase && w.detailJob != nil {
+				rebased := rebaseJobInputOnCommitted(w.jobInputFromDraft(), request.input, jobInputFromJob(*w.detailJob))
+				w.copyJobEditFields(overlayJobInput(*w.detailJob, rebased))
+			}
 			w.afterSave = nil
 			return
 		}

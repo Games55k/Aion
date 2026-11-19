@@ -317,6 +317,92 @@ func TestAsyncDiscardThenEditExcludesFailedSaveFromFollowUpWrite(t *testing.T) {
 	}
 }
 
+// An invalid draft after the discard must also rebase: untouched fields must not keep the
+// failed write's values while the user's invalid input and validation state survive.
+func TestAsyncDiscardThenInvalidDraftExcludesFailedSave(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	if err := tt.Click("任务详情描述输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("注定失败的描述")
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	unlock()
+	drainTestUI(w, queue)
+	if w.editTitle != "" || w.editDescription != "" || w.saveState != "validation_error" {
+		t.Fatalf("invalid draft kept the failed baseline: title=%q desc=%q state=%q",
+			w.editTitle, w.editDescription, w.saveState)
+	}
+	tt.Type("补齐的新标题")
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || saved.Title != "补齐的新标题" || saved.Description != "" {
+		t.Fatalf("follow-up save leaked the failed write: %+v %v", saved, err)
+	}
+}
+
+// Tag edits made after the discard must merge additively: a failed tag from the rolled-back
+// write must not ride along when the user only added a new tag afterwards.
+func TestAsyncDiscardThenTagEditExcludesFailedTags(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_tag BEFORE UPDATE ON tasks
+			WHEN NEW.tags LIKE '%"failed-tag"%'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	addTag := func(tag string) {
+		t.Helper()
+		if err := tt.Click("添加标签输入框"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Type(tag)
+		tt.Key(0, ui.KeyEnter)
+	}
+	unlock := holdTestStore(t, s)
+	addTag("failed-tag")
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	addTag("keep-tag")
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Tags) != 1 || saved.Tags[0] != "keep-tag" {
+		t.Fatalf("failed tag leaked or kept tag lost: %+v %v", saved, err)
+	}
+	if len(w.editTags) != 1 || w.editTags[0] != "keep-tag" || w.dirty || w.saving {
+		t.Fatalf("draft diverged after tag rebase: %+v dirty=%v saving=%v", w.editTags, w.dirty, w.saving)
+	}
+}
+
 // Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
 func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
@@ -568,6 +654,104 @@ func TestJobAsyncDiscardThenEditExcludesFailedSaveFromFollowUpWrite(t *testing.T
 	if w.editJobCompany != "初始公司A" || w.editJobNotes != "落地前补充的备注" || w.jobDirty || w.jobSaving || w.jobSaveState != "saved" {
 		t.Fatalf("draft diverged after rebase: company=%q notes=%q dirty=%v saving=%v state=%q",
 			w.editJobCompany, w.editJobNotes, w.jobDirty, w.jobSaving, w.jobSaveState)
+	}
+}
+
+// A job draft that turns invalid after the discard must also rebase on the committed values.
+func TestJobAsyncDiscardThenInvalidDraftExcludesFailedSave(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER jobs_reject_failed_company2 BEFORE UPDATE ON job_applications
+			WHEN NEW.company_name = '注定失败的新公司'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "注定失败的新公司")
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("详情岗位名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	unlock()
+	drainTestUI(w, queue)
+	if w.editJobCompany != "初始公司A" || w.editJobPosition != "" || w.jobSaveState != "validation_error" {
+		t.Fatalf("invalid draft kept the failed baseline: company=%q position=%q state=%q",
+			w.editJobCompany, w.editJobPosition, w.jobSaveState)
+	}
+	// The error banner pushes the position field out of the scroll viewport in
+	// headless tests; drive the same draft edit the UI would submit directly.
+	w.editJobPosition = "补齐的新岗位"
+	w.TouchJobDetailField()
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "初始公司A" || saved.PositionName != "补齐的新岗位" {
+		t.Fatalf("follow-up save leaked the failed write: %+v %v", saved, err)
+	}
+}
+
+// A closure reason queued by the rebase must stay pending until a write carrying it is
+// acknowledged; later note-only saves must keep retrying it instead of silently dropping it.
+func TestJobAsyncRebaseKeepsPendingClosureReason(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`UPDATE job_applications SET lifecycle='closed', outcome='other',
+			closure_reason='旧结束原因', closed_at='2026-01-01T00:00:00Z' WHERE id = ?`, job1.ID)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`CREATE TRIGGER jobs_reject_reason_change BEFORE UPDATE ON job_applications
+			WHEN NEW.closure_reason != '旧结束原因'
+			BEGIN SELECT RAISE(ABORT, 'reason write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.CloseJobDetail()
+	drainTestUI(w, queue)
+	w.SelectJobApplication(job1.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情结束原因", "原因甲")
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	typeJobDetailField(t, tt, "详情结束原因", "原因乙")
+	unlock()
+	drainTestUI(w, queue)
+	if w.jobSaveState != "error" {
+		t.Fatalf("expected the rebased reason write to fail visibly, state=%q", w.jobSaveState)
+	}
+	// The error banner pushes the notes field out of the scroll viewport in headless
+	// tests; drive the same draft edit the UI would submit directly.
+	w.editJobNotes = "新备注"
+	w.TouchJobDetailField()
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	// The trigger rejects every reason change, so the notes ride along in the same
+	// failed write and must not land without the reason.
+	if err != nil || saved.ClosureReason != "旧结束原因" || saved.Notes != "初始备注" {
+		t.Fatalf("notes-only save mishandled the pending reason: %+v %v", saved, err)
+	}
+	if w.editJobClosureReason != "原因乙" || w.editJobNotes != "新备注" || w.jobSaveState != "error" || !w.jobDirty {
+		t.Fatalf("pending reason dropped or failure masked: reason=%q notes=%q state=%q dirty=%v",
+			w.editJobClosureReason, w.editJobNotes, w.jobSaveState, w.jobDirty)
 	}
 }
 
