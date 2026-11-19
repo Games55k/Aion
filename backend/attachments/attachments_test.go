@@ -96,13 +96,6 @@ func TestImportSurvivesOriginalDeletionAndSameNames(t *testing.T) {
 		attachment model.Attachment
 		want       string
 	}{{a, "first contents"}, {b, "second contents"}} {
-		path, err := service.ManagedPath(ctx, tc.attachment.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := read(t, path); got != tc.want {
-			t.Fatalf("contents = %q", got)
-		}
 		export := filepath.Join(t.TempDir(), "saved.txt")
 		if err := service.Export(ctx, tc.attachment.ID, export); err != nil {
 			t.Fatal(err)
@@ -188,9 +181,6 @@ func TestDeletedParentsHideOperationsButRetainFiles(t *testing.T) {
 			if _, err := service.List(ctx, "t"); !errors.Is(err, want) {
 				t.Fatalf("List error = %v", err)
 			}
-			if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, want) {
-				t.Fatalf("ManagedPath error = %v", err)
-			}
 			if err := service.Export(ctx, a.ID, filepath.Join(t.TempDir(), "export")); !errors.Is(err, want) {
 				t.Fatalf("Export error = %v", err)
 			}
@@ -204,8 +194,8 @@ func TestDeletedParentsHideOperationsButRetainFiles(t *testing.T) {
 				t.Fatalf("retained file = %q", got)
 			}
 			exec(t, s, `UPDATE `+parent+` SET deleted_at=NULL`)
-			if _, err := service.ManagedPath(ctx, a.ID); err != nil {
-				t.Fatalf("restored path: %v", err)
+			if err := service.ExportOverwrite(ctx, a.ID, filepath.Join(t.TempDir(), "restored")); err != nil {
+				t.Fatalf("restored export: %v", err)
 			}
 			exec(t, s, `DELETE FROM `+parent)
 			if n, err := service.GC(ctx); err != nil || n != 1 {
@@ -239,8 +229,8 @@ func TestRemoveAndGCPreserveOtherReferencesAndNeverFollowLinks(t *testing.T) {
 	if err := service.Remove(ctx, a.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, model.ErrNotFound) {
-		t.Fatalf("removed path error = %v", err)
+	if err := service.ExportOverwrite(ctx, a.ID, filepath.Join(t.TempDir(), "removed")); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("removed attachment export error = %v", err)
 	}
 	if n, err := service.GC(ctx); err != nil || n != 1 {
 		t.Fatalf("GC = %d %v", n, err)
@@ -251,30 +241,39 @@ func TestRemoveAndGCPreserveOtherReferencesAndNeverFollowLinks(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(s.AttachmentsDir(), "symlink")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ManagedPath(ctx, b.ID); err != nil {
-		t.Fatal(err)
+	if got := read(t, filepath.Join(s.AttachmentsDir(), b.StorageName)); got != "b" {
+		t.Fatalf("GC changed referenced attachment: %q", got)
 	}
 }
 
-// ManagedPath and Export reject stored attachment names that traverse directories or point to symlinks.
-func TestManagedPathsRejectTraversalAndSymlinks(t *testing.T) {
-	for _, badName := range []string{"../outside", "/absolute", "..\\outside", "link"} {
-		t.Run(badName, func(t *testing.T) {
-			s, service := fixture(t)
-			a, err := service.Import(ctx, "t", source(t, "a", "a"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			outside := source(t, "outside", "outside")
-			if err := os.Symlink(outside, filepath.Join(s.AttachmentsDir(), "link")); err != nil {
-				t.Fatal(err)
-			}
-			exec(t, s, `UPDATE attachments SET storage_name=? WHERE id=?`, badName, a.ID)
-			if _, err := service.ManagedPath(ctx, a.ID); err == nil {
-				t.Fatal("resolved unsafe stored name")
-			}
-			if err := service.Export(ctx, a.ID, filepath.Join(t.TempDir(), "saved")); err == nil {
+// Regression: attachment export followed symlinks within managed storage when their targets matched the attachment.
+func TestExportRejectsUnsafeManagedPaths(t *testing.T) {
+	s, service := fixture(t)
+	a, err := service.Import(ctx, "t", source(t, "a", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(s.Root(), "outside")
+	if err := os.WriteFile(outside, []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(a.StorageName, filepath.Join(s.AttachmentsDir(), "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ label, storedName string }{
+		{"relative parent", "../outside"},
+		{"absolute", outside},
+		{"backslash", "..\\outside"},
+		{"symlink", "link"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			exec(t, s, `UPDATE attachments SET storage_name=? WHERE id=?`, tc.storedName, a.ID)
+			dest := filepath.Join(t.TempDir(), "saved")
+			if err := service.ExportOverwrite(ctx, a.ID, dest); err == nil {
 				t.Fatal("exported unsafe stored name")
+			}
+			if _, err := os.Lstat(dest); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unsafe export left a destination: %v", err)
 			}
 		})
 	}
@@ -301,10 +300,7 @@ func TestExportFailuresPreserveExistingFilesAndCleanPartialCopies(t *testing.T) 
 	if err := service.Export(ctx, a.ID, filepath.Join(s.AttachmentsDir(), "unexpected")); !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("export to store = %v", err)
 	}
-	managed, err := service.ManagedPath(ctx, a.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	managed := filepath.Join(s.AttachmentsDir(), a.StorageName)
 	if err := os.WriteFile(managed, []byte("damaged"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -318,8 +314,8 @@ func TestExportFailuresPreserveExistingFilesAndCleanPartialCopies(t *testing.T) 
 	if err := os.Remove(managed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing managed file = %v", err)
+	if err := service.ExportOverwrite(ctx, a.ID, destination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("export of missing managed file = %v", err)
 	}
 }
 
@@ -398,10 +394,7 @@ func TestExportOverwriteReplacesRegularFileAndPreservesOnFailure(t *testing.T) {
 	if err := service.ExportOverwrite(ctx, a.ID, s.DBPath()); !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("db overwrite error = %v", err)
 	}
-	managed, err := service.ManagedPath(ctx, a.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	managed := filepath.Join(s.AttachmentsDir(), a.StorageName)
 	// Oversized corruption beyond a.Size must be bounded and leave the existing target intact.
 	if err := os.WriteFile(managed, []byte("this managed file is much larger than original size"), 0600); err != nil {
 		t.Fatal(err)
@@ -429,9 +422,6 @@ func TestBothTaskAndProjectDeletedReturnsNotFound(t *testing.T) {
 	}
 	if _, err := service.List(ctx, "t"); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("List error = %v", err)
-	}
-	if _, err := service.ManagedPath(ctx, a.ID); !errors.Is(err, model.ErrNotFound) {
-		t.Fatalf("ManagedPath error = %v", err)
 	}
 	if err := service.Export(ctx, a.ID, filepath.Join(t.TempDir(), "out")); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("Export error = %v", err)

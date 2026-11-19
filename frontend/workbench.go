@@ -2256,14 +2256,6 @@ func (w *Workbench) RemoveAttachmentFromSelectedTask(attachmentID string) {
 	})
 }
 
-func (w *Workbench) exportAttachmentWithContext(ctx context.Context, att model.Attachment, destPath string) error {
-	destPath = strings.TrimSpace(destPath)
-	if destPath == "" {
-		return nil
-	}
-	return w.app.Attachments.ExportOverwrite(ctx, att.ID, destPath)
-}
-
 func (w *Workbench) applyExportAttachmentResult(destPath string, err error) {
 	if err != nil {
 		w.enqueueErrorToast("导出附件失败", err)
@@ -2274,21 +2266,6 @@ func (w *Workbench) applyExportAttachmentResult(destPath string, err error) {
 		Description: destPath,
 		Type:        ToastSuccess,
 	})
-}
-
-// ExportAttachment exports a managed attachment to destPath using backend-validated atomic staging
-// so any existing user regular file is preserved on failure and protected store paths are rejected.
-func (w *Workbench) ExportAttachment(att model.Attachment, destPath string) error {
-	if w.IsRestoring() {
-		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
-	}
-	destPath = strings.TrimSpace(destPath)
-	if destPath == "" {
-		return nil
-	}
-	err := w.exportAttachmentWithContext(context.Background(), att, destPath)
-	w.applyExportAttachmentResult(destPath, err)
-	return err
 }
 
 // PickAndExportAttachment opens the save dialog and exports att off the UI thread.
@@ -2320,7 +2297,7 @@ func (w *Workbench) PickAndExportAttachment(att model.Attachment) {
 		if dest == "" {
 			return nil
 		}
-		exportErr := w.exportAttachmentWithContext(ctx, att, dest)
+		exportErr := w.app.Attachments.ExportOverwrite(ctx, att.ID, dest)
 		return func() {
 			w.applyExportAttachmentResult(dest, exportErr)
 		}
@@ -2802,14 +2779,6 @@ func (w *Workbench) RunDueBackupNow() {
 	})
 }
 
-func (w *Workbench) exportManualBackupWithContext(ctx context.Context, destPath string) error {
-	destPath = strings.TrimSpace(destPath)
-	if destPath == "" {
-		return nil
-	}
-	return w.app.Backups.ExportOverwrite(ctx, destPath)
-}
-
 func (w *Workbench) applyExportBackupResult(destPath string, err error) {
 	if err != nil {
 		w.enqueueErrorToast("导出完整备份失败", err)
@@ -2821,24 +2790,6 @@ func (w *Workbench) applyExportBackupResult(destPath string, err error) {
 		Description: destPath,
 		Type:        ToastSuccess,
 	})
-}
-
-// ExportManualBackup exports a full backup ZIP to destPath using backend-validated atomic staging
-// so any existing user regular file at destPath is preserved on failure and protected store paths are rejected.
-func (w *Workbench) ExportManualBackup(destPath string) error {
-	if w.IsRestoring() {
-		return fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
-	}
-	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再导出备份"); err != nil {
-		return err
-	}
-	destPath = strings.TrimSpace(destPath)
-	if destPath == "" {
-		return nil
-	}
-	err := w.exportManualBackupWithContext(context.Background(), destPath)
-	w.applyExportBackupResult(destPath, err)
-	return err
 }
 
 // PickAndExportManualBackup opens the save dialog and exports a full backup ZIP off the UI thread.
@@ -2869,7 +2820,7 @@ func (w *Workbench) PickAndExportManualBackup() {
 		if dest == "" {
 			return nil
 		}
-		exportErr := w.exportManualBackupWithContext(ctx, dest)
+		exportErr := w.app.Backups.ExportOverwrite(ctx, dest)
 		return func() {
 			w.applyExportBackupResult(dest, exportErr)
 		}

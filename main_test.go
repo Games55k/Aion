@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,8 +62,11 @@ func TestSnapshotRejectsDataDirectoryTargets(t *testing.T) {
 				t.Fatalf("snapshot damaged the database: %v", err)
 			}
 			defer reopened.Close()
-			if got, err := reopened.Projects.GetProject(ctx, p.ID); err != nil || got.Name != p.Name {
-				t.Fatalf("snapshot lost project data: %+v, %v", got, err)
+			list, err := reopened.Projects.ListProjects(ctx, projects.ProjectFilter{})
+			if err != nil || !slices.ContainsFunc(list, func(got model.Project) bool {
+				return got.ID == p.ID && got.Name == p.Name
+			}) {
+				t.Fatalf("snapshot lost project data: %+v, %v", list, err)
 			}
 		})
 	}

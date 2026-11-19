@@ -72,8 +72,8 @@ func TestValidationAndDefaults(t *testing.T) {
 	}
 }
 
+// Duplicate matching ignores casing, spaces, other roles, closed records and deleted records, and matching applications remain creatable.
 func TestActiveDuplicateDetectionDoesNotBlockMultiRoleOrReapply(t *testing.T) {
-	// Active duplicate queries must warn on matching active roles without blocking multi-role or closed re-applications.
 	ctx := context.Background()
 	now := time.Date(2026, 11, 15, 9, 30, 0, 0, time.Local)
 	svc, _ := openTestService(t, &now)
@@ -86,14 +86,18 @@ func TestActiveDuplicateDetectionDoesNotBlockMultiRoleOrReapply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dupes, err := svc.FindActiveDuplicates(ctx, " example corp ", "BACKEND ENGINEER")
-	if err != nil || len(dupes) != 1 || dupes[0].ID != first.ID {
-		t.Fatalf("FindActiveDuplicates = %+v, err=%v", dupes, err)
+	apps, err := svc.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dupes := jobapplications.MatchActiveDuplicates(apps, " example corp ", "BACKEND ENGINEER")
+	if len(dupes) != 1 || dupes[0].ID != first.ID {
+		t.Fatalf("same-role matches = %+v", dupes)
 	}
 
 	// Different position at the same company has no duplicate warning and creates independently.
-	otherRoleDupes, err := svc.FindActiveDuplicates(ctx, "Example Corp", "Platform Engineer")
-	if err != nil || len(otherRoleDupes) != 0 {
+	otherRoleDupes := jobapplications.MatchActiveDuplicates(apps, "Example Corp", "Platform Engineer")
+	if len(otherRoleDupes) != 0 {
 		t.Fatalf("unexpected dupes for different role: %+v, err=%v", otherRoleDupes, err)
 	}
 	second, err := svc.Create(ctx, jobapplications.CreateInput{
@@ -106,15 +110,19 @@ func TestActiveDuplicateDetectionDoesNotBlockMultiRoleOrReapply(t *testing.T) {
 	}
 
 	// Closing the original records removes them from active duplicate matches.
-	if _, err := svc.Close(ctx, jobapplications.CloseInput{ID: first.ID, Outcome: model.JobOutcomeRejected}); err != nil {
+	closedFirst, err := svc.Close(ctx, jobapplications.CloseInput{ID: first.ID, Outcome: model.JobOutcomeRejected})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Close(ctx, jobapplications.CloseInput{ID: second.ID, Outcome: model.JobOutcomeWithdrawn}); err != nil {
+	closedSecond, err := svc.Close(ctx, jobapplications.CloseInput{ID: second.ID, Outcome: model.JobOutcomeWithdrawn})
+	if err != nil {
 		t.Fatal(err)
 	}
-	dupesAfterClose, err := svc.FindActiveDuplicates(ctx, "Example Corp", "Backend Engineer")
-	if err != nil || len(dupesAfterClose) != 0 {
-		t.Fatalf("closed roles must not trigger active duplicate warning: %+v, err=%v", dupesAfterClose, err)
+	deleted := model.JobApplication{CompanyName: first.CompanyName, PositionName: first.PositionName, Lifecycle: model.JobLifecycleActive, DeletedAt: &now}
+	if matches := jobapplications.MatchActiveDuplicates(
+		[]model.JobApplication{closedFirst, closedSecond, deleted}, "Example Corp", "Backend Engineer",
+	); len(matches) != 0 {
+		t.Fatalf("closed or deleted applications matched: %+v", matches)
 	}
 }
 

@@ -29,22 +29,6 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (model.Pro
 	return p, nil
 }
 
-func (s *Service) GetProject(ctx context.Context, id string) (model.Project, error) {
-	var p model.Project
-	err := s.store.Read(ctx, func(tx *sql.Tx) error {
-		var err error
-		p, err = projectByID(ctx, tx, id)
-		if err == nil && p.DeletedAt != nil {
-			return model.ErrNotFound
-		}
-		return err
-	})
-	if err != nil {
-		return model.Project{}, err
-	}
-	return p, nil
-}
-
 func (s *Service) ListProjects(ctx context.Context, filter ProjectFilter) ([]model.Project, error) {
 	result := make([]model.Project, 0)
 	err := s.store.Read(ctx, func(tx *sql.Tx) error {

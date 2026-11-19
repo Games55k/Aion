@@ -282,18 +282,6 @@ func MatchActiveDuplicates(apps []model.JobApplication, companyName, positionNam
 	return dupes
 }
 
-// FindActiveDuplicates returns active non-deleted applications matching the same company and position (case-insensitive, trimmed).
-func (s *Service) FindActiveDuplicates(ctx context.Context, companyName, positionName string) ([]model.JobApplication, error) {
-	if strings.TrimSpace(companyName) == "" || strings.TrimSpace(positionName) == "" {
-		return nil, nil
-	}
-	apps, err := s.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return MatchActiveDuplicates(apps, companyName, positionName), nil
-}
-
 // Create validates and inserts a new active application along with its creation timeline event.
 func (s *Service) Create(ctx context.Context, in CreateInput) (model.JobApplication, error) {
 	company := strings.TrimSpace(in.CompanyName)

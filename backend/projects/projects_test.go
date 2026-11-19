@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 
@@ -92,6 +93,15 @@ func board(t *testing.T, s *projects.Service, p model.Project, status model.Stat
 // Project CRUD, archiving, soft deletion, and restoration preserve project identity and board tasks across reopens.
 func TestProjectLifecycleAndPersistence(t *testing.T) {
 	s, st := setup(t)
+	findVisible := func(id string) (model.Project, bool) {
+		list, err := s.ListProjects(ctx, projects.ProjectFilter{})
+		check(t, err)
+		idx := slices.IndexFunc(list, func(p model.Project) bool { return p.ID == id })
+		if idx < 0 {
+			return model.Project{}, false
+		}
+		return list[idx], true
+	}
 	p := project(t, s, "  工作台  ")
 	if p.Name != "工作台" || p.ID == "" || p.CreatedAt.IsZero() || p.Archived {
 		t.Fatalf("unexpected project: %+v", p)
@@ -122,8 +132,9 @@ func TestProjectLifecycleAndPersistence(t *testing.T) {
 	// Archived boards remain readable and editable.
 	v := task(t, s, archived, "Archived task")
 	check(t, s.DeleteProject(ctx, p.ID))
-	_, err = s.GetProject(ctx, p.ID)
-	isError(t, err, model.ErrNotFound)
+	if _, visible := findVisible(p.ID); visible {
+		t.Fatal("soft-deleted project is still listed")
+	}
 	isError(t, s.DeleteProject(ctx, p.ID), model.ErrConflict)
 	_, err = s.ArchiveProject(ctx, p.ID, false)
 	isError(t, err, model.ErrNotFound)
@@ -131,9 +142,8 @@ func TestProjectLifecycleAndPersistence(t *testing.T) {
 	isError(t, err, model.ErrNotFound)
 	check(t, s.RestoreProject(ctx, p.ID))
 	isError(t, s.RestoreProject(ctx, p.ID), model.ErrConflict)
-	got, err := s.GetProject(ctx, p.ID)
-	check(t, err)
-	if !got.Archived || got.Name != "更名" {
+	got, visible := findVisible(p.ID)
+	if !visible || !got.Archived || got.Name != "更名" {
 		t.Fatalf("restore changed project content: %+v", got)
 	}
 	_, err = s.ArchiveProject(ctx, p.ID, false)
@@ -144,9 +154,8 @@ func TestProjectLifecycleAndPersistence(t *testing.T) {
 	check(t, err)
 	t.Cleanup(func() { check(t, reopened.Close()) })
 	s = projects.New(reopened)
-	got, err = s.GetProject(ctx, p.ID)
-	check(t, err)
-	if got.Archived || got.Icon != "α" || !got.CreatedAt.Equal(p.CreatedAt) {
+	got, visible = findVisible(p.ID)
+	if !visible || got.Archived || got.Icon != "α" || !got.CreatedAt.Equal(p.CreatedAt) {
 		t.Fatalf("persistence: %+v", got)
 	}
 	board(t, s, got, model.Planned, v)

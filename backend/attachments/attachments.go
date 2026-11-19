@@ -181,28 +181,6 @@ func (s *Service) ListByProject(ctx context.Context, projectID string) (map[stri
 	return byTask, nil
 }
 
-// ManagedPath resolves an existing regular file for a visible attachment.
-// The returned path is transient: a later removal, purge or restore can replace it.
-func (s *Service) ManagedPath(ctx context.Context, attachmentID string) (string, error) {
-	var path string
-	err := s.store.Read(ctx, func(tx *sql.Tx) error {
-		a, err := visibleAttachment(ctx, tx, attachmentID)
-		if err != nil {
-			return err
-		}
-		file, err := s.openManaged(a.StorageName)
-		if err != nil {
-			return err
-		}
-		if err = file.Close(); err != nil {
-			return err
-		}
-		path = filepath.Join(s.store.AttachmentsDir(), a.StorageName)
-		return nil
-	})
-	return path, err
-}
-
 // Export creates a new file at destinationPath. Existing files and symlinks are
 // never overwritten. Partial exports are removed on failure.
 func (s *Service) Export(ctx context.Context, attachmentID, destinationPath string) error {
@@ -211,7 +189,8 @@ func (s *Service) Export(ctx context.Context, attachmentID, destinationPath stri
 
 // ExportOverwrite exports an attachment to destinationPath using a temporary staging file
 // in the destination directory and atomically replaces an existing user regular file only
-// after content verification succeeds. Protected store paths, symlinks, and directories are rejected.
+// after content verification succeeds. It rejects symlink sources and destinations and
+// protects managed paths and directories from overwrites.
 func (s *Service) ExportOverwrite(ctx context.Context, attachmentID, destinationPath string) error {
 	return s.export(ctx, attachmentID, destinationPath, true)
 }
@@ -431,15 +410,22 @@ func (s *Service) openManaged(name string) (*os.File, error) {
 	if !safeName(name) {
 		return nil, model.ErrInvalid
 	}
-	root, err := managedRoot(s.store.AttachmentsDir())
+	dir, err := os.OpenFile(s.store.AttachmentsDir(), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 	if err != nil {
+		if errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
+			return nil, errors.Join(model.ErrInvalid, err)
+		}
 		return nil, err
 	}
-	defer root.Close()
-	file, err := root.OpenFile(name, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	defer dir.Close()
+	// os.Root.OpenFile resolves in-root symlinks. Open the single validated
+	// filename against the pinned directory so the kernel rejects symlinks.
+	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	path := filepath.Join(dir.Name(), name)
 	if err != nil {
-		return nil, err
+		return nil, &os.PathError{Op: "openat", Path: path, Err: err}
 	}
+	file := os.NewFile(uintptr(fd), path)
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()

@@ -1,6 +1,7 @@
 package backend_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -13,6 +14,71 @@ import (
 	"aion/backend/model"
 	"aion/backend/projects"
 )
+
+// Regression: attachment and backup exports used to accept live store paths and case aliases of managed attachments.
+func TestExportsRejectProtectedAndCaseAliasedPaths(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	app, err := backend.Open(ctx, backend.Options{DataDir: dir, DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	p, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "protected export"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := app.Projects.CreateTask(ctx, p.ID, projects.TaskInput{Title: "attachment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "aion.sqlite")
+	payload := []byte("attachment content")
+	if err := os.WriteFile(source, payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	att, err := app.Attachments.Import(ctx, task.ID, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, protected := range []string{
+		"aion.sqlite", ".aion.lock", ".backup-auto-state.json", "aion.sqlite-wal", "attachments/escape.bin",
+	} {
+		dest := filepath.Join(dir, protected)
+		if err := app.Attachments.ExportOverwrite(ctx, att.ID, dest); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("attachment export to %s = %v", protected, err)
+		}
+		if err := app.Backups.ExportOverwrite(ctx, dest); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("backup export to %s = %v", protected, err)
+		}
+	}
+	if got, err := app.Projects.GetTask(ctx, task.ID); err != nil || got.Title != task.Title {
+		t.Fatalf("live database was changed: %+v, %v", got, err)
+	}
+
+	t.Run("case alias", func(t *testing.T) {
+		alias := filepath.Join(dir, "ATTACHMENTS", att.StorageName)
+		if _, err := os.Stat(alias); errors.Is(err, os.ErrNotExist) {
+			t.Skip("filesystem is case-sensitive")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source, []byte("replacement content"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		replacement, err := app.Attachments.Import(ctx, task.ID, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := app.Attachments.ExportOverwrite(ctx, replacement.ID, alias); !errors.Is(err, model.ErrInvalid) {
+			t.Fatalf("attachment export to a case alias = %v", err)
+		}
+		got, err := os.ReadFile(alias)
+		if err != nil || !bytes.Equal(got, payload) {
+			t.Fatalf("case alias changed the managed attachment: %q, %v", got, err)
+		}
+	})
+}
 
 // Exporting and restoring across data directories preserves projects, independent trash state, attachments, and settings.
 func TestBackupMigrationAcrossDataDirectories(t *testing.T) {
@@ -81,8 +147,8 @@ func TestBackupMigrationAcrossDataDirectories(t *testing.T) {
 	if _, err = target.Projects.GetTask(ctx, deleted.ID); !errors.Is(err, model.ErrNotFound) {
 		t.Fatal("independently deleted task restored", err)
 	}
-	path, err := target.Attachments.ManagedPath(ctx, attachment.ID)
-	if err != nil {
+	path := filepath.Join(t.TempDir(), "restored.txt")
+	if err := target.Attachments.ExportOverwrite(ctx, attachment.ID, path); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(path)
@@ -129,10 +195,7 @@ func TestPurgeCoordinatesMetadataAndFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	managed, err := a.Attachments.ManagedPath(ctx, file.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	managed := filepath.Join(a.DataDir(), "attachments", file.StorageName)
 	if err = a.PermanentlyDelete(ctx, projects.TrashProject, p.ID); !errors.Is(err, model.ErrConflict) {
 		t.Fatal("live project purged", err)
 	}

@@ -111,8 +111,10 @@ func TestProjectLifecycle(t *testing.T) {
 	if wb.ActiveProject() == nil || wb.ActiveProject().Name != "Aion 核心研发" || wb.ActiveProject().Icon != "rocket" {
 		t.Fatalf("project not updated: %+v", wb.ActiveProject())
 	}
-	persisted, err := app.Projects.GetProject(context.Background(), wb.activeProjectID)
-	if err != nil || persisted.Name != "Aion 核心研发" || persisted.Icon != "rocket" {
+	persisted, err := app.Projects.ListProjects(context.Background(), projects.ProjectFilter{})
+	if err != nil || !slices.ContainsFunc(persisted, func(p model.Project) bool {
+		return p.ID == wb.activeProjectID && p.Name == "Aion 核心研发" && p.Icon == "rocket"
+	}) {
 		t.Fatalf("project update not persisted in DB: %+v err=%v", persisted, err)
 	}
 
@@ -876,68 +878,59 @@ func TestReviewFailedSaveMustKeepDraft(t *testing.T) {
 	}
 }
 
-// Regression: exporting over an existing backup or attachment previously removed the target file before the new export succeeded.
-func TestReviewFailedExportMustPreservePreviousBackup(t *testing.T) {
-	dataDir := t.TempDir()
-	outDir := t.TempDir()
-	destZip := filepath.Join(outDir, "aion-backup.zip")
-	oldBytes := []byte("existing user backup that must survive a failed overwrite")
-	if err := os.WriteFile(destZip, oldBytes, 0o600); err != nil {
-		t.Fatalf("seed existing backup: %v", err)
-	}
-
-	app, wb, _ := openTestWorkbench(t, dataDir, Host{})
-	wb.OpenCreateProjectModal()
-	wb.projectModalName = "导出失败保护"
-	wb.SubmitProjectModal()
-
-	srcAtt := filepath.Join(t.TempDir(), "doc.txt")
-	if err := os.WriteFile(srcAtt, []byte("attachment body"), 0o600); err != nil {
-		t.Fatalf("write src attachment: %v", err)
-	}
-	task, err := wb.QuickCreateTask(model.Planned, "带附件任务")
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	wb.SelectTask(task.ID)
-	wb.ImportAttachmentsToSelectedTask([]string{srcAtt})
-	if len(wb.detailAttachments) != 1 {
-		t.Fatalf("expected 1 attachment, got %d", len(wb.detailAttachments))
-	}
-	att := wb.detailAttachments[0]
-
-	destAtt := filepath.Join(outDir, "exported-doc.txt")
-	oldAttBytes := []byte("existing exported attachment that must survive")
-	if err := os.WriteFile(destAtt, oldAttBytes, 0o600); err != nil {
-		t.Fatalf("seed existing exported attachment: %v", err)
-	}
-
-	// Close the backend to simulate an export failure.
-	if err := app.Close(); err != nil {
-		t.Fatalf("close backend: %v", err)
-	}
-
-	if err := wb.ExportManualBackup(destZip); err == nil {
-		t.Fatalf("expected ExportManualBackup to fail after backend close")
-	}
-
-	got, err := os.ReadFile(destZip)
-	if err != nil {
-		t.Fatalf("existing backup file was deleted on failed export: %v", err)
-	}
-	if !bytes.Equal(got, oldBytes) {
-		t.Fatalf("existing backup content changed on failed export: got %q", got)
-	}
-
-	if err := wb.ExportAttachment(att, destAtt); err == nil {
-		t.Fatalf("expected ExportAttachment to fail after backend close")
-	}
-	gotAtt, err := os.ReadFile(destAtt)
-	if err != nil {
-		t.Fatalf("existing attachment file was deleted on failed export: %v", err)
-	}
-	if !bytes.Equal(gotAtt, oldAttBytes) {
-		t.Fatalf("existing attachment content changed on failed export: got %q", gotAtt)
+// Regression: failed exports used to remove a user's existing file before publishing its replacement.
+func TestFailedExportsPreserveExistingFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, filename, control, failure string
+	}{
+		{"backup", "backup.zip", "导出完整备份 (.zip)", "导出完整备份失败"},
+		{"attachment", "doc.txt", "导出附件 doc.txt", "导出附件失败"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), tc.filename)
+			old := []byte("existing user file")
+			if err := os.WriteFile(dest, old, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+				PickSaveFile: func(_, _ string, _ ...string) (string, error) { return dest, nil },
+			})
+			if tc.name == "backup" {
+				wb.NavigateTo(NavSettings)
+			} else {
+				source := filepath.Join(t.TempDir(), tc.filename)
+				if err := os.WriteFile(source, []byte("attachment body"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				wb.OpenCreateProjectModal()
+				wb.projectModalName = "导出失败保护"
+				wb.SubmitProjectModal()
+				task, err := wb.QuickCreateTask(model.Planned, "带附件任务")
+				if err != nil {
+					t.Fatal(err)
+				}
+				wb.SelectTask(task.ID)
+				wb.ImportAttachmentsToSelectedTask([]string{source})
+			}
+			tt.Frame()
+			if err := app.Close(); err != nil {
+				t.Fatal(err)
+			}
+			queue := make(chan func(), 8)
+			wb.host.Dispatch = func(fn func()) { queue <- fn }
+			if err := tt.Click(tc.control); err != nil {
+				t.Fatal(err)
+			}
+			drainTestUI(wb, queue)
+			tt.Frame()
+			if !tt.HasText(tc.failure) {
+				t.Fatal("expected the export failure to be reported")
+			}
+			got, err := os.ReadFile(dest)
+			if err != nil || !bytes.Equal(got, old) {
+				t.Fatalf("failed export changed destination: %q, %v", got, err)
+			}
+		})
 	}
 }
 
@@ -999,73 +992,6 @@ func TestReviewAsyncBackgroundTaskAndCancel(t *testing.T) {
 	close(release)
 }
 
-// Regression: exporting an attachment or backup previously allowed overwriting live store files or case-aliased managed attachments.
-func TestExportRejectsProtectedAndCaseAliasedPaths(t *testing.T) {
-	dir := t.TempDir()
-	app, wb, _ := openTestWorkbench(t, dir, Host{})
-	wb.OpenCreateProjectModal()
-	wb.projectModalName = "protected export"
-	wb.SubmitProjectModal()
-	task, err := wb.QuickCreateTask(model.Planned, "attachment")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wb.SelectTask(task.ID)
-	source := filepath.Join(t.TempDir(), "aion.sqlite")
-	payload := []byte("attachment content, not the application database")
-	if err := os.WriteFile(source, payload, 0600); err != nil {
-		t.Fatal(err)
-	}
-	wb.ImportAttachmentsToSelectedTask([]string{source})
-	if len(wb.detailAttachments) != 1 {
-		t.Fatal("attachment import failed")
-	}
-	dest := filepath.Join(dir, "aion.sqlite")
-	exportErr := wb.ExportAttachment(wb.detailAttachments[0], dest)
-	got, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if exportErr == nil || bytes.Equal(got, payload) {
-		t.Fatalf("live database overwritten: export error=%v, bytes=%q", exportErr, got)
-	}
-
-	for _, protected := range []string{
-		filepath.Join(dir, ".aion.lock"),
-		filepath.Join(dir, ".backup-auto-state.json"),
-		filepath.Join(dir, "aion.sqlite-wal"),
-		filepath.Join(dir, "attachments", "escape.bin"),
-	} {
-		if err := wb.ExportAttachment(wb.detailAttachments[0], protected); err == nil {
-			t.Fatalf("expected attachment export to protected path %s to be rejected", protected)
-		}
-		if err := wb.ExportManualBackup(protected); err == nil {
-			t.Fatalf("expected backup export to protected path %s to be rejected", protected)
-		}
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "ATTACHMENTS")); err == nil {
-		otherSrc := filepath.Join(t.TempDir(), "replacement.txt")
-		otherPayload := []byte("different exported content")
-		if err := os.WriteFile(otherSrc, otherPayload, 0600); err != nil {
-			t.Fatal(err)
-		}
-		replacement, err := app.Attachments.Import(context.Background(), task.ID, otherSrc)
-		if err != nil {
-			t.Fatal(err)
-		}
-		original := wb.detailAttachments[0]
-		aliasErr := wb.ExportAttachment(replacement, filepath.Join(dir, "ATTACHMENTS", original.StorageName))
-		managedBytes, err := os.ReadFile(filepath.Join(dir, "attachments", original.StorageName))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if aliasErr == nil || bytes.Equal(managedBytes, otherPayload) {
-			t.Fatalf("case alias overwrote managed attachment: error=%v, content=%q", aliasErr, managedBytes)
-		}
-	}
-}
-
 // Regression: rendering Settings or task attachment previews previously acquired the Store lock and froze the UI during backups.
 func TestRenderDoesNotWaitForStoreLock(t *testing.T) {
 	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
@@ -1113,7 +1039,14 @@ func TestRenderDoesNotWaitForStoreLock(t *testing.T) {
 
 // Regression: restoring a backup previously flushed pre-restore drafts or allowed queued UI writes to overwrite restored rows.
 func TestRestoreBlocksPreRestoreDraftAndBusyEdits(t *testing.T) {
-	app, wb, _ := openTestWorkbench(t, t.TempDir(), Host{})
+	blocked := filepath.Join(t.TempDir(), "blocked.zip")
+	picks := make(chan struct{}, 1)
+	app, wb, _ := openTestWorkbench(t, t.TempDir(), Host{
+		PickSaveFile: func(_, _ string, _ ...string) (string, error) {
+			picks <- struct{}{}
+			return blocked, nil
+		},
+	})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "async restore"
 	wb.SubmitProjectModal()
@@ -1127,11 +1060,11 @@ func TestRestoreBlocksPreRestoreDraftAndBusyEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	zip := filepath.Join(t.TempDir(), "snapshot.zip")
-	if err := wb.ExportManualBackup(zip); err != nil {
+	if err := app.Backups.Export(context.Background(), zip); err != nil {
 		t.Fatal(err)
 	}
 	wb.editDescription = "unsaved or post-backup description from the old database"
-	dispatched := make(chan func(), 1)
+	dispatched := make(chan func(), 8)
 	wb.host.Dispatch = func(fn func()) { dispatched <- fn }
 	wb.RequestRestoreBackup(zip)
 	wb.TriggerRestoreBackup()
@@ -1142,11 +1075,14 @@ func TestRestoreBlocksPreRestoreDraftAndBusyEdits(t *testing.T) {
 	wb.editTitle = "user edits while restore is busy"
 	saveErr := wb.SaveSelectedTask()
 	wb.RunDueBackupNow()
-	exportErr := wb.ExportManualBackup(filepath.Join(t.TempDir(), "blocked.zip"))
+	wb.PickAndExportManualBackup()
 	wb.NavigateTo(NavAllProjects)
-	(<-dispatched)()
-	if exportErr == nil {
-		t.Fatal("expected ExportManualBackup to be blocked while restore is awaiting UI completion")
+	drainTestUI(wb, dispatched)
+	if len(picks) != 0 {
+		t.Fatal("backup export opened a picker while restore was awaiting UI completion")
+	}
+	if _, err := os.Stat(blocked); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blocked export created a destination: %v", err)
 	}
 	if wb.selectedTaskID != "" || wb.dirty || wb.editDescription != "" {
 		t.Fatalf("expected restore completion to clear pre-restore draft state, got selected=%q dirty=%v desc=%q", wb.selectedTaskID, wb.dirty, wb.editDescription)
@@ -1296,8 +1232,9 @@ func TestRestoreOrphanTaskWithParentSurfacesTaskError(t *testing.T) {
 	if wb.trashParentErrModalOpen || wb.trashOrphanTask != nil {
 		t.Fatalf("expected orphan modal to close after parent project restored")
 	}
-	if _, err := app.Projects.GetProject(context.Background(), projID); err != nil {
-		t.Fatalf("expected parent project to be restored, got err=%v", err)
+	listed, err := app.Projects.ListProjects(context.Background(), projects.ProjectFilter{})
+	if err != nil || !slices.ContainsFunc(listed, func(p model.Project) bool { return p.ID == projID }) {
+		t.Fatalf("expected parent project to be restored, got projects=%+v err=%v", listed, err)
 	}
 	if !tt.HasText("恢复任务失败（所属项目已恢复）") {
 		t.Fatalf("expected error toast when restoring task failed")
@@ -1393,7 +1330,7 @@ func TestApplyRestoredStateResetsPreRestoreWorkbenchState(t *testing.T) {
 	wb.ArchiveProject(archivedProjID)
 
 	zipPath := filepath.Join(t.TempDir(), "archived-only.zip")
-	if err := wb.ExportManualBackup(zipPath); err != nil {
+	if err := app.Backups.Export(context.Background(), zipPath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1444,8 +1381,9 @@ func TestApplyRestoredStateResetsPreRestoreWorkbenchState(t *testing.T) {
 	if !wb.lastSavedAt.IsZero() || wb.LastAsyncError() != "" {
 		t.Fatalf("expected lastSavedAt and lastAsyncErr cleared after restore, got savedAt=%v err=%q", wb.lastSavedAt, wb.LastAsyncError())
 	}
-	if _, err := app.Projects.GetProject(context.Background(), tempProjID); !errors.Is(err, model.ErrNotFound) {
-		t.Fatalf("expected pre-restore project to be absent in restored DB, got err=%v", err)
+	listed, err := app.Projects.ListProjects(context.Background(), projects.ProjectFilter{})
+	if err != nil || slices.ContainsFunc(listed, func(p model.Project) bool { return p.ID == tempProjID }) {
+		t.Fatalf("expected pre-restore project to be absent in restored DB, got projects=%+v err=%v", listed, err)
 	}
 }
 
@@ -1561,14 +1499,15 @@ func TestApplyThemeSettingErrorRevertsSegmentedControl(t *testing.T) {
 	}
 }
 
-// Real async attachment import, picker errors, and manual backup export run via Host.Dispatch while rejecting concurrent busy triggers.
-func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
+// Attachment import, picker errors, and attachment and backup exports dispatch their results and reject concurrent triggers.
+func TestAsyncAttachmentAndBackupDispatchFlow(t *testing.T) {
 	srcDir := t.TempDir()
 	docPath := filepath.Join(srcDir, "spec.txt")
 	if err := os.WriteFile(docPath, []byte("async spec content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	exportZip := filepath.Join(t.TempDir(), "async-export.zip")
+	exportDoc := filepath.Join(t.TempDir(), "async-export.txt")
 
 	dispatched := make(chan func(), 16)
 	pickerGate := make(chan struct{})
@@ -1586,7 +1525,10 @@ func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
 			}
 			return []string{docPath}, nil
 		},
-		PickSaveFile: func(_ string, _ string, _ ...string) (string, error) {
+		PickSaveFile: func(_ string, suggestedName string, _ ...string) (string, error) {
+			if suggestedName == "spec.txt" {
+				return exportDoc, nil
+			}
 			return exportZip, nil
 		},
 	}
@@ -1635,6 +1577,15 @@ func TestAsyncAttachmentImportAndBackupExportDispatchFlow(t *testing.T) {
 	}
 	if len(wb.detailAttachments) != 1 || wb.detailAttachments[0].Name != "spec.txt" {
 		t.Fatalf("expected 1 imported attachment after dispatch, got %+v", wb.detailAttachments)
+	}
+
+	tt.Frame()
+	if err := tt.Click("导出附件 spec.txt"); err != nil {
+		t.Fatal(err)
+	}
+	drainTestUI(wb, dispatched)
+	if got, err := os.ReadFile(exportDoc); err != nil || string(got) != "async spec content" {
+		t.Fatalf("attachment export = %q, %v", got, err)
 	}
 
 	// Picker error must surface a toast instead of silently returning nil.
