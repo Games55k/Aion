@@ -452,6 +452,53 @@ func TestAsyncDiscardThenSubtaskTickExcludesFailedRename(t *testing.T) {
 	}
 }
 
+// Regression: a failed subtask creation silently dropped a rename submitted after discard.
+func TestAsyncDiscardThenRenamePendingSubtask(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_pending_subtask BEFORE UPDATE ON tasks
+			WHEN NEW.subtasks LIKE '%Tentative subtask%'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	if err := tt.Click("新子任务输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("Tentative subtask")
+	tt.Key(0, ui.KeyEnter)
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("编辑子任务 Tentative subtask"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("编辑子任务输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("Renamed subtask")
+	tt.Key(0, ui.KeyEnter)
+	unlock()
+	drainTestUI(w, queue)
+
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Subtasks) != 1 || saved.Subtasks[0].Title != "Renamed subtask" ||
+		!slices.Equal(w.editSubtasks, saved.Subtasks) || w.dirty {
+		t.Fatalf("rename lost: stored=%+v editor=%+v state=%q", saved.Subtasks, w.editSubtasks, w.saveState)
+	}
+}
+
 // Reordering subtasks after the discard must survive an unrelated failed write: the
 // committed order must not silently win through the rebase.
 func TestAsyncDiscardThenSubtaskReorderSurvivesFailedWrite(t *testing.T) {
@@ -1220,6 +1267,59 @@ func TestJobAsyncDiscardThenEditExcludesFailedSaveFromFollowUpWrite(t *testing.T
 	if w.editJobCompany != "初始公司A" || w.editJobNotes != "落地前补充的备注" || w.jobDirty || w.jobSaving || w.jobSaveState != "saved" {
 		t.Fatalf("draft diverged after rebase: company=%q notes=%q dirty=%v saving=%v state=%q",
 			w.editJobCompany, w.editJobNotes, w.jobDirty, w.jobSaving, w.jobSaveState)
+	}
+}
+
+// Regression: rebasing a queued job save after discard erased a line break from the active notes editor.
+func TestJobAsyncDiscardKeepsNotesNewlineInValidDraft(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstField, firstValue, note, want string
+	}{
+		{"new notes", "详情公司名称", "Tentative company", "第一行", "第一行"},
+		{"unchanged notes", "详情公司名称", "Tentative company", "初始备注", "初始备注"},
+		{"rolled-back notes", "详情通用备注", "Tentative notes", "Tentative notes", "初始备注"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, w, tt, queue, job, _ := asyncJobTestWorkbench(t)
+			if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+				_, err := db.Exec(`CREATE TRIGGER jobs_reject_tentative_details BEFORE UPDATE ON job_applications
+					WHEN NEW.company_name = 'Tentative company' OR NEW.notes = 'Tentative notes'
+					BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			unlock := holdTestStore(t, s)
+			typeJobDetailField(t, tt, tc.firstField, tc.firstValue)
+			if err := tt.Click("详情公司名称"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Key(ui.Cmd, ui.KeyA)
+			tt.Key(0, ui.KeyBackspace)
+			if err := tt.Click("放弃修改"); err != nil {
+				t.Fatal(err)
+			}
+			typeJobDetailField(t, tt, "详情通用备注", tc.note)
+			tt.Key(0, ui.KeyEnter)
+			unlock()
+			drainTestUI(w, queue)
+
+			tt.Frame()
+			if want := tc.want + "\n"; w.editJobNotes != want {
+				t.Fatalf("line break lost: editor=%q want=%q", w.editJobNotes, want)
+			}
+			// A rollback can move the cursor when it replaces the preceding text.
+			tt.Key(ui.Cmd, ui.KeyDown)
+			tt.Type("下一行")
+			drainTestUI(w, queue)
+			saved, err := w.app.JobApplications.Get(context.Background(), job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved.Notes != tc.want+"\n下一行" || saved.CompanyName != job.CompanyName {
+				t.Fatalf("unexpected saved notes or company: %+v", saved)
+			}
+		})
 	}
 }
 

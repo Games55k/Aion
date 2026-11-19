@@ -93,24 +93,19 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 			}
 			return
 		}
+		if err != nil && rebase {
+			w.rebaseTaskDraftOnCommitted(request.input)
+		}
 		if next := w.pendingSave; next != nil {
 			w.pendingSave = nil
 			if err != nil && rebase {
-				// The discard baseline never committed; rebase the queued draft on the
-				// committed task, keeping only fields edited after the discard.
-				next.input = rebaseTaskInputOnCommitted(next.input, request.input, taskInputFromTask(*w.detailTask))
-				w.resetDetailEditFields(overlayTaskInput(*w.detailTask, next.input))
-				w.saveState, w.saveErr = "saving", ""
+				next.input = w.taskInputFromDraft()
 			}
 			_ = w.startTaskSave(*next)
 			return
 		}
 		if request.revision != w.saveRevision {
-			// A newer invalid draft must not be marked saved by an older completion,
-			// but a failed discard baseline must not linger in it either.
-			if err != nil && rebase {
-				w.rebaseInvalidDraftOnCommitted(request.input)
-			}
+			// A newer invalid draft must not be marked saved by an older completion.
 			w.afterSave = nil
 			return
 		}

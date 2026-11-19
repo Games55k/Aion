@@ -1348,49 +1348,11 @@ func (w *Workbench) inFlightSaveBaseline() (model.Task, bool) {
 	return overlayTaskInput(*w.detailTask, w.inFlightSave.input), true
 }
 
-// taskInputFromTask snapshots a committed task's content as a save input.
-func taskInputFromTask(t model.Task) projects.TaskInput {
-	return projects.TaskInput{
-		Title:       t.Title,
-		Description: t.Description,
-		Status:      t.Status,
-		Priority:    t.Priority,
-		Tags:        slices.Clone(t.Tags),
-		Subtasks:    slices.Clone(t.Subtasks),
-		DueDate:     t.DueDate,
-	}
-}
-
 // overlayTaskInput projects a save input onto a task's content fields.
 func overlayTaskInput(t model.Task, in projects.TaskInput) model.Task {
 	t.Title, t.Description, t.Status, t.Priority = in.Title, in.Description, in.Status, in.Priority
 	t.Tags, t.Subtasks, t.DueDate = in.Tags, in.Subtasks, in.DueDate
 	return t
-}
-
-// rebaseTaskInputOnCommitted replaces fields the queued draft still shares with the
-// failed discard baseline (snap) with the committed task's values, so a write that
-// rolled back cannot reach the database through the follow-up save. Fields edited
-// after the discard differ from snap and survive.
-func rebaseTaskInputOnCommitted(in, snap, committed projects.TaskInput) projects.TaskInput {
-	if in.Title == snap.Title {
-		in.Title = committed.Title
-	}
-	if in.Description == snap.Description {
-		in.Description = committed.Description
-	}
-	if in.Status == snap.Status {
-		in.Status = committed.Status
-	}
-	if in.Priority == snap.Priority {
-		in.Priority = committed.Priority
-	}
-	if in.DueDate == snap.DueDate {
-		in.DueDate = committed.DueDate
-	}
-	in.Tags = rebaseTagsOnCommitted(in.Tags, snap.Tags, committed.Tags)
-	in.Subtasks = rebaseSubtasksOnCommitted(in.Subtasks, snap.Subtasks, committed.Subtasks)
-	return in
 }
 
 // rebaseTagsOnCommitted merges post-discard tag additions and removals into the
@@ -1415,8 +1377,8 @@ func rebaseTagsOnCommitted(in, snap, committed []string) []string {
 
 // rebaseSubtasksOnCommitted merges post-discard subtask edits into the committed list.
 // Titles and done flags fall back to the committed values field by field unless the
-// user changed them after the discard. Additions stay, subtasks the failed write
-// deleted come back, and post-discard order edits take precedence over old positions.
+// user changed them after the discard. Additions and edits to unsaved additions stay,
+// failed deletions roll back, and post-discard order edits take precedence.
 func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subtask {
 	snapByID := make(map[string]model.Subtask, len(snap))
 	for _, st := range snap {
@@ -1430,16 +1392,13 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	var draftOrder []string
 	for _, st := range in {
 		s, wasInSnap := snapByID[st.ID]
-		if wasInSnap {
-			if _, inCommitted := committedByID[st.ID]; !inCommitted {
-				// Added by the failed write; it never committed, so it is dropped. A
-				// post-discard re-add gets a fresh ID and survives as an addition.
-				continue
-			}
+		c, inCommitted := committedByID[st.ID]
+		if wasInSnap && !inCommitted && st == s {
+			// The failed write added this row and the user left it untouched.
+			continue
 		}
 		merged := st
-		if wasInSnap {
-			c := committedByID[st.ID]
+		if wasInSnap && inCommitted {
 			if st.Title == s.Title {
 				merged.Title = c.Title
 			}
@@ -1461,7 +1420,9 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	}
 	var snapIDs, committedIDs []string
 	for _, st := range snap {
-		if _, ok := mergedByID[st.ID]; ok {
+		// An edited row from a failed addition keeps its position as a new row.
+		_, inCommitted := committedByID[st.ID]
+		if _, ok := mergedByID[st.ID]; ok && inCommitted {
 			snapIDs = append(snapIDs, st.ID)
 		}
 	}
@@ -1654,17 +1615,15 @@ func (w *Workbench) SaveSelectedTask() error {
 	return w.startTaskSave(request)
 }
 
-// rebaseInvalidDraftOnCommitted resets only the fields the current draft still shares
-// with the failed discard baseline (snap) to the committed values, field by field.
-// The draft stays invalid: the user's newer input — including raw spacing a save input
-// would trim — and the validation error survive until a valid save can be built.
-func (w *Workbench) rebaseInvalidDraftOnCommitted(snap projects.TaskInput) {
+// rebaseTaskDraftOnCommitted rolls back fields inherited from the failed write
+// while preserving newer input and any validation error.
+func (w *Workbench) rebaseTaskDraftOnCommitted(snap projects.TaskInput) {
 	if w.detailTask == nil {
 		return
 	}
 	committed := *w.detailTask
 	draft := w.taskInputFromDraft()
-	if draft.Title == snap.Title {
+	if draft.Title == snap.Title && draft.Title != committed.Title {
 		w.editTitle = committed.Title
 	}
 	if draft.Description == snap.Description {

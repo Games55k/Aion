@@ -103,46 +103,45 @@ func (w *Workbench) resetJobEditFields(app model.JobApplication) {
 	w.jobSaveErr = ""
 }
 
-// rebaseInvalidJobDraftOnCommitted resets only the fields the current draft still
-// shares with the failed discard baseline (snap) to the committed values, field by
-// field. The draft stays invalid: the user's newer input — including raw whitespace a
-// save input would trim — and the validation error survive until a valid save can be
-// built.
-func (w *Workbench) rebaseInvalidJobDraftOnCommitted(snap jobapplications.UpdateDetailsInput) {
+// rebaseJobDraftOnCommitted rolls back fields inherited from the failed write
+// while preserving newer input and any validation error.
+func (w *Workbench) rebaseJobDraftOnCommitted(snap jobapplications.UpdateDetailsInput) {
 	if w.detailJob == nil {
 		return
 	}
 	committed := *w.detailJob
 	draft := w.jobInputFromDraft()
-	if draft.CompanyName == snap.CompanyName {
+	if draft.CompanyName == snap.CompanyName && draft.CompanyName != committed.CompanyName {
 		w.editJobCompany = committed.CompanyName
 	}
-	if draft.PositionName == snap.PositionName {
+	if draft.PositionName == snap.PositionName && draft.PositionName != committed.PositionName {
 		w.editJobPosition = committed.PositionName
 	}
-	if draft.AppliedDate == snap.AppliedDate {
+	if draft.AppliedDate == snap.AppliedDate && draft.AppliedDate != committed.AppliedDate {
 		w.editJobAppliedDate = parseCalendarDateValue(committed.AppliedDate)
 	}
-	if draft.ApplicationURL == snap.ApplicationURL {
+	if draft.ApplicationURL == snap.ApplicationURL && draft.ApplicationURL != committed.ApplicationURL {
 		w.editJobURL = committed.ApplicationURL
 	}
-	if draft.Channel == snap.Channel {
+	if draft.Channel == snap.Channel && draft.Channel != committed.Channel {
 		w.editJobChannel = committed.Channel
 	}
-	if draft.Notes == snap.Notes {
-		w.editJobNotes = committed.Notes
+	if draft.Notes == snap.Notes && draft.Notes != committed.Notes {
+		// The request trimmed trailing line breaks typed after the discard.
+		w.editJobNotes = committed.Notes + w.editJobNotes[len(draft.Notes):]
 	}
 	// A reason without a pending edit is untouched, and a reason equal to the failed
 	// baseline counts as untouched by the same rule as every other field; both fall
 	// back together with the dirty marker.
 	if !w.editJobReasonDirty || jobClosureReasonEqual(draft.ClosureReason, snap.ClosureReason) {
-		w.editJobClosureReason = committed.ClosureReason
+		if strings.TrimSpace(w.editJobClosureReason) != committed.ClosureReason {
+			w.editJobClosureReason = committed.ClosureReason
+		}
 		w.editJobReasonDirty = false
 	}
 }
 
-// jobInputFromDraft snapshots the current draft inputs as a save input without
-// validating them, for rebasing drafts that do not pass validation yet.
+// jobInputFromDraft snapshots normalized draft inputs without validating them.
 func (w *Workbench) jobInputFromDraft() jobapplications.UpdateDetailsInput {
 	in := jobapplications.UpdateDetailsInput{
 		ID:             w.selectedJobID,
@@ -170,21 +169,6 @@ func (w *Workbench) inFlightJobBaseline() (model.JobApplication, bool) {
 	return overlayJobInput(*w.detailJob, w.inFlightJobSave.input), true
 }
 
-// jobInputFromJob snapshots a committed application's details as a save input.
-// ClosureReason stays nil: an untouched reason must not be rewritten.
-func jobInputFromJob(app model.JobApplication) jobapplications.UpdateDetailsInput {
-	return jobapplications.UpdateDetailsInput{
-		ID:               app.ID,
-		CompanyName:      app.CompanyName,
-		PositionName:     app.PositionName,
-		AppliedDate:      app.AppliedDate,
-		ApplicationURL:   app.ApplicationURL,
-		Channel:          app.Channel,
-		Notes:            app.Notes,
-		NextFollowUpDate: nil,
-	}
-}
-
 // overlayJobInput projects a save input onto an application's detail fields.
 func overlayJobInput(app model.JobApplication, in jobapplications.UpdateDetailsInput) model.JobApplication {
 	app.CompanyName, app.PositionName, app.AppliedDate = in.CompanyName, in.PositionName, in.AppliedDate
@@ -201,35 +185,6 @@ func jobClosureReasonEqual(a, b *string) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-// rebaseJobInputOnCommitted replaces fields the queued draft still shares with the
-// failed discard baseline (snap) with the committed application's values, so a write
-// that rolled back cannot reach the database through the follow-up save. Fields
-// edited after the discard differ from snap and survive.
-func rebaseJobInputOnCommitted(in, snap, committed jobapplications.UpdateDetailsInput) jobapplications.UpdateDetailsInput {
-	if in.CompanyName == snap.CompanyName {
-		in.CompanyName = committed.CompanyName
-	}
-	if in.PositionName == snap.PositionName {
-		in.PositionName = committed.PositionName
-	}
-	if in.AppliedDate == snap.AppliedDate {
-		in.AppliedDate = committed.AppliedDate
-	}
-	if in.ApplicationURL == snap.ApplicationURL {
-		in.ApplicationURL = committed.ApplicationURL
-	}
-	if in.Channel == snap.Channel {
-		in.Channel = committed.Channel
-	}
-	if in.Notes == snap.Notes {
-		in.Notes = committed.Notes
-	}
-	if jobClosureReasonEqual(in.ClosureReason, snap.ClosureReason) {
-		in.ClosureReason = committed.ClosureReason
-	}
-	return in
 }
 
 func (w *Workbench) markJobDirty() {
@@ -273,37 +228,21 @@ func (w *Workbench) buildJobSaveRequest() (jobSave, error) {
 	if w.IsRestoring() || w.detailJobEpoch != w.currentDataEpoch() {
 		return jobSave{}, fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
 	}
-	company := strings.TrimSpace(w.editJobCompany)
-	if company == "" {
+	in := w.jobInputFromDraft()
+	if in.CompanyName == "" {
 		return jobSave{}, fmt.Errorf("%w: 公司名称不能为空", model.ErrInvalid)
 	}
-	position := strings.TrimSpace(w.editJobPosition)
-	if position == "" {
+	if in.PositionName == "" {
 		return jobSave{}, fmt.Errorf("%w: 岗位名称不能为空", model.ErrInvalid)
 	}
-	appliedDate := formatCalendarDate(w.editJobAppliedDate)
-	if appliedDate == "" {
+	if in.AppliedDate == "" {
 		return jobSave{}, fmt.Errorf("%w: 投递日期不能为空", model.ErrInvalid)
 	}
-	if _, err := model.ParseCalendarDate(appliedDate); err != nil {
+	if _, err := model.ParseCalendarDate(in.AppliedDate); err != nil {
 		return jobSave{}, err
 	}
-	appURL, err := model.ValidateJobURL(w.editJobURL)
-	if err != nil {
+	if _, err := model.ValidateJobURL(in.ApplicationURL); err != nil {
 		return jobSave{}, err
-	}
-	in := jobapplications.UpdateDetailsInput{
-		ID:             w.selectedJobID,
-		CompanyName:    company,
-		PositionName:   position,
-		AppliedDate:    appliedDate,
-		ApplicationURL: appURL,
-		Channel:        strings.TrimSpace(w.editJobChannel),
-		Notes:          strings.TrimRight(w.editJobNotes, "\r\n"),
-	}
-	if w.editJobReasonDirty && w.detailJob.Lifecycle == model.JobLifecycleClosed {
-		r := strings.TrimSpace(w.editJobClosureReason)
-		in.ClosureReason = &r
 	}
 	return jobSave{
 		jobID:    w.selectedJobID,
@@ -401,29 +340,19 @@ func (w *Workbench) startJobSave(request jobSave) error {
 			}
 			return
 		}
+		if err != nil && rebase {
+			w.rebaseJobDraftOnCommitted(request.input)
+		}
 		if next := w.pendingJobSave; next != nil {
 			w.pendingJobSave = nil
 			if err != nil && rebase {
-				// The discard baseline never committed; rebase the queued draft on the
-				// committed application, keeping only fields edited after the discard.
-				next.input = rebaseJobInputOnCommitted(next.input, request.input, jobInputFromJob(*w.detailJob))
-				w.resetJobEditFields(overlayJobInput(*w.detailJob, next.input))
-				if next.input.ClosureReason != nil {
-					// The queued request still carries the pending closure reason; keep
-					// its dirty marker until a write containing it is acknowledged.
-					w.editJobReasonDirty = true
-				}
-				w.jobSaveState, w.jobSaveErr = "saving", ""
+				next.input = w.jobInputFromDraft()
 			}
 			_ = w.startJobSave(*next)
 			return
 		}
 		if request.revision != w.jobSaveRevision {
-			// A newer invalid draft must not be marked saved by an older completion,
-			// but a failed discard baseline must not linger in it either.
-			if err != nil && rebase {
-				w.rebaseInvalidJobDraftOnCommitted(request.input)
-			}
+			// A newer invalid draft must not be marked saved by an older completion.
 			w.afterSave = nil
 			return
 		}
