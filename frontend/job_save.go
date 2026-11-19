@@ -63,6 +63,7 @@ func (w *Workbench) resetSelectedJobState() {
 	w.pendingJobSave = nil
 	w.inFlightJobSave = nil
 	w.discardJobAfterSave = false
+	w.discardJobRebase = false
 	w.jobNoteInput = ""
 	w.jobNoteDate = time.Time{}
 	w.jobNoteErr = ""
@@ -109,14 +110,69 @@ func (w *Workbench) inFlightJobBaseline() (model.JobApplication, bool) {
 	if w.detailJob == nil || w.inFlightJobSave == nil || w.inFlightJobSave.jobID != w.selectedJobID {
 		return model.JobApplication{}, false
 	}
-	app := *w.detailJob
-	in := w.inFlightJobSave.input
+	return overlayJobInput(*w.detailJob, w.inFlightJobSave.input), true
+}
+
+// jobInputFromJob snapshots a committed application's details as a save input.
+// ClosureReason stays nil: an untouched reason must not be rewritten.
+func jobInputFromJob(app model.JobApplication) jobapplications.UpdateDetailsInput {
+	return jobapplications.UpdateDetailsInput{
+		ID:               app.ID,
+		CompanyName:      app.CompanyName,
+		PositionName:     app.PositionName,
+		AppliedDate:      app.AppliedDate,
+		ApplicationURL:   app.ApplicationURL,
+		Channel:          app.Channel,
+		Notes:            app.Notes,
+		NextFollowUpDate: nil,
+	}
+}
+
+// overlayJobInput projects a save input onto an application's detail fields.
+func overlayJobInput(app model.JobApplication, in jobapplications.UpdateDetailsInput) model.JobApplication {
 	app.CompanyName, app.PositionName, app.AppliedDate = in.CompanyName, in.PositionName, in.AppliedDate
 	app.ApplicationURL, app.Channel, app.Notes = in.ApplicationURL, in.Channel, in.Notes
 	if in.ClosureReason != nil && app.Lifecycle == model.JobLifecycleClosed {
 		app.ClosureReason = *in.ClosureReason
 	}
-	return app, true
+	return app
+}
+
+// jobClosureReasonEqual compares optional closure reasons.
+func jobClosureReasonEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// rebaseJobInputOnCommitted replaces fields the queued draft still shares with the
+// failed discard baseline (snap) with the committed application's values, so a write
+// that rolled back cannot reach the database through the follow-up save. Fields
+// edited after the discard differ from snap and survive.
+func rebaseJobInputOnCommitted(in, snap, committed jobapplications.UpdateDetailsInput) jobapplications.UpdateDetailsInput {
+	if in.CompanyName == snap.CompanyName {
+		in.CompanyName = committed.CompanyName
+	}
+	if in.PositionName == snap.PositionName {
+		in.PositionName = committed.PositionName
+	}
+	if in.AppliedDate == snap.AppliedDate {
+		in.AppliedDate = committed.AppliedDate
+	}
+	if in.ApplicationURL == snap.ApplicationURL {
+		in.ApplicationURL = committed.ApplicationURL
+	}
+	if in.Channel == snap.Channel {
+		in.Channel = committed.Channel
+	}
+	if in.Notes == snap.Notes {
+		in.Notes = committed.Notes
+	}
+	if jobClosureReasonEqual(in.ClosureReason, snap.ClosureReason) {
+		in.ClosureReason = committed.ClosureReason
+	}
+	return in
 }
 
 func (w *Workbench) markJobDirty() {
@@ -247,7 +303,11 @@ func (w *Workbench) DiscardJobChanges() {
 		} else {
 			w.resetJobEditFields(*w.detailJob)
 		}
+		// The previewed baseline is still being written; it must not read as saved
+		// before the acknowledgement lands (and it may still roll back on failure).
+		w.jobSaveState = "saving"
 		w.discardJobAfterSave = true
+		w.discardJobRebase = true
 		return
 	}
 	w.syncDetailFromJob(*w.detailJob)
@@ -263,6 +323,8 @@ func (w *Workbench) startJobSave(request jobSave) error {
 	apply := func(updated model.JobApplication, err error) {
 		w.jobSaving = false
 		w.inFlightJobSave = nil
+		rebase := w.discardJobRebase
+		w.discardJobRebase = false
 		if request.epoch != w.currentDataEpoch() || request.jobID != w.selectedJobID {
 			return
 		}
@@ -284,6 +346,13 @@ func (w *Workbench) startJobSave(request jobSave) error {
 		}
 		if next := w.pendingJobSave; next != nil {
 			w.pendingJobSave = nil
+			if err != nil && rebase {
+				// The discard baseline never committed; rebase the queued draft on the
+				// committed application, keeping only fields edited after the discard.
+				next.input = rebaseJobInputOnCommitted(next.input, request.input, jobInputFromJob(*w.detailJob))
+				w.resetJobEditFields(overlayJobInput(*w.detailJob, next.input))
+				w.jobSaveState, w.jobSaveErr = "saving", ""
+			}
 			_ = w.startJobSave(*next)
 			return
 		}

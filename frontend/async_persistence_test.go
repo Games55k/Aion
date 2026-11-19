@@ -276,6 +276,47 @@ func TestAsyncDiscardThenEditKeepsInFlightSaveAsBaseline(t *testing.T) {
 	}
 }
 
+// A failed in-flight write must not leak its content through the queued post-discard save: untouched
+// fields revert to the committed values while edits made after the discard still persist.
+func TestAsyncDiscardThenEditExcludesFailedSaveFromFollowUpWrite(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_title BEFORE UPDATE ON tasks
+			WHEN NEW.title = '注定失败的新标题'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	typeTaskTitle(t, tt, "注定失败的新标题")
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if w.saveState != "saving" {
+		t.Fatalf("discard during save must keep the saving state: %q", w.saveState)
+	}
+	if err := tt.Click("任务详情描述输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("落地前补充的描述")
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || saved.Title != "Original" || saved.Description != "落地前补充的描述" {
+		t.Fatalf("follow-up save leaked the failed write or lost new input: %+v %v", saved, err)
+	}
+	if w.editTitle != "Original" || w.editDescription != "落地前补充的描述" || w.dirty || w.saving || w.saveState != "saved" {
+		t.Fatalf("draft diverged after rebase: title=%q desc=%q dirty=%v saving=%v state=%q",
+			w.editTitle, w.editDescription, w.dirty, w.saving, w.saveState)
+	}
+}
+
 // Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
 func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
@@ -490,6 +531,43 @@ func TestJobAsyncSaveErrorRetryAndDiscardDuringFlight(t *testing.T) {
 	}
 	if w2.jobDirty || w2.editJobCompany != "在途写入" {
 		t.Fatalf("expected local detail reverted to persisted baseline, dirty=%v company=%q", w2.jobDirty, w2.editJobCompany)
+	}
+}
+
+// A failed in-flight job write must not leak its content through the queued post-discard save.
+func TestJobAsyncDiscardThenEditExcludesFailedSaveFromFollowUpWrite(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER jobs_reject_failed_company BEFORE UPDATE ON job_applications
+			WHEN NEW.company_name = '注定失败的新公司'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	typeJobDetailField(t, tt, "详情公司名称", "注定失败的新公司")
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if w.jobSaveState != "saving" {
+		t.Fatalf("discard during save must keep the saving state: %q", w.jobSaveState)
+	}
+	typeJobDetailField(t, tt, "详情通用备注", "落地前补充的备注")
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.CompanyName != "初始公司A" || saved.Notes != "落地前补充的备注" {
+		t.Fatalf("follow-up save leaked the failed write or lost new input: %+v %v", saved, err)
+	}
+	if w.editJobCompany != "初始公司A" || w.editJobNotes != "落地前补充的备注" || w.jobDirty || w.jobSaving || w.jobSaveState != "saved" {
+		t.Fatalf("draft diverged after rebase: company=%q notes=%q dirty=%v saving=%v state=%q",
+			w.editJobCompany, w.editJobNotes, w.jobDirty, w.jobSaving, w.jobSaveState)
 	}
 }
 

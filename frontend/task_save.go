@@ -55,6 +55,8 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 	apply := func(updated model.Task, err error) {
 		w.saving = false
 		w.inFlightSave = nil
+		rebase := w.discardRebase
+		w.discardRebase = false
 		if request.epoch != w.currentDataEpoch() || request.taskID != w.selectedTaskID {
 			return
 		}
@@ -93,6 +95,13 @@ func (w *Workbench) startTaskSave(request taskSave) error {
 		}
 		if next := w.pendingSave; next != nil {
 			w.pendingSave = nil
+			if err != nil && rebase {
+				// The discard baseline never committed; rebase the queued draft on the
+				// committed task, keeping only fields edited after the discard.
+				next.input = rebaseTaskInputOnCommitted(next.input, request.input, taskInputFromTask(*w.detailTask))
+				w.resetDetailEditFields(overlayTaskInput(*w.detailTask, next.input))
+				w.saveState, w.saveErr = "saving", ""
+			}
 			_ = w.startTaskSave(*next)
 			return
 		}

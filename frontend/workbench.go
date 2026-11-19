@@ -177,7 +177,10 @@ type Workbench struct {
 	inFlightJobSave      *jobSave
 	pendingJobSave       *jobSave
 	discardJobAfterSave  bool
-	jobWrites            []func()
+	// discardJobRebase marks that the in-flight write is a discard baseline: if it
+	// fails, the queued follow-up save must rebase on the committed application.
+	discardJobRebase bool
+	jobWrites        []func()
 
 	// Job Timeline input & retry state
 	jobNoteInput           string
@@ -254,6 +257,9 @@ type Workbench struct {
 	pendingSave      *taskSave
 	afterSave        func()
 	discardAfterSave bool
+	// discardRebase marks that the in-flight write is a discard baseline: if it fails,
+	// the queued follow-up save must rebase on the committed task instead.
+	discardRebase     bool
 	loadVersions      map[string]uint64
 	navigationVersion uint64
 	boardNeedsReload  bool
@@ -1214,6 +1220,7 @@ func (w *Workbench) resetSelectedTaskState() {
 	w.pendingSave = nil
 	w.inFlightSave = nil
 	w.discardAfterSave = false
+	w.discardRebase = false
 	w.lastSavedAt = time.Time{}
 	w.clearDetailTransientInputs()
 	w.attachmentPaths = make(map[string]string)
@@ -1241,7 +1248,11 @@ func (w *Workbench) DiscardSelectedTaskDraft() {
 		} else if w.detailTask != nil {
 			w.resetDetailEditFields(*w.detailTask)
 		}
+		// The previewed baseline is still being written; it must not read as saved
+		// before the acknowledgement lands (and it may still roll back on failure).
+		w.saveState = "saving"
 		w.discardAfterSave = true
+		w.discardRebase = true
 		return
 	}
 	if w.detailTask != nil {
@@ -1313,11 +1324,58 @@ func (w *Workbench) inFlightSaveBaseline() (model.Task, bool) {
 	if w.detailTask == nil || w.inFlightSave == nil || w.inFlightSave.taskID != w.selectedTaskID {
 		return model.Task{}, false
 	}
-	t := *w.detailTask
-	in := w.inFlightSave.input
+	return overlayTaskInput(*w.detailTask, w.inFlightSave.input), true
+}
+
+// taskInputFromTask snapshots a committed task's content as a save input.
+func taskInputFromTask(t model.Task) projects.TaskInput {
+	return projects.TaskInput{
+		Title:       t.Title,
+		Description: t.Description,
+		Status:      t.Status,
+		Priority:    t.Priority,
+		Tags:        slices.Clone(t.Tags),
+		Subtasks:    slices.Clone(t.Subtasks),
+		DueDate:     t.DueDate,
+	}
+}
+
+// overlayTaskInput projects a save input onto a task's content fields.
+func overlayTaskInput(t model.Task, in projects.TaskInput) model.Task {
 	t.Title, t.Description, t.Status, t.Priority = in.Title, in.Description, in.Status, in.Priority
 	t.Tags, t.Subtasks, t.DueDate = in.Tags, in.Subtasks, in.DueDate
-	return t, true
+	return t
+}
+
+// rebaseTaskInputOnCommitted replaces fields the queued draft still shares with the
+// failed discard baseline (snap) with the committed task's values, so a write that
+// rolled back cannot reach the database through the follow-up save. Fields edited
+// after the discard differ from snap and survive.
+func rebaseTaskInputOnCommitted(in, snap, committed projects.TaskInput) projects.TaskInput {
+	if in.Title == snap.Title {
+		in.Title = committed.Title
+	}
+	if in.Description == snap.Description {
+		in.Description = committed.Description
+	}
+	if in.Status == snap.Status {
+		in.Status = committed.Status
+	}
+	if in.Priority == snap.Priority {
+		in.Priority = committed.Priority
+	}
+	if in.DueDate == snap.DueDate {
+		in.DueDate = committed.DueDate
+	}
+	if slices.Equal(in.Tags, snap.Tags) {
+		in.Tags = committed.Tags
+	}
+	if slices.EqualFunc(in.Subtasks, snap.Subtasks, func(a, b model.Subtask) bool {
+		return a.ID == b.ID && a.Title == b.Title && a.Done == b.Done
+	}) {
+		in.Subtasks = committed.Subtasks
+	}
+	return in
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when
@@ -1820,6 +1878,7 @@ func (w *Workbench) SoftDeleteTask(taskID string) {
 		w.pendingSave = nil
 		w.inFlightSave = nil
 		w.discardAfterSave = false
+		w.discardRebase = false
 		w.afterSave = nil
 	} else {
 		if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再删除其他任务"); err != nil {
