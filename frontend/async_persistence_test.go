@@ -639,9 +639,9 @@ func TestAsyncDiscardThenAdditionKeepsCommittedSubtaskOrder(t *testing.T) {
 	if err != nil || len(saved.Subtasks) != 3 {
 		t.Fatalf("subtasks lost: %+v %v", saved, err)
 	}
-	// The failed Beta/Alpha order is rolled back and the addition stays behind the
-	// neighbor the user left it by (the discard preview ended in Alpha).
-	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Epsilon" || saved.Subtasks[2].Title != "Beta" {
+	// The failed Beta/Alpha order is rolled back; an addition appended at the end of
+	// the preview stays at the end of the rolled-back list.
+	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Beta" || saved.Subtasks[2].Title != "Epsilon" {
 		t.Fatalf("addition adopted the failed order: %+v", saved.Subtasks)
 	}
 }
@@ -812,9 +812,9 @@ func TestAsyncDiscardThenMovedAdditionKeepsPosition(t *testing.T) {
 	}
 }
 
-// Relative orders the user actually changed survive even when the LCS treats the
-// crossed items as untouched: moving Delta and Gamma above Beta must keep Delta before
-// both of them.
+// Only pairwise orders the user actually flipped survive: moving Delta and Gamma above
+// Beta flips their pairs with Beta, but Delta/Gamma keep the committed order because
+// the user never swapped that pair (the failed write's swap must not leak).
 func TestAsyncDiscardThenCrossedMoveKeepsChangedPairs(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
 	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
@@ -862,12 +862,14 @@ func TestAsyncDiscardThenCrossedMoveKeepsChangedPairs(t *testing.T) {
 	if err != nil || len(saved.Subtasks) != 4 {
 		t.Fatalf("subtasks lost: %+v %v", saved, err)
 	}
-	pos := map[string]int{}
-	for i, st := range saved.Subtasks {
-		pos[st.Title] = i
+	titles := make([]string, 0, 4)
+	for _, st := range saved.Subtasks {
+		titles = append(titles, st.Title)
 	}
-	if !(pos["Delta"] < pos["Beta"] && pos["Gamma"] < pos["Beta"] && pos["Delta"] < pos["Gamma"] && pos["Alpha"] < pos["Beta"]) {
-		t.Fatalf("crossed moves lost: %+v", saved.Subtasks)
+	// The pairs with Beta flipped (user moved Delta and Gamma above it); Delta/Gamma
+	// keep their committed order — the failed swap must not leak through them.
+	if strings.Join(titles, ",") != "Alpha,Gamma,Delta,Beta" {
+		t.Fatalf("crossed moves mishandled: %v", titles)
 	}
 }
 

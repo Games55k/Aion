@@ -1480,74 +1480,98 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 }
 
 // rebaseSubtaskOrder merges the order edits the user made after the discard into the
-// committed sequence. An item whose relative order to some other item actually flipped
-// between the failed baseline and the draft (or that was added after the discard) was
-// touched by the user and is reinserted next to the neighbor it was left by; every
-// other item keeps its committed position, so failed reorders and deletions cannot
-// leak and rollback-restored subtasks return in place.
+// committed sequence, pairwise: a pair whose relative order flipped between the failed
+// baseline and the draft was swapped by the user and keeps the draft order; every
+// other pair keeps the committed order, so failed reorders and deletions cannot leak
+// and rollback-restored subtasks return in place. Pairs involving an addition follow
+// the draft order, so an addition appended at the end stays at the end. The output is
+// a topological order of these constraints, breaking ties by committed position.
 func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
-	snapSet := make(map[string]bool, len(snapIDs))
-	for _, id := range snapIDs {
-		snapSet[id] = true
-	}
-	inSet := make(map[string]bool, len(inIDs))
-	for _, id := range inIDs {
-		inSet[id] = true
-	}
-	var common []string
-	for _, id := range inIDs {
-		if snapSet[id] {
-			common = append(common, id)
-		}
+	posIn := make(map[string]int, len(inIDs))
+	for i, id := range inIDs {
+		posIn[id] = i
 	}
 	posSnap := make(map[string]int, len(snapIDs))
 	for i, id := range snapIDs {
 		posSnap[id] = i
 	}
-	posIn := make(map[string]int, len(inIDs))
-	for i, id := range inIDs {
-		posIn[id] = i
+	posCommitted := make(map[string]int, len(committedIDs))
+	for i, id := range committedIDs {
+		posCommitted[id] = i
 	}
-	// An item is moved when any pairwise order it takes part in flipped after the
-	// discard; pairwise comparison catches crossings a longest common subsequence
-	// silently absorbs.
-	moved := make(map[string]bool, len(common))
-	for _, x := range common {
-		for _, y := range common {
-			if x == y {
+	items := make([]string, 0, len(inIDs)+len(committedIDs))
+	for _, id := range committedIDs {
+		items = append(items, id)
+	}
+	for _, id := range inIDs {
+		if _, ok := posCommitted[id]; !ok {
+			items = append(items, id)
+		}
+	}
+	inSnap := func(id string) bool { _, ok := posSnap[id]; return ok }
+	inCommitted := func(id string) bool { _, ok := posCommitted[id]; return ok }
+	// before reports whether x must sort before y.
+	before := func(x, y string) bool {
+		_, xin := posIn[x]
+		_, yin := posIn[y]
+		switch {
+		case xin && yin && inSnap(x) && inSnap(y):
+			// Both predate the discard: the user's word only on pairs they flipped.
+			if (posSnap[x] < posSnap[y]) != (posIn[x] < posIn[y]) {
+				return posIn[x] < posIn[y]
+			}
+			return posCommitted[x] < posCommitted[y]
+		case xin && yin:
+			// At least one side was added (or re-added) after the discard.
+			return posIn[x] < posIn[y]
+		case !inCommitted(x):
+			// x is an addition facing a rollback-restored subtask.
+			return false
+		case !inCommitted(y):
+			return true
+		default:
+			return posCommitted[x] < posCommitted[y]
+		}
+	}
+	remaining := make(map[string]bool, len(items))
+	for _, id := range items {
+		remaining[id] = true
+	}
+	out := make([]string, 0, len(items))
+	for len(remaining) > 0 {
+		// Pick the earliest candidate (committed order first, additions after) with no
+		// unordered predecessor; ties among impossible-to-order leftovers fall back to
+		// the committed order. An empty ID is a valid pick, so found distinguishes it
+		// from the zero value.
+		var pick string
+		found := false
+		for _, id := range items {
+			if !remaining[id] {
 				continue
 			}
-			if (posSnap[x] < posSnap[y]) != (posIn[x] < posIn[y]) {
-				moved[x] = true
+			blocked := false
+			for _, other := range items {
+				if other != id && remaining[other] && before(other, id) {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				pick = id
+				found = true
 				break
 			}
 		}
-	}
-	out := slices.Clone(committedIDs)
-	placed := make(map[string]bool, len(out))
-	for _, id := range out {
-		placed[id] = true
-	}
-	for _, id := range inIDs {
-		if placed[id] && !moved[id] {
-			continue
-		}
-		// Added or moved after the discard: (re)insert after the nearest placed
-		// predecessor the user left it by, or at the front when it belongs at the top.
-		at := posIn[id]
-		out = slices.DeleteFunc(out, func(x string) bool { return x == id })
-		anchor := -1
-		for j := at - 1; j >= 0 && anchor < 0; j-- {
-			if placed[inIDs[j]] {
-				anchor = slices.Index(out, inIDs[j])
+		if !found {
+			for _, id := range items {
+				if remaining[id] {
+					pick = id
+					break
+				}
 			}
 		}
-		if anchor >= 0 {
-			out = slices.Insert(out, anchor+1, id)
-		} else {
-			out = slices.Insert(out, 0, id)
-		}
-		placed[id] = true
+		out = append(out, pick)
+		delete(remaining, pick)
 	}
 	return out
 }

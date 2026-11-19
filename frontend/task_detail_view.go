@@ -205,6 +205,10 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 					ui.Column(c.Key("detail-sec-tags")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
 						ui.Text(c, "分类标签").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 						ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+							// Structural edits run after the pass: deleting rows
+							// mid-render re-renders a row in the same frame and can
+							// panic the renderer on a duplicate key.
+							removeTagAt := -1
 							for i, tag := range w.editTags {
 								idx := i
 								tagVal := tag
@@ -216,10 +220,13 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 										Label("移除标签 " + tagVal)
 									rmBtn.Children(func() { ui.Icon(c, iconX()).FontSize(11) })
 									if rmBtn.Clicked() {
-										w.editTags = slices.Delete(w.editTags, idx, idx+1)
-										_ = w.SaveSelectedTask()
+										removeTagAt = idx
 									}
 								})
+							}
+							if removeTagAt >= 0 && removeTagAt < len(w.editTags) {
+								w.editTags = slices.Delete(w.editTags, removeTagAt, removeTagAt+1)
+								_ = w.SaveSelectedTask()
 							}
 
 							// Add Tag Input + Button
