@@ -1415,10 +1415,8 @@ func rebaseTagsOnCommitted(in, snap, committed []string) []string {
 
 // rebaseSubtasksOnCommitted merges post-discard subtask edits into the committed list.
 // Titles and done flags fall back to the committed values field by field unless the
-// user changed them after the discard; additions stay; subtasks the failed write
-// deleted come back. Order: when the draft still follows the failed baseline's
-// sequence the committed order wins (a failed reorder or deletion must not leak), and
-// a sequence the user actually changed after the discard survives.
+// user changed them after the discard. Additions stay, subtasks the failed write
+// deleted come back, and post-discard order edits take precedence over old positions.
 func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subtask {
 	snapByID := make(map[string]model.Subtask, len(snap))
 	for _, st := range snap {
@@ -1454,7 +1452,7 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	}
 	for _, st := range committed {
 		// Deleted by the failed write (absent from snap) and not re-added: the
-		// rollback restored it, at its committed position.
+		// rollback restored it. Its committed position is a preference in the merge.
 		if _, wasInSnap := snapByID[st.ID]; !wasInSnap {
 			if _, ok := mergedByID[st.ID]; !ok {
 				mergedByID[st.ID] = st
@@ -1479,99 +1477,92 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	return out
 }
 
-// rebaseSubtaskOrder merges the order edits the user made after the discard into the
-// committed sequence, pairwise: a pair whose relative order flipped between the failed
-// baseline and the draft was swapped by the user and keeps the draft order; every
-// other pair keeps the committed order, so failed reorders and deletions cannot leak
-// and rollback-restored subtasks return in place. Pairs involving an addition follow
-// the draft order, so an addition appended at the end stays at the end. The output is
-// a topological order of these constraints, breaking ties by committed position.
+// rebaseSubtaskOrder preserves post-discard swaps and the order of additions relative to
+// visible subtasks. It then keeps compatible pairs in committed order. Placement of
+// restored subtasks relative to additions comes last.
 func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
-	posIn := make(map[string]int, len(inIDs))
-	for i, id := range inIDs {
-		posIn[id] = i
+	if slices.Equal(inIDs, snapIDs) {
+		return slices.Clone(committedIDs)
 	}
+
 	posSnap := make(map[string]int, len(snapIDs))
 	for i, id := range snapIDs {
 		posSnap[id] = i
 	}
-	posCommitted := make(map[string]int, len(committedIDs))
+	items := slices.Clone(committedIDs)
+	index := make(map[string]int, len(committedIDs)+len(inIDs))
 	for i, id := range committedIDs {
-		posCommitted[id] = i
+		index[id] = i
 	}
-	items := make([]string, 0, len(inIDs)+len(committedIDs))
-	for _, id := range committedIDs {
-		items = append(items, id)
-	}
+	visible := make(map[string]bool, len(inIDs))
 	for _, id := range inIDs {
-		if _, ok := posCommitted[id]; !ok {
+		visible[id] = true
+		if _, ok := index[id]; !ok {
+			index[id] = len(items)
 			items = append(items, id)
 		}
 	}
-	inSnap := func(id string) bool { _, ok := posSnap[id]; return ok }
-	inCommitted := func(id string) bool { _, ok := posCommitted[id]; return ok }
-	// before reports whether x must sort before y.
-	before := func(x, y string) bool {
-		_, xin := posIn[x]
-		_, yin := posIn[y]
-		switch {
-		case xin && yin && inSnap(x) && inSnap(y):
-			// Both predate the discard: the user's word only on pairs they flipped.
-			if (posSnap[x] < posSnap[y]) != (posIn[x] < posIn[y]) {
-				return posIn[x] < posIn[y]
+
+	// Required edges all follow draft order, so they cannot form a cycle.
+	predecessors := make([][]int, len(items))
+	for j, later := range inIDs {
+		laterSnap, laterExisted := posSnap[later]
+		to := index[later]
+		for _, earlier := range inIDs[:j] {
+			earlierSnap, earlierExisted := posSnap[earlier]
+			if !earlierExisted || !laterExisted || earlierSnap > laterSnap {
+				predecessors[to] = append(predecessors[to], index[earlier])
 			}
-			return posCommitted[x] < posCommitted[y]
-		case xin && yin:
-			// At least one side was added (or re-added) after the discard.
-			return posIn[x] < posIn[y]
-		case !inCommitted(x):
-			// x is an addition facing a rollback-restored subtask.
-			return false
-		case !inCommitted(y):
-			return true
-		default:
-			return posCommitted[x] < posCommitted[y]
 		}
 	}
-	remaining := make(map[string]bool, len(items))
-	for _, id := range items {
-		remaining[id] = true
+
+	seen := make([]bool, len(items))
+	var markPredecessors func(int)
+	markPredecessors = func(i int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		for _, prev := range predecessors[i] {
+			markPredecessors(prev)
+		}
 	}
+	preferBefore := func(from, start, end int) {
+		clear(seen)
+		markPredecessors(from)
+		// Edges leaving from cannot change which items already precede it.
+		for to := start; to < end; to++ {
+			if !seen[to] && !slices.Contains(predecessors[to], from) {
+				predecessors[to] = append(predecessors[to], from)
+			}
+		}
+	}
+	for i := range committedIDs {
+		preferBefore(i, i+1, len(committedIDs))
+	}
+	if len(items) > len(committedIDs) {
+		for i, id := range committedIDs {
+			if !visible[id] {
+				preferBefore(i, len(committedIDs), len(items))
+			}
+		}
+	}
+
+	clear(seen)
 	out := make([]string, 0, len(items))
-	for len(remaining) > 0 {
-		// Pick the earliest candidate (committed order first, additions after) with no
-		// unordered predecessor; ties among impossible-to-order leftovers fall back to
-		// the committed order. An empty ID is a valid pick, so found distinguishes it
-		// from the zero value.
-		var pick string
-		found := false
-		for _, id := range items {
-			if !remaining[id] {
-				continue
-			}
-			blocked := false
-			for _, other := range items {
-				if other != id && remaining[other] && before(other, id) {
-					blocked = true
-					break
-				}
-			}
-			if !blocked {
-				pick = id
-				found = true
-				break
-			}
+	var emit func(int)
+	emit = func(i int) {
+		if seen[i] {
+			return
 		}
-		if !found {
-			for _, id := range items {
-				if remaining[id] {
-					pick = id
-					break
-				}
-			}
+		seen[i] = true
+		for _, prev := range predecessors[i] {
+			emit(prev)
 		}
-		out = append(out, pick)
-		delete(remaining, pick)
+		out = append(out, items[i])
+	}
+	for i := range items {
+		emit(i)
 	}
 	return out
 }

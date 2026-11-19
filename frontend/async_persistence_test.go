@@ -873,6 +873,102 @@ func TestAsyncDiscardThenCrossedMoveKeepsChangedPairs(t *testing.T) {
 	}
 }
 
+// Conflicting order preferences used to erase post-discard moves when the first write failed.
+func TestAsyncDiscardSubtaskOrderConflictsKeepUserMoves(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		firstClick string
+		rejectWhen string
+		later      func(*ui.Tester, func(string))
+		before     string
+		after      []string
+	}{
+		{
+			name:       "move conflicts with failed swap",
+			firstClick: "上移子任务 Beta",
+			rejectWhen: "json_extract(NEW.subtasks, '$[0].id') = 'b' AND json_extract(NEW.subtasks, '$[1].id') = 'a'",
+			later:      func(_ *ui.Tester, click func(string)) { click("下移子任务 Alpha") },
+			before:     "Gamma",
+			after:      []string{"Alpha"},
+		},
+		{
+			name:       "new first item conflicts with restored item",
+			firstClick: "删除子任务 Beta",
+			rejectWhen: "json_array_length(NEW.subtasks) = 2",
+			later: func(tt *ui.Tester, click func(string)) {
+				click("新子任务输入框")
+				tt.Type("Epsilon")
+				tt.Key(0, ui.KeyEnter)
+				click("上移子任务 Epsilon")
+				click("上移子任务 Epsilon")
+			},
+			before: "Epsilon",
+			after:  []string{"Alpha", "Beta", "Gamma"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, w, tt, queue, _, task := asyncTestWorkbench(t)
+			ctx := context.Background()
+			subtasks := []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}, {ID: "c", Title: "Gamma"}}
+			if _, err := w.app.Projects.UpdateTask(ctx, task.ID, projects.TaskInput{
+				Title: task.Title, Status: task.Status, Priority: task.Priority, Subtasks: subtasks,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			w.ClearSelectedTask()
+			w.SelectTask(task.ID)
+			drainTestUI(w, queue)
+			tt.Frame()
+			if err := s.Exclusive(ctx, func(db *sql.DB) error {
+				_, err := db.Exec(`CREATE TRIGGER reject_first_subtask_order BEFORE UPDATE ON tasks
+					WHEN ` + tc.rejectWhen + ` BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			click := func(label string) {
+				t.Helper()
+				if err := tt.Click(label); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unlock := holdTestStore(t, s)
+			click(tc.firstClick)
+			click("任务详情标题")
+			tt.Key(ui.Cmd, ui.KeyA)
+			tt.Key(0, ui.KeyBackspace)
+			click("放弃修改")
+			tc.later(tt, click)
+			unlock()
+			w.WaitForTasks()
+			if first, err := w.app.Projects.GetTask(ctx, task.ID); err != nil || !slices.Equal(first.Subtasks, subtasks) {
+				t.Fatalf("first write did not roll back: %+v, %v", first.Subtasks, err)
+			}
+			drainTestUI(w, queue)
+			saved, err := w.app.Projects.GetTask(ctx, task.ID)
+			if err != nil || w.saving || w.dirty || w.saveState != "saved" || !slices.Equal(w.editSubtasks, saved.Subtasks) {
+				t.Fatalf("follow-up did not save and refresh the draft: %+v, %v, state %q", saved.Subtasks, err, w.saveState)
+			}
+			positions := make(map[string]int, len(saved.Subtasks))
+			for i, st := range saved.Subtasks {
+				positions[st.Title] = i
+			}
+			before, ok := positions[tc.before]
+			if !ok {
+				t.Fatalf("lost moved subtask %q: %+v", tc.before, saved.Subtasks)
+			}
+			last := before
+			for _, title := range tc.after {
+				if pos, ok := positions[title]; !ok || pos <= last {
+					t.Fatalf("expected %q followed by %v: %+v", tc.before, tc.after, saved.Subtasks)
+				} else {
+					last = pos
+				}
+			}
+		})
+	}
+}
+
 // Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
 func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
