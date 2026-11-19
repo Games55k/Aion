@@ -397,10 +397,18 @@ func (s *Service) ReorderTasks(ctx context.Context, projectID string, status mod
 	})
 }
 
+// DeleteTask moves a live task to the recycle bin. An independently deleted
+// task returns ErrConflict, and a live task under a deleted project returns ErrParentDeleted.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	return s.store.Write(ctx, func(tx *sql.Tx) error {
-		t, err := visibleTask(ctx, tx, id)
+		t, err := taskByID(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		if t.DeletedAt != nil {
+			return model.ErrConflict
+		}
+		if _, err = visibleProject(ctx, tx, t.ProjectID); err != nil {
 			return err
 		}
 		now := time.Now().UTC()

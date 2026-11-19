@@ -107,6 +107,8 @@ func (a *App) ListTrash(ctx context.Context) ([]model.TrashItem, error) {
 }
 
 // RestoreTrash restores a soft-deleted item by dispatching to the owning module service.
+// A missing ID returns ErrNotFound. A task under a deleted project returns
+// ErrParentDeleted. Other attempts to restore an existing live item return ErrConflict.
 func (a *App) RestoreTrash(ctx context.Context, kind, id string) error {
 	if kind == jobapplications.TrashKind {
 		return a.JobApplications.Restore(ctx, id)
@@ -115,8 +117,10 @@ func (a *App) RestoreTrash(ctx context.Context, kind, id string) error {
 }
 
 // PermanentlyDelete purges a recycled item and then reclaims files that no
-// module references. A cleanup error does not undo the database deletion; GC
-// can be retried safely. The host owns the user confirmation interaction.
+// module references. A missing ID returns ErrNotFound and an item that was
+// never moved to trash or has already been restored returns ErrConflict.
+// Attachment cleanup runs after deletion commits. GC can be retried safely.
+// The host owns the user confirmation interaction.
 func (a *App) PermanentlyDelete(ctx context.Context, kind, id string) error {
 	if kind == jobapplications.TrashKind {
 		return a.JobApplications.PermanentlyDelete(ctx, id)

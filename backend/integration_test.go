@@ -247,6 +247,118 @@ func TestModuleRegistrationAndSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// Regression: trash operations reported existing tasks or applications in the wrong state as missing.
+func TestTrashErrorsDistinguishMissingFromStateConflict(t *testing.T) {
+	ctx := context.Background()
+	app, err := backend.Open(ctx, backend.Options{DataDir: t.TempDir(), DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	project, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := app.Projects.CreateTask(ctx, project.ID, projects.TaskInput{Title: "Task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{CompanyName: "Company", PositionName: "Role"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{ID: job.ID, Outcome: model.JobOutcomeRejected}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exercise the task before permanently deleting its project.
+	for _, tc := range []struct {
+		kind, id   string
+		softDelete func(context.Context, string) error
+	}{
+		{projects.TrashTask, task.ID, app.Projects.DeleteTask},
+		{projects.TrashProject, project.ID, app.Projects.DeleteProject},
+		{jobapplications.TrashKind, job.ID, app.JobApplications.Delete},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			expect := func(operation string, got, want error) {
+				t.Helper()
+				if !errors.Is(got, want) {
+					t.Errorf("%s = %v, want %v", operation, got, want)
+				}
+			}
+			const missing = "missing"
+			expect("delete missing", tc.softDelete(ctx, missing), model.ErrNotFound)
+			expect("restore missing", app.RestoreTrash(ctx, tc.kind, missing), model.ErrNotFound)
+			expect("purge missing", app.PermanentlyDelete(ctx, tc.kind, missing), model.ErrNotFound)
+			expect("restore live", app.RestoreTrash(ctx, tc.kind, tc.id), model.ErrConflict)
+			expect("purge live", app.PermanentlyDelete(ctx, tc.kind, tc.id), model.ErrConflict)
+			if err := tc.softDelete(ctx, tc.id); err != nil {
+				t.Fatalf("delete live: %v", err)
+			}
+			expect("delete already recycled", tc.softDelete(ctx, tc.id), model.ErrConflict)
+			if err := app.RestoreTrash(ctx, tc.kind, tc.id); err != nil {
+				t.Fatalf("restore recycled: %v", err)
+			}
+			if err := tc.softDelete(ctx, tc.id); err != nil {
+				t.Fatalf("delete restored: %v", err)
+			}
+			if err := app.PermanentlyDelete(ctx, tc.kind, tc.id); err != nil {
+				t.Fatalf("purge recycled: %v", err)
+			}
+			expect("restore purged", app.RestoreTrash(ctx, tc.kind, tc.id), model.ErrNotFound)
+		})
+	}
+}
+
+// Task restore reports a recycled parent and independently recycled tasks can still be purged.
+func TestTaskTrashOperationsWithDeletedParent(t *testing.T) {
+	ctx := context.Background()
+	app, err := backend.Open(ctx, backend.Options{DataDir: t.TempDir(), DisableScheduler: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	project, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := app.Projects.CreateTask(ctx, project.ID, projects.TaskInput{Title: "Live task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recycled, err := app.Projects.CreateTask(ctx, project.ID, projects.TaskInput{Title: "Independently recycled task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Projects.DeleteTask(ctx, recycled.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Projects.DeleteProject(ctx, project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.Projects.DeleteTask(ctx, live.ID); !errors.Is(err, model.ErrParentDeleted) {
+		t.Errorf("delete live child = %v, want ErrParentDeleted", err)
+	}
+	if err := app.Projects.DeleteTask(ctx, recycled.ID); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("delete recycled child = %v, want ErrConflict", err)
+	}
+	for _, task := range []model.Task{live, recycled} {
+		if err := app.RestoreTrash(ctx, projects.TrashTask, task.ID); !errors.Is(err, model.ErrParentDeleted) {
+			t.Errorf("restore %q = %v, want ErrParentDeleted", task.Title, err)
+		}
+	}
+	if err := app.PermanentlyDelete(ctx, projects.TrashTask, live.ID); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("purge live child = %v, want ErrConflict", err)
+	}
+	if err := app.PermanentlyDelete(ctx, projects.TrashTask, recycled.ID); err != nil {
+		t.Fatalf("purge independently recycled child: %v", err)
+	}
+}
+
 // Global recycle bin aggregates projects, tasks, and job applications while dispatching restores, cascades, and attachment GC cleanly.
 func TestCrossModuleTrashDispatchAndAttachmentCleanup(t *testing.T) {
 	ctx := context.Background()
