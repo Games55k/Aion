@@ -3581,6 +3581,59 @@ func TestJobFilterSearchSortPaginationViewsAndRestart(t *testing.T) {
 	}
 }
 
+// Regression: empty job categories offered first-use onboarding even when other categories had records.
+func TestJobCategoryEmptyStateWithExistingApplications(t *testing.T) {
+	for _, tc := range []struct {
+		page         NavPage
+		label        string
+		closeFixture bool
+	}{
+		{page: NavJobActive, label: "进行中", closeFixture: true},
+		{page: NavJobOffer, label: "已获 Offer"},
+		{page: NavJobClosed, label: "已结束"},
+	} {
+		t.Run(string(tc.page), func(t *testing.T) {
+			app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
+			ctx := context.Background()
+			job, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+				CompanyName: "示例公司", PositionName: "研发工程师",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.closeFixture {
+				if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{ID: job.ID, Outcome: model.JobOutcomeRejected}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wb.SwitchModule("job_applications")
+			tt.Frame()
+			clickWriteControl(t, tt, tc.label)
+			tt.Frame()
+			if wb.navPage != tc.page || len(wb.jobApps) != 1 || len(wb.filteredJobApps) != 0 {
+				t.Fatalf("expected an empty category and one saved application: page=%s, total=%d, visible=%d", wb.navPage, len(wb.jobApps), len(wb.filteredJobApps))
+			}
+			typeIntoJobField(t, tt, "搜索投递记录", "无匹配")
+			if wb.jobSearchQuery != "无匹配" {
+				t.Fatalf("search filter was not applied: %q", wb.jobSearchQuery)
+			}
+			clickWriteControl(t, tt, "清空筛选条件")
+			tt.Frame()
+			if wb.jobSearchQuery != "" || wb.navPage != tc.page || len(wb.filteredJobApps) != 0 {
+				t.Fatalf("clearing filters should return to the empty category: query=%q, page=%s, visible=%d", wb.jobSearchQuery, wb.navPage, len(wb.filteredJobApps))
+			}
+			if _, offered := tt.AccessByRole(ui.RoleButton, "立即新增投递"); offered {
+				t.Fatal("empty category offered first-application onboarding despite an existing record")
+			}
+			clickWriteControl(t, tt, "新增投递")
+			tt.Frame()
+			if !wb.jobCreateOpen {
+				t.Fatal("expected the regular create action to remain available")
+			}
+		})
+	}
+}
+
 // Closing requires Offer confirmation for offer outcomes, closed rows allow stage correction and reopening with preserved events, timeline notes/backfill leave current state intact, and empty/narrow states render cleanly.
 func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 	nowVal := time.Date(2026, 11, 15, 11, 0, 0, 0, time.Local)

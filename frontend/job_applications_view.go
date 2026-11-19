@@ -209,7 +209,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 			}
 		})
 
-		if strings.TrimSpace(w.jobSearchQuery) != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero() {
+		if w.hasJobFilters() {
 			clearBtn := uiButton(c, "清除筛选", buttonProps{Variant: buttonText, Size: sizeSmall})
 			if clearBtn.Clicked() {
 				w.ClearJobFilters()
@@ -218,31 +218,40 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 	})
 }
 
+func (w *Workbench) hasJobFilters() bool {
+	return strings.TrimSpace(w.jobSearchQuery) != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero()
+}
+
 func (w *Workbench) renderJobEmptyState(c *ui.Context) {
-	hasFilter := strings.TrimSpace(w.jobSearchQuery) != "" || w.jobStageFilter != "" || w.jobOutcomeFilter != "" || !w.jobAppliedDateFilter.IsZero()
-	title := "暂无投递记录"
-	desc := "点击「新增投递」记录你的第一条求职投递，支持后续阶段追踪、结果结束与时间线回溯。"
-	if hasFilter {
-		title = "没有符合筛选条件的记录"
-		desc = "请调整关键词、阶段、结束结果或投递日期筛选条件。"
+	empty := emptyProps{Icon: iconBriefcase(), Title: "暂无投递记录"}
+	switch {
+	case w.hasJobFilters():
+		empty.Title = "没有符合筛选条件的记录"
+		empty.Description = "请调整关键词、阶段、结束结果或投递日期筛选条件。"
+		empty.Action = func() {
+			if uiButton(c, "清空筛选条件", buttonProps{Variant: buttonDefault}).Clicked() {
+				w.ClearJobFilters()
+			}
+		}
+	case len(w.jobApps) == 0:
+		empty.Description = "创建第一条投递，开始跟踪求职进度。"
+		empty.Action = func() {
+			if uiButton(c, "立即新增投递", buttonProps{Variant: buttonPrimary}).Clicked() {
+				w.OpenJobCreateModal()
+			}
+		}
+	case w.navPage == NavJobActive:
+		empty.Title = "暂无进行中的投递"
+		empty.Description = "新增或重新开启投递后，可以在这里跟进。"
+	case w.navPage == NavJobOffer:
+		empty.Title = "暂无获得 Offer 的投递"
+		empty.Description = "收到 Offer 后，可在投递详情中更新阶段。"
+	case w.navPage == NavJobClosed:
+		empty.Title = "暂无已结束的投递"
+		empty.Description = "可在投递详情中结束流程并填写结果。"
 	}
 	ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		uiEmpty(c, emptyProps{
-			Icon:        iconBriefcase(),
-			Title:       title,
-			Description: desc,
-			Action: func() {
-				if hasFilter {
-					if uiButton(c, "清空筛选条件", buttonProps{Variant: buttonDefault}).Clicked() {
-						w.ClearJobFilters()
-					}
-				} else {
-					if uiButton(c, "立即新增投递", buttonProps{Variant: buttonPrimary}).Clicked() {
-						w.OpenJobCreateModal()
-					}
-				}
-			},
-		})
+		uiEmpty(c, empty)
 	})
 }
 
