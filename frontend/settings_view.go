@@ -64,7 +64,11 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 						})
 
 						beforeIdx := w.themeSegmentIdx
-						uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []string{"跟随系统", "浅色", "深色"}, segmentedProps{
+						uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []segmentedOption{
+							{Label: "跟随系统", Icon: iconMonitor()},
+							{Label: "浅色", Icon: iconSun()},
+							{Label: "深色", Icon: iconMoon()},
+						}, segmentedProps{
 							Size: sizeMiddle,
 						}).Label("主题模式切换")
 						if w.themeSegmentIdx != beforeIdx {

@@ -299,7 +299,11 @@ func (w *Workbench) renderMarkdownSection(c *ui.Context, tk *uiTokens, t model.T
 				ui.Icon(c, iconFileText()).FontSize(14).TextColor(tk.TextSecondary)
 				ui.Text(c, "任务描述 (Markdown)").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary)
 			})
-			uiSegmented(c.Key("md-mode-"+t.ID), &w.mdMode, []string{"编辑", "预览", "分栏"}, segmentedProps{
+			uiSegmented(c.Key("md-mode-"+t.ID), &w.mdMode, []segmentedOption{
+				{Label: "编辑"},
+				{Label: "预览"},
+				{Label: "分栏"},
+			}, segmentedProps{
 				Size: sizeSmall,
 			}).Label("Markdown 模式切换")
 		})

@@ -4172,3 +4172,60 @@ func TestInputPlaceholderHidesOnFocus(t *testing.T) {
 	tt.Frame()
 	assertPlaceholderHides("新建任务描述输入框", "新建任务标签输入框")
 }
+
+// Theme segmented control renders supported SVG icons and switches between system, light, and dark modes by label.
+func TestThemeSegmentedControlSwitchesAllModesWithIcons(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		svg  *ui.SVG
+	}{
+		{name: "monitor", svg: iconMonitor()},
+		{name: "sun", svg: iconSun()},
+		{name: "moon", svg: iconMoon()},
+	} {
+		if missing := tc.svg.Unsupported(); len(missing) > 0 {
+			t.Fatalf("%s icon has unsupported SVG features: %v", tc.name, missing)
+		}
+	}
+
+	var appliedThemes []string
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		SetTheme: func(theme string) {
+			appliedThemes = append(appliedThemes, theme)
+		},
+	})
+	wb.NavigateTo(NavSettings)
+	tt.Frame()
+
+	for _, step := range []struct {
+		label   string
+		want    string
+		wantIdx int
+	}{
+		{label: "浅色", want: ThemeLight, wantIdx: 1},
+		{label: "深色", want: ThemeDark, wantIdx: 2},
+		{label: "跟随系统", want: ThemeSystem, wantIdx: 0},
+	} {
+		if err := tt.Click(step.label); err != nil {
+			t.Fatalf("click %s: %v", step.label, err)
+		}
+		if wb.themeSetting != step.want {
+			t.Fatalf("after clicking %s: expected themeSetting %q, got %q", step.label, step.want, wb.themeSetting)
+		}
+		if wb.themeSegmentIdx != step.wantIdx {
+			t.Fatalf("after clicking %s: expected themeSegmentIdx %d, got %d", step.label, step.wantIdx, wb.themeSegmentIdx)
+		}
+		gotPersisted, err := app.Settings.Theme(context.Background())
+		if err != nil {
+			t.Fatalf("read persisted theme after %s: %v", step.label, err)
+		}
+		if gotPersisted != step.want {
+			t.Fatalf("after clicking %s: expected persisted theme %q, got %q", step.label, step.want, gotPersisted)
+		}
+	}
+
+	wantApplied := []string{ThemeLight, ThemeDark, ThemeSystem}
+	if !slices.Equal(appliedThemes, wantApplied) {
+		t.Fatalf("expected Host.SetTheme calls %v, got %v", wantApplied, appliedThemes)
+	}
+}
