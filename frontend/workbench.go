@@ -1507,19 +1507,26 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 		return items
 	}
 
-	// Required edges all follow draft order, so they cannot form a cycle.
-	posSnap := make(map[string]int, len(snapIDs))
+	positions := make([]subtaskOrderPosition, len(items))
 	for i, id := range snapIDs {
-		posSnap[id] = i
+		positions[index[id]].snapshot = i + 1
 	}
+	draft := make([]int, len(inIDs))
+	for i, id := range inIDs {
+		item := index[id]
+		draft[i] = item
+		positions[item].draft = i + 1
+	}
+	if order := compatibleSubtaskOrder(items, positions); order != nil {
+		return order
+	}
+
+	// Required edges all follow draft order, so they cannot form a cycle.
 	predecessors := make([][]int, len(items))
-	for j, later := range inIDs {
-		laterSnap, laterExisted := posSnap[later]
-		to := index[later]
-		for _, earlier := range inIDs[:j] {
-			earlierSnap, earlierExisted := posSnap[earlier]
-			if !earlierExisted || !laterExisted || earlierSnap > laterSnap {
-				predecessors[to] = append(predecessors[to], index[earlier])
+	for j, to := range draft {
+		for _, from := range draft[:j] {
+			if positions[from].usesDraftOrder(positions[to]) {
+				predecessors[to] = append(predecessors[to], from)
 			}
 		}
 	}
@@ -1549,12 +1556,8 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 		preferBefore(i, i+1, len(committedIDs))
 	}
 	if len(items) > len(committedIDs) {
-		visible := make(map[string]bool, len(inIDs))
-		for _, id := range inIDs {
-			visible[id] = true
-		}
-		for i, id := range committedIDs {
-			if !visible[id] {
+		for i := range committedIDs {
+			if positions[i].draft == 0 {
 				preferBefore(i, len(committedIDs), len(items))
 			}
 		}
@@ -1577,6 +1580,46 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 		emit(i)
 	}
 	return out
+}
+
+type subtaskOrderPosition struct {
+	draft, snapshot int // one-based, zero if absent
+}
+
+// usesDraftOrder reports whether a pair includes a visible addition or was swapped
+// after the discard. These are the pairs that take precedence in a conflict.
+func (p subtaskOrderPosition) usesDraftOrder(other subtaskOrderPosition) bool {
+	return p.draft != 0 && other.draft != 0 &&
+		(p.snapshot == 0 || other.snapshot == 0 || (p.draft < other.draft) != (p.snapshot < other.snapshot))
+}
+
+// compatibleSubtaskOrder returns the order satisfying every pair, or nil if they
+// conflict. One item precedes the other in every pair. Distinct predecessor counts
+// therefore give the unique ranks: remove rank zero and repeat on the remaining items.
+func compatibleSubtaskOrder(items []string, positions []subtaskOrderPosition) []string {
+	counts := make([]int, len(items))
+	for left, pos := range positions {
+		for right := left + 1; right < len(positions); right++ {
+			other := positions[right]
+			// By default, committed items stay in order and restored items precede
+			// additions. items already lists committed items first.
+			if other.draft < pos.draft && pos.usesDraftOrder(other) {
+				counts[left]++
+			} else {
+				counts[right]++
+			}
+		}
+	}
+	order := make([]string, len(items))
+	occupied := make([]bool, len(items))
+	for i, rank := range counts {
+		if occupied[rank] {
+			return nil
+		}
+		order[rank] = items[i]
+		occupied[rank] = true
+	}
+	return order
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when
