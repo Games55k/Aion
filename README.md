@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="按状态分组卡片的 Aion 三列看板与任务详情弹窗" />
+  <img src="assets/screenshot.png" alt="按状态分组卡片的 Aion 三列看板" />
 </p>
 
 Aion（读作 `EYE-on`，源自古希腊语 αἰών，意为“生命、时代与永恒”）帮你把日常项目、任务拆解、本地资料与求职投递记录收敛在同一处。所有数据 100% 存储在你的 Mac 本地，无需注册账号，不依赖云服务，断网环境下依然拥有毫秒级响应。

@@ -708,6 +708,8 @@ func TestVisualSnapshotRender(t *testing.T) {
 	}
 	_ = wb.SaveSelectedTask()
 	wb.ImportAttachmentsToSelectedTask([]string{imgPath})
+	wb.WaitForTasks()
+	wb.ClearSelectedTask()
 	wb.pendingToasts = nil
 
 	if outPath != "" {
@@ -726,7 +728,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 	}
 
 	if settingsOutPath != "" {
-		wb.ClearSelectedTask()
 		wb.NavigateTo(NavSettings)
 		wb.pendingToasts = nil
 		img := ui.Render(wb.View, 1440, 1280, 1.0)
