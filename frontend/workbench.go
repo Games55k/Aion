@@ -1484,26 +1484,34 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 	if slices.Equal(inIDs, snapIDs) {
 		return slices.Clone(committedIDs)
 	}
-
-	posSnap := make(map[string]int, len(snapIDs))
-	for i, id := range snapIDs {
-		posSnap[id] = i
+	if slices.Equal(snapIDs, committedIDs) {
+		// The failed write did not change the order or hide a subtask.
+		return slices.Clone(inIDs)
 	}
+
 	items := slices.Clone(committedIDs)
 	index := make(map[string]int, len(committedIDs)+len(inIDs))
 	for i, id := range committedIDs {
 		index[id] = i
 	}
-	visible := make(map[string]bool, len(inIDs))
 	for _, id := range inIDs {
-		visible[id] = true
 		if _, ok := index[id]; !ok {
 			index[id] = len(items)
 			items = append(items, id)
 		}
 	}
+	if len(inIDs) >= len(snapIDs) && slices.Equal(inIDs[:len(snapIDs)], snapIDs) &&
+		slices.Equal(inIDs[len(snapIDs):], items[len(committedIDs):]) {
+		// Only new trailing items changed, so committed order followed by those
+		// additions already satisfies every constraint, including restored positions.
+		return items
+	}
 
 	// Required edges all follow draft order, so they cannot form a cycle.
+	posSnap := make(map[string]int, len(snapIDs))
+	for i, id := range snapIDs {
+		posSnap[id] = i
+	}
 	predecessors := make([][]int, len(items))
 	for j, later := range inIDs {
 		laterSnap, laterExisted := posSnap[later]
@@ -1541,6 +1549,10 @@ func rebaseSubtaskOrder(inIDs, snapIDs, committedIDs []string) []string {
 		preferBefore(i, i+1, len(committedIDs))
 	}
 	if len(items) > len(committedIDs) {
+		visible := make(map[string]bool, len(inIDs))
+		for _, id := range inIDs {
+			visible[id] = true
+		}
 		for i, id := range committedIDs {
 			if !visible[id] {
 				preferBefore(i, len(committedIDs), len(items))
