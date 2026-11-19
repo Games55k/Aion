@@ -1414,9 +1414,11 @@ func rebaseTagsOnCommitted(in, snap, committed []string) []string {
 }
 
 // rebaseSubtasksOnCommitted merges post-discard subtask edits into the committed list.
-// The draft's order survives (a reorder is an edit like any other); titles and done
-// flags fall back to the committed values field by field unless the user changed them
-// after the discard; additions stay; and subtasks the failed write deleted come back.
+// Titles and done flags fall back to the committed values field by field unless the
+// user changed them after the discard; additions stay; subtasks the failed write
+// deleted come back. Order: when the draft still follows the failed baseline's
+// sequence the committed order wins (a failed reorder or deletion must not leak), and
+// a sequence the user actually changed after the discard survives.
 func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subtask {
 	snapByID := make(map[string]model.Subtask, len(snap))
 	for _, st := range snap {
@@ -1426,17 +1428,20 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 	for _, st := range committed {
 		committedByID[st.ID] = st
 	}
-	out := make([]model.Subtask, 0, len(committed)+len(in))
+	mergedByID := make(map[string]model.Subtask, len(in)+len(committed))
+	var draftOrder []string
 	for _, st := range in {
 		s, wasInSnap := snapByID[st.ID]
-		c, inCommitted := committedByID[st.ID]
-		if wasInSnap && !inCommitted {
-			// Added by the failed write; it never committed, so it is dropped. A
-			// post-discard re-add gets a fresh ID and survives as an addition.
-			continue
+		if wasInSnap {
+			if _, inCommitted := committedByID[st.ID]; !inCommitted {
+				// Added by the failed write; it never committed, so it is dropped. A
+				// post-discard re-add gets a fresh ID and survives as an addition.
+				continue
+			}
 		}
 		merged := st
 		if wasInSnap {
+			c := committedByID[st.ID]
 			if st.Title == s.Title {
 				merged.Title = c.Title
 			}
@@ -1444,18 +1449,57 @@ func rebaseSubtasksOnCommitted(in, snap, committed []model.Subtask) []model.Subt
 				merged.Done = c.Done
 			}
 		}
-		out = append(out, merged)
+		mergedByID[merged.ID] = merged
+		draftOrder = append(draftOrder, merged.ID)
 	}
 	for _, st := range committed {
 		// Deleted by the failed write (absent from snap) and not re-added: the
-		// rollback restored it, so it comes back.
+		// rollback restored it. In place when the committed order stands, appended
+		// after a post-discard reorder.
 		if _, wasInSnap := snapByID[st.ID]; !wasInSnap {
-			if !slices.ContainsFunc(out, func(o model.Subtask) bool { return o.ID == st.ID }) {
-				out = append(out, st)
+			if _, ok := mergedByID[st.ID]; !ok {
+				mergedByID[st.ID] = st
 			}
 		}
 	}
+	order := draftOrder
+	if sameSubtaskSequence(in, snap) {
+		// The user did not reorder after the discard, so the committed order stands.
+		order = nil
+		for _, st := range committed {
+			if _, ok := mergedByID[st.ID]; ok {
+				order = append(order, st.ID)
+			}
+		}
+	}
+	out := make([]model.Subtask, 0, len(mergedByID))
+	inOrder := make(map[string]bool, len(order))
+	for _, id := range order {
+		if st, ok := mergedByID[id]; ok && !inOrder[id] {
+			out = append(out, st)
+			inOrder[id] = true
+		}
+	}
+	for _, st := range committed {
+		if m, ok := mergedByID[st.ID]; ok && !inOrder[st.ID] {
+			out = append(out, m)
+			inOrder[st.ID] = true
+		}
+	}
 	return out
+}
+
+// sameSubtaskSequence reports whether two subtask lists share the same ID sequence.
+func sameSubtaskSequence(a, b []model.Subtask) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID {
+			return false
+		}
+	}
+	return true
 }
 
 // SaveSelectedTask validates a draft and queues an ordered background save when

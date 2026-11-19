@@ -497,6 +497,102 @@ func TestAsyncDiscardThenSubtaskReorderSurvivesFailedWrite(t *testing.T) {
 	}
 }
 
+// A failed reorder must not ride along: when the user did not reorder after the discard,
+// the follow-up save keeps the committed order.
+func TestAsyncDiscardThenFollowUpKeepsCommittedSubtaskOrder(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc3 BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	w.editSubtasks[0], w.editSubtasks[1] = w.editSubtasks[1], w.editSubtasks[0]
+	w.editDescription = "注定失败的描述"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.editDescription = "落地前补充的描述"
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 2 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Beta" || saved.Description != "落地前补充的描述" {
+		t.Fatalf("failed reorder leaked through the follow-up save: %+v", saved.Subtasks)
+	}
+}
+
+// A failed deletion must restore the subtask in place: the rollback must not silently
+// reorder the committed list.
+func TestAsyncDiscardThenFailedDeletionRestoresSubtaskInPlace(t *testing.T) {
+	s, w, tt, queue, _, task := asyncTestWorkbench(t)
+	if _, err := w.app.Projects.UpdateTask(context.Background(), task.ID, projects.TaskInput{
+		Title: "Original", Status: model.Planned, Priority: model.NoPriority,
+		Subtasks: []model.Subtask{{ID: "a", Title: "Alpha"}, {ID: "b", Title: "Beta"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearSelectedTask()
+	drainTestUI(w, queue)
+	w.SelectTask(task.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		_, err := db.Exec(`CREATE TRIGGER tasks_reject_failed_desc4 BEFORE UPDATE ON tasks
+			WHEN NEW.description = '注定失败的描述'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdTestStore(t, s)
+	w.editSubtasks = w.editSubtasks[1:]
+	w.editDescription = "注定失败的描述"
+	_ = w.SaveSelectedTask()
+	if err := tt.Click("任务详情标题"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	w.editDescription = "落地前补充的描述"
+	_ = w.SaveSelectedTask()
+	unlock()
+	drainTestUI(w, queue)
+	saved, err := w.app.Projects.GetTask(context.Background(), task.ID)
+	if err != nil || len(saved.Subtasks) != 2 {
+		t.Fatalf("subtasks lost: %+v %v", saved, err)
+	}
+	if saved.Subtasks[0].Title != "Alpha" || saved.Subtasks[1].Title != "Beta" || saved.Description != "落地前补充的描述" {
+		t.Fatalf("failed deletion reordered the committed list: %+v", saved.Subtasks)
+	}
+}
+
 // Text typed into the tag input after 放弃修改 must survive the in-flight save's completion callback.
 func TestAsyncDiscardKeepsTagDraftTypedAfterDiscard(t *testing.T) {
 	s, w, tt, queue, _, task := asyncTestWorkbench(t)
@@ -836,6 +932,72 @@ func TestJobAsyncInvalidDraftRebaseKeepsRawNotesInput(t *testing.T) {
 			w.editJobCompany, w.editJobPosition, w.jobSaveState)
 	}
 	_ = job1
+}
+
+// A closure reason edited back to the failed baseline's value counts as untouched and
+// must fall back to the committed reason, in invalid drafts too.
+func TestJobAsyncInvalidDraftRebasesReasonByValue(t *testing.T) {
+	s, w, tt, queue, job1, _ := asyncJobTestWorkbench(t)
+	if err := s.Exclusive(context.Background(), func(db *sql.DB) error {
+		if _, err := db.Exec(`UPDATE job_applications SET lifecycle='closed', outcome='other',
+			closure_reason='旧结束原因', closed_at='2026-01-01T00:00:00Z' WHERE id = ?`, job1.ID); err != nil {
+			return err
+		}
+		// Reject only the first write: it carries the failed reason with the original
+		// position, so the follow-up (new position) succeeds and any leaked reason
+		// lands in the database where the assertion can see it.
+		_, err := db.Exec(`CREATE TRIGGER jobs_reject_first_reason BEFORE UPDATE ON job_applications
+			WHEN NEW.closure_reason = '失败的原因X' AND NEW.position_name = '后端工程师'
+			BEGIN SELECT RAISE(ABORT, 'first write must fail'); END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.CloseJobDetail()
+	drainTestUI(w, queue)
+	w.SelectJobApplication(job1.ID)
+	drainTestUI(w, queue)
+	tt.Frame()
+	unlock := holdTestStore(t, s)
+	// Editing the reason field in the UI marks it dirty; simulate the same handler here.
+	w.editJobClosureReason = "失败的原因X"
+	w.editJobReasonDirty = true
+	w.TouchJobDetailField()
+	if err := tt.Click("详情公司名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("详情岗位名称"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	// Editing the reason field in the UI marks it dirty; simulate the same handler here.
+	w.editJobClosureReason = "别的原因Y"
+	w.editJobReasonDirty = true
+	w.TouchJobDetailField()
+	w.editJobClosureReason = "失败的原因X"
+	w.TouchJobDetailField()
+	if w.jobSaveState != "validation_error" || w.pendingJobSave != nil {
+		t.Fatalf("expected invalid draft without queued save, state=%q", w.jobSaveState)
+	}
+	unlock()
+	drainTestUI(w, queue)
+	if w.editJobClosureReason != "旧结束原因" || w.editJobReasonDirty {
+		t.Fatalf("reason equal to the failed baseline must fall back: reason=%q dirty=%v",
+			w.editJobClosureReason, w.editJobReasonDirty)
+	}
+	w.editJobPosition = "补齐的新岗位"
+	w.TouchJobDetailField()
+	drainTestUI(w, queue)
+	saved, err := w.app.JobApplications.Get(context.Background(), job1.ID)
+	if err != nil || saved.ClosureReason != "旧结束原因" || saved.PositionName != "补齐的新岗位" {
+		t.Fatalf("failed reason leaked through the follow-up save: %+v %v", saved, err)
+	}
 }
 
 // A closure reason queued by the rebase must stay pending until a write carrying it is
