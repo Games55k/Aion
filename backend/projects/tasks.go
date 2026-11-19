@@ -233,6 +233,20 @@ func (s *Service) UpdateTask(ctx context.Context, id string, in TaskInput) (mode
 	return t, nil
 }
 
+// SetTaskPriority updates only the task's priority and modification time.
+func (s *Service) SetTaskPriority(ctx context.Context, id string, priority model.Priority) error {
+	if !priority.Valid() {
+		return invalid("invalid priority")
+	}
+	return s.store.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := visibleTask(ctx, tx, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE tasks SET priority=?,updated_at=? WHERE id=?`, priority, s.nowUTC().Format(time.RFC3339Nano), id)
+		return err
+	})
+}
+
 func columnIDs(ctx context.Context, tx *sql.Tx, projectID string, status model.Status) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id=? AND status=? AND deleted_at IS NULL ORDER BY position,created_at,id`, projectID, status)
 	if err != nil {

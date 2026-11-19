@@ -317,7 +317,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 	}
 	row.Children(func() {
 		// 1. Company (clickable to open detail modal)
-		compBtn := ui.ButtonBase(c.Key("open-comp-"+app.ID)).Width(jobColCompanyWidth).Shrink(0).
+		compBtn := ui.ButtonBase(c.Key("open-comp-" + app.ID)).Width(jobColCompanyWidth).Shrink(0).
 			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("查看详情 " + app.CompanyName + " " + app.PositionName)
 		compBtn.Children(func() {
@@ -333,7 +333,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 		}
 
 		// 2. Position + brief 1-line summary (closure reason / notes never expand row height)
-		posBtn := ui.ButtonBase(c.Key("open-pos-"+app.ID)).Width(jobColPositionWidth).Shrink(0).
+		posBtn := ui.ButtonBase(c.Key("open-pos-" + app.ID)).Width(jobColPositionWidth).Shrink(0).
 			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("打开投递详情 " + app.PositionName)
 		posBtn.Children(func() {
@@ -578,7 +578,7 @@ func (w *Workbench) renderJobCreateModal(c *ui.Context, tk *uiTokens) {
 				if uiButton(c, "取消", buttonProps{Variant: buttonDefault}).Clicked() {
 					w.jobCreateOpen = false
 				}
-				submit := uiButton(c, "确认创建", buttonProps{Variant: buttonPrimary})
+				submit := uiButton(c, "确认创建", buttonProps{Variant: buttonPrimary}).Disabled(w.jobCreatePending)
 				if submit.Clicked() {
 					w.SubmitJobCreateModal()
 				}

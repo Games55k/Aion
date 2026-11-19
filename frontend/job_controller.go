@@ -176,12 +176,21 @@ func (w *Workbench) OpenJobCreateModal() {
 	w.jobCreateChannel = ""
 	w.jobCreateNotes = ""
 	w.jobCreateErr = ""
+	w.jobCreateVersion++
 	w.jobCreateOpen = true
+}
+
+func (w *Workbench) jobCreateDraft() jobapplications.CreateInput {
+	return jobapplications.CreateInput{
+		CompanyName: w.jobCreateCompany, PositionName: w.jobCreatePosition,
+		AppliedDate: formatCalendarDate(w.jobCreateAppliedDate), Stage: model.JobStage(w.jobCreateStage),
+		ApplicationURL: w.jobCreateURL, Channel: w.jobCreateChannel, Notes: w.jobCreateNotes,
+	}
 }
 
 // SubmitJobCreateModal validates required fields and inserts a new job application.
 func (w *Workbench) SubmitJobCreateModal() {
-	if w.IsRestoring() {
+	if w.IsRestoring() || w.jobCreatePending {
 		return
 	}
 	company := strings.TrimSpace(w.jobCreateCompany)
@@ -225,19 +234,38 @@ func (w *Workbench) SubmitJobCreateModal() {
 		Channel:        strings.TrimSpace(w.jobCreateChannel),
 		Notes:          strings.TrimRight(w.jobCreateNotes, "\r\n"),
 	}
-	created, err := w.app.JobApplications.Create(context.Background(), in)
-	if err != nil {
-		w.jobCreateErr = err.Error()
-		return
-	}
-	w.jobCreateOpen = false
-	w.jobCreateErr = ""
-	w.jobPage = 0
-	w.upsertJobInCache(created)
-	w.EnqueueToast(ToastProps{
-		Title:       "已新增投递记录",
-		Description: fmt.Sprintf("%s / %s", created.CompanyName, created.PositionName),
-		Type:        ToastSuccess,
+	draft, version, navigation := w.jobCreateDraft(), w.jobCreateVersion, w.navigationVersion
+	service := w.app.JobApplications
+	w.jobCreatePending = true
+	var created model.JobApplication
+	w.runJobWorker(func() error {
+		var err error
+		created, err = service.Create(context.Background(), in)
+		return err
+	}, func(err error) {
+		w.jobCreatePending = false
+		current := w.jobCreateOpen && w.jobCreateVersion == version && w.jobCreateDraft() == draft
+		if err != nil {
+			if current {
+				w.jobCreateErr = err.Error()
+			} else {
+				w.enqueueErrorToast("新增投递失败", err)
+			}
+			return
+		}
+		if current {
+			w.jobCreateOpen = false
+			w.jobCreateErr = ""
+		}
+		if w.navigationVersion == navigation {
+			w.jobPage = 0
+		}
+		w.upsertJobInCache(created)
+		w.EnqueueToast(ToastProps{
+			Title:       "已新增投递记录",
+			Description: fmt.Sprintf("%s / %s", created.CompanyName, created.PositionName),
+			Type:        ToastSuccess,
+		})
 	})
 }
 
@@ -811,7 +839,7 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 			w.resetSelectedJobState()
 		}
 		w.removeJobFromCache(appID)
-		w.ReloadTrash()
+		w.reloadTrash(true)
 		w.EnqueueToast(ToastProps{
 			Title:       "已移入回收站",
 			Description: "可在全局回收站中恢复或彻底删除",

@@ -33,6 +33,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 		return
 	}
 	t := *w.detailTask
+	deleting := w.deletingTaskID == t.ID
 
 	var panelDismissed bool
 	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
@@ -47,7 +48,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 		}
 
 		// Allow dropping files anywhere on the task detail modal or its attachment zone
-		if dropped := panel.DroppedFiles(); len(dropped) > 0 {
+		if dropped := panel.DroppedFiles(); !deleting && len(dropped) > 0 {
 			w.ImportAttachmentsToSelectedTask(dropped)
 		}
 
@@ -57,6 +58,10 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 				AlignSelf(ui.Stretch).Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
 				// Save status indicator
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+					if deleting {
+						ui.Text(c, "正在移入回收站…").FontSize(12).TextColor(tk.TextSecondary)
+						return
+					}
 					switch w.saveState {
 					case "saving":
 						ui.Text(c, "正在保存…").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
@@ -100,7 +105,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 						Variant: buttonDefault,
 						Size:    sizeSmall,
 						Danger:  true,
-					}).Label("将任务移入回收站").Clicked() {
+					}).Disabled(deleting).Label("将任务移入回收站").Clicked() {
 						w.SoftDeleteTask(t.ID)
 						return
 					}
@@ -111,7 +116,7 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 					}
 				})
 			})
-			if w.detailTask == nil {
+			if deleting || w.detailTask == nil {
 				return
 			}
 

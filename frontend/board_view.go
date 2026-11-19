@@ -324,7 +324,7 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 				if uiButton(c.Key("quick-btn-"+string(col.Status)), "添加", buttonProps{
 					Variant: buttonPrimary,
 					Size:    sizeSmall,
-				}).Label("确认添加" + col.Title + "任务").Clicked() {
+				}).Disabled(w.recordWritePending).Label("确认添加" + col.Title + "任务").Clicked() {
 					_, _ = w.QuickCreateTask(col.Status, quickVal)
 				}
 			}
@@ -658,6 +658,7 @@ func (w *Workbench) renderTaskCreateModal(c *ui.Context, tk *uiTokens) {
 		Width:      520,
 		OkText:     "创建任务",
 		CancelText: "取消",
+		OkDisabled: w.recordWritePending,
 	}, func() {
 		ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 			if w.taskModalErr != "" {

@@ -249,6 +249,7 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *uiTokens) {
 		Width:      480,
 		OkText:     okText,
 		CancelText: "取消",
+		OkDisabled: w.recordWritePending,
 	}, func() {
 		ui.Column(c).Gap(14).AlignSelf(ui.Stretch).Children(func() {
 			if w.projectModalErr != "" {

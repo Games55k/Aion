@@ -1256,8 +1256,10 @@ func TestConfirmPermanentDeleteRetainsModalWhenBusy(t *testing.T) {
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "忙碌删除保护"
 	wb.SubmitProjectModal()
+	drainTestUI(wb, dispatched)
 	projID := wb.activeProjectID
 	wb.SoftDeleteProject(projID)
+	drainTestUI(wb, dispatched)
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -1299,10 +1301,7 @@ func TestConfirmPermanentDeleteRetainsModalWhenBusy(t *testing.T) {
 
 	// Once idle, ConfirmPermanentDelete executes and prunes projectNames.
 	wb.ConfirmPermanentDelete()
-	wb.WaitForTasks()
-	for len(dispatched) > 0 {
-		(<-dispatched)()
-	}
+	drainTestUI(wb, dispatched)
 	if wb.confirmPermDeleteOpen || wb.confirmPermDeleteItem != nil {
 		t.Fatalf("expected permanent delete modal state cleared after execution")
 	}
@@ -1533,23 +1532,17 @@ func TestAsyncAttachmentAndBackupDispatchFlow(t *testing.T) {
 		},
 	}
 
-	_, wb, tt := openTestWorkbench(t, t.TempDir(), host)
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), host)
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "异步分发项目"
 	wb.SubmitProjectModal()
-	task, err := wb.QuickCreateTask(model.Planned, "异步附件任务")
+	drainTestUI(wb, dispatched)
+	task, err := app.Projects.CreateTask(context.Background(), wb.activeProjectID, projects.TaskInput{Title: "异步附件任务"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb.WaitForTasks()
-	for len(dispatched) > 0 {
-		(<-dispatched)()
-	}
 	wb.SelectTask(task.ID)
-	wb.WaitForTasks()
-	for len(dispatched) > 0 {
-		(<-dispatched)()
-	}
+	drainTestUI(wb, dispatched)
 
 	// Start real async attachment pick & import.
 	wb.PickAndImportAttachmentsToSelectedTask()
@@ -1569,9 +1562,7 @@ func TestAsyncAttachmentAndBackupDispatchFlow(t *testing.T) {
 	if len(wb.detailAttachments) != 0 {
 		t.Fatal("background worker updated UI attachments before Dispatch callback ran")
 	}
-	for len(dispatched) > 0 {
-		(<-dispatched)()
-	}
+	drainTestUI(wb, dispatched)
 	if wb.IsBusy() {
 		t.Fatal("expected busy cleared after dispatched import apply")
 	}
@@ -2023,15 +2014,17 @@ func TestPrepareCloseWithActiveBackupOrAttachmentTask(t *testing.T) {
 		},
 	}
 
-	_, wb, _ := openTestWorkbench(t, t.TempDir(), host)
+	app, wb, _ := openTestWorkbench(t, t.TempDir(), host)
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "关闭任务保护"
 	wb.SubmitProjectModal()
-	task, err := wb.QuickCreateTask(model.Planned, "附件与备份任务")
+	drainTestUI(wb, dispatched)
+	task, err := app.Projects.CreateTask(context.Background(), wb.activeProjectID, projects.TaskInput{Title: "附件与备份任务"})
 	if err != nil {
 		t.Fatalf("QuickCreateTask: %v", err)
 	}
 	wb.SelectTask(task.ID)
+	drainTestUI(wb, dispatched)
 
 	// 1. Active async backup task blocks PrepareClose until worker finishes and Dispatch callback drains.
 	wb.PickAndExportManualBackup()
@@ -2065,9 +2058,7 @@ func TestPrepareCloseWithActiveBackupOrAttachmentTask(t *testing.T) {
 	if wb.PrepareClose() {
 		t.Fatal("PrepareClose must return false before queued attachment UI Dispatch callback runs")
 	}
-	for len(dispatched) > 0 {
-		(<-dispatched)()
-	}
+	drainTestUI(wb, dispatched)
 	if !wb.PrepareClose() {
 		t.Fatal("PrepareClose must return true after attachment import and UI callback complete")
 	}
@@ -3087,7 +3078,7 @@ func TestTrashCleanupFailureRefreshesDeletedItems(t *testing.T) {
 			if err := os.Rename(managed, moved); err != nil {
 				t.Fatal(err)
 			}
-			dispatched := make(chan func(), 1)
+			dispatched := make(chan func(), 8)
 			wb.host.Dispatch = func(fn func()) { dispatched <- fn }
 			start, confirm := "彻底删除 Delete me", "确认彻底删除"
 			if clearAll {
@@ -3099,8 +3090,7 @@ func TestTrashCleanupFailureRefreshesDeletedItems(t *testing.T) {
 			if err := tt.Click(confirm); err != nil {
 				t.Fatal(err)
 			}
-			wb.WaitForTasks()
-			(<-dispatched)()
+			drainTestUI(wb, dispatched)
 			tt.Frame()
 			items, err := app.Projects.ListTrash(ctx)
 			if err != nil || len(items) != 0 {

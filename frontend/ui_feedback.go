@@ -123,6 +123,7 @@ type modalProps struct {
 	Width      float32
 	OkText     string
 	CancelText string
+	OkDisabled bool
 }
 
 func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
@@ -161,7 +162,7 @@ func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
 				if uiButton(c, textOr(p.CancelText, "Cancel"), buttonProps{}).Clicked() {
 					*open = false
 				}
-				if uiButton(c, textOr(p.OkText, "OK"), buttonProps{Variant: buttonPrimary}).Clicked() {
+				if uiButton(c, textOr(p.OkText, "OK"), buttonProps{Variant: buttonPrimary}).Disabled(p.OkDisabled).Clicked() {
 					ok = true
 				}
 			})

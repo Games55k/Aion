@@ -153,6 +153,8 @@ type Workbench struct {
 	jobCreateChannel     string
 	jobCreateNotes       string
 	jobCreateErr         string
+	jobCreateVersion     uint64
+	jobCreatePending     bool
 
 	// Job Detail modal & auto-save state
 	selectedJobID        string
@@ -259,10 +261,13 @@ type Workbench struct {
 	discardAfterSave bool
 	// discardRebase marks that the in-flight write is a discard baseline: if it fails,
 	// the queued follow-up save must rebase on the committed task instead.
-	discardRebase     bool
-	loadVersions      map[string]uint64
-	navigationVersion uint64
-	boardNeedsReload  bool
+	discardRebase      bool
+	loadVersions       map[string]uint64
+	navigationVersion  uint64
+	boardNeedsReload   bool
+	recordWritePending bool
+	afterRecordWrite   func()
+	deletingTaskID     string
 
 	// Preview caches are owned by the UI thread; workers publish through Host.Dispatch.
 	attachmentPaths   map[string]string
@@ -274,12 +279,13 @@ type Workbench struct {
 	bitmapLoader      func(string) (*ui.Bitmap, error)
 
 	// Create/Edit Project modal state
-	projectModalOpen   bool
-	projectModalEditID string
-	projectModalName   string
-	projectModalDesc   string
-	projectModalIcon   string
-	projectModalErr    string
+	projectModalOpen    bool
+	projectModalEditID  string
+	projectModalName    string
+	projectModalDesc    string
+	projectModalIcon    string
+	projectModalErr     string
+	projectModalVersion uint64
 
 	// Create Task modal state
 	taskModalOpen     bool
@@ -290,6 +296,7 @@ type Workbench struct {
 	taskModalTags     string
 	taskModalDueDate  time.Time
 	taskModalErr      string
+	taskModalVersion  uint64
 
 	// Trash view state
 	trashSearch             string
@@ -316,6 +323,7 @@ type Workbench struct {
 	confirmRestoreOpen   bool
 	pendingRestoreZip    string
 	updateInfo           UpdateCapability
+	settingWrites        map[string]func() func()
 }
 
 // New creates and initializes a Workbench backed by app.
@@ -684,6 +692,10 @@ func (w *Workbench) FlushPending() error {
 // If there are unsaved task or job edits that fail validation/persistence, or a background task is running,
 // PrepareClose keeps the draft/modal visible, notifies the user, and returns false.
 func (w *Workbench) PrepareClose() bool {
+	if w.recordWritePending || len(w.settingWrites) > 0 {
+		w.EnqueueToast(ToastProps{Title: "正在保存更改", Description: "保存完成后再关闭窗口", Type: ToastInfo})
+		return false
+	}
 	if w.saving {
 		w.EnqueueToast(ToastProps{Title: "正在保存任务", Description: "保存完成后再关闭窗口", Type: ToastInfo})
 		return false
@@ -998,9 +1010,12 @@ func (w *Workbench) reloadBoardTasks(async bool) {
 		return
 	}
 
-	projectID := w.activeProjectID
+	w.loadUI("board", async, w.boardReader(w.activeProjectID))
+}
+
+func (w *Workbench) boardReader(projectID string) func() func() {
 	service, attachments := w.app.Projects, w.app.Attachments
-	w.loadUI("board", async, func() func() {
+	return func() func() {
 		ctx := context.Background()
 		unfiltered, err := service.ListTasks(ctx, projectID, projects.TaskFilter{})
 		var attMap map[string][]model.Attachment
@@ -1046,7 +1061,7 @@ func (w *Workbench) reloadBoardTasks(async bool) {
 				w.pruneAttachmentCaches()
 			}
 		}
-	})
+	}
 }
 
 // rebuildBoardDerived recomputes everything derived from boardTasks (project
@@ -1158,6 +1173,16 @@ func (w *Workbench) SelectTask(taskID string) {
 	if w.IsRestoring() {
 		return
 	}
+	if w.recordWritePending {
+		navigation := w.navigationVersion
+		w.loadVersions["selection"]++
+		w.afterRecordWrite = func() {
+			if w.navigationVersion == navigation && slices.ContainsFunc(w.boardTasks, func(t model.Task) bool { return t.ID == taskID }) {
+				w.SelectTask(taskID)
+			}
+		}
+		return
+	}
 	if w.selectedTaskID == taskID && w.detailTask != nil {
 		w.loadVersions["selection"]++
 		w.afterSave = nil
@@ -1177,6 +1202,10 @@ func (w *Workbench) SelectTask(taskID string) {
 		return func() {
 			if err != nil {
 				w.enqueueErrorToast("无法打开任务详情", err)
+				return
+			}
+			if w.recordWritePending {
+				w.SelectTask(taskID)
 				return
 			}
 			w.taskAttachments[t.ID] = atts
@@ -1283,14 +1312,8 @@ func (w *Workbench) ClearSelectedTask() {
 func (w *Workbench) syncDetailFromTask(t model.Task) {
 	w.detailTask = &t
 	w.detailTaskEpoch = w.currentDataEpoch()
-	if atts, ok := w.taskAttachments[t.ID]; ok {
-		w.detailAttachments = slices.Clone(atts)
-		w.cacheAttachments(atts)
-	} else if atts, err := w.app.Attachments.List(context.Background(), t.ID); err == nil {
-		w.detailAttachments = atts
-		w.taskAttachments[t.ID] = atts
-		w.cacheAttachments(atts)
-	}
+	w.detailAttachments = slices.Clone(w.taskAttachments[t.ID])
+	w.cacheAttachments(w.detailAttachments)
 	w.resetDetailEditFields(t)
 }
 
@@ -1658,24 +1681,12 @@ func (w *Workbench) SetTaskPriority(taskID string, priority model.Priority) {
 	if t.Priority == priority {
 		return
 	}
-	updated, err := w.app.Projects.UpdateTask(context.Background(), taskID, projects.TaskInput{
-		Title:       t.Title,
-		Description: t.Description,
-		Status:      t.Status,
-		Priority:    priority,
-		Tags:        slices.Clone(t.Tags),
-		Subtasks:    slices.Clone(t.Subtasks),
-		DueDate:     t.DueDate,
-	})
-	if err != nil {
+	service := w.app.Projects
+	runBoardWrite(w, t.ProjectID, func() (struct{}, error) {
+		return struct{}{}, service.SetTaskPriority(context.Background(), taskID, priority)
+	}, func(_ struct{}, err error) {
 		w.enqueueErrorToast("更新优先级失败", err)
-		return
-	}
-	w.boardTasks[idx] = updated
-	if w.selectedTaskID == updated.ID && !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
-		w.syncDetailFromTask(updated)
-	}
-	w.rebuildBoardDerived()
+	})
 }
 
 // MoveTaskToColumn moves a task to targetStatus at the given unfiltered index (or end of column when index < 0).
@@ -1697,12 +1708,12 @@ func (w *Workbench) MoveTaskToColumn(taskID string, targetStatus model.Status, u
 		}
 		unfilteredIndex = count
 	}
-	ctx := context.Background()
-	if _, err := w.app.Projects.MoveTask(ctx, taskID, targetStatus, unfilteredIndex); err != nil {
+	service := w.app.Projects
+	runBoardWrite(w, w.activeProjectID, func() (model.Task, error) {
+		return service.MoveTask(context.Background(), taskID, targetStatus, unfilteredIndex)
+	}, func(_ model.Task, err error) {
 		w.enqueueErrorToast("移动任务失败", err)
-		return
-	}
-	w.ReloadBoardTasks()
+	})
 }
 
 // MoveOrReorderTaskToSlot moves draggedTaskID to the insertion gap visibleSlot
@@ -1748,12 +1759,7 @@ func (w *Workbench) MoveOrReorderTaskToSlot(draggedTaskID string, targetStatus m
 			insertIdx--
 		}
 		ids = slices.Insert(ids, insertIdx, draggedTaskID)
-		ctx := context.Background()
-		if err := w.app.Projects.ReorderTasks(ctx, w.activeProjectID, targetStatus, ids); err != nil {
-			w.enqueueErrorToast("排序失败", err)
-			return
-		}
-		w.ReloadBoardTasks()
+		w.reorderBoard(targetStatus, ids, "排序失败")
 		return
 	}
 
@@ -1808,12 +1814,16 @@ func (w *Workbench) StepTaskInColumn(taskID string, status model.Status, delta i
 		ids[i] = t.ID
 	}
 	ids[idx], ids[newIdx] = ids[newIdx], ids[idx]
-	ctx := context.Background()
-	if err := w.app.Projects.ReorderTasks(ctx, w.activeProjectID, status, ids); err != nil {
-		w.enqueueErrorToast("调整顺序失败", err)
-		return
-	}
-	w.ReloadBoardTasks()
+	w.reorderBoard(status, ids, "调整顺序失败")
+}
+
+func (w *Workbench) reorderBoard(status model.Status, ids []string, failureTitle string) {
+	projectID, service := w.activeProjectID, w.app.Projects
+	runBoardWrite(w, projectID, func() (struct{}, error) {
+		return struct{}{}, service.ReorderTasks(context.Background(), projectID, status, ids)
+	}, func(_ struct{}, err error) {
+		w.enqueueErrorToast(failureTitle, err)
+	})
 }
 
 // OpenCreateProjectModal opens the modal to create a new project.
@@ -1821,6 +1831,7 @@ func (w *Workbench) OpenCreateProjectModal() {
 	if w.IsRestoring() {
 		return
 	}
+	w.projectModalVersion++
 	w.projectModalOpen = true
 	w.projectModalEditID = ""
 	w.projectModalName = ""
@@ -1834,6 +1845,7 @@ func (w *Workbench) OpenEditProjectModal(p model.Project) {
 	if w.IsRestoring() {
 		return
 	}
+	w.projectModalVersion++
 	w.projectModalOpen = true
 	w.projectModalEditID = p.ID
 	w.projectModalName = p.Name
@@ -1859,46 +1871,53 @@ func (w *Workbench) SubmitProjectModal() bool {
 	if icon == "" {
 		icon = "folder"
 	}
-	ctx := context.Background()
+	draft := w.projectFormInput()
 	input := projects.ProjectInput{
 		Name:        name,
 		Description: strings.TrimSpace(w.projectModalDesc),
 		Icon:        icon,
 	}
-	if w.projectModalEditID == "" {
+	editID, version, navigation := w.projectModalEditID, w.projectModalVersion, w.navigationVersion
+	if editID == "" {
 		if err := w.FlushPending(); err != nil {
 			w.projectModalErr = "当前打开的任务存在未保存修改（" + w.flushErrorDetail(err) + "），请先修正或放弃修改"
 			return false
 		}
-		created, err := w.app.Projects.CreateProject(ctx, input)
-		if err != nil {
-			w.projectModalErr = err.Error()
-			return false
+	}
+	service := w.app.Projects
+	_, err := runRecordWrite(w, func() (model.Project, error) {
+		if editID == "" {
+			return service.CreateProject(context.Background(), input)
 		}
-		w.projectModalOpen = false
-		w.ReloadProjects()
-		w.SelectProject(created.ID)
-		w.EnqueueToast(ToastProps{
-			Title:       "已创建项目",
-			Description: created.Name,
-			Type:        ToastSuccess,
-		})
-		return true
-	}
-
-	updated, err := w.app.Projects.UpdateProject(ctx, w.projectModalEditID, input)
-	if err != nil {
-		w.projectModalErr = err.Error()
-		return false
-	}
-	w.projectModalOpen = false
-	w.ReloadProjects()
-	w.EnqueueToast(ToastProps{
-		Title:       "已更新项目",
-		Description: updated.Name,
-		Type:        ToastSuccess,
+		return service.UpdateProject(context.Background(), editID, input)
+	}, func(project model.Project, err error) {
+		current := w.projectModalOpen && w.projectModalVersion == version && w.projectFormInput() == draft
+		if err != nil {
+			if current {
+				w.projectModalErr = err.Error()
+			} else {
+				w.enqueueErrorToast("保存项目失败", err)
+			}
+			return
+		}
+		if current {
+			w.projectModalOpen = false
+		}
+		w.upsertProjectInCache(project)
+		title := "已更新项目"
+		if editID == "" {
+			title = "已创建项目"
+			if current && w.navigationVersion == navigation {
+				w.SelectProject(project.ID)
+			}
+		}
+		w.EnqueueToast(ToastProps{Title: title, Description: project.Name, Type: ToastSuccess})
 	})
-	return true
+	return err == nil
+}
+
+func (w *Workbench) projectFormInput() projects.ProjectInput {
+	return projects.ProjectInput{Name: w.projectModalName, Icon: w.projectModalIcon, Description: w.projectModalDesc}
 }
 
 // ArchiveProject archives an active project.
@@ -1909,18 +1928,7 @@ func (w *Workbench) ArchiveProject(projectID string) {
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再归档项目"); err != nil {
 		return
 	}
-	ctx := context.Background()
-	p, err := w.app.Projects.ArchiveProject(ctx, projectID, true)
-	if err != nil {
-		w.enqueueErrorToast("归档项目失败", err)
-		return
-	}
-	w.ReloadProjects()
-	w.EnqueueToast(ToastProps{
-		Title:       "项目已归档",
-		Description: p.Name,
-		Type:        ToastInfo,
-	})
+	w.setProjectArchived(projectID, true, "项目已归档", "归档项目失败", ToastInfo)
 }
 
 // UnarchiveProject restores an archived project back to the active project list.
@@ -1928,17 +1936,20 @@ func (w *Workbench) UnarchiveProject(projectID string) {
 	if w.IsRestoring() {
 		return
 	}
-	ctx := context.Background()
-	p, err := w.app.Projects.ArchiveProject(ctx, projectID, false)
-	if err != nil {
-		w.enqueueErrorToast("恢复归档失败", err)
-		return
-	}
-	w.ReloadProjects()
-	w.EnqueueToast(ToastProps{
-		Title:       "已恢复归档项目",
-		Description: p.Name,
-		Type:        ToastSuccess,
+	w.setProjectArchived(projectID, false, "已恢复归档项目", "恢复归档失败", ToastSuccess)
+}
+
+func (w *Workbench) setProjectArchived(projectID string, archived bool, success, failure string, severity ToastType) {
+	service := w.app.Projects
+	runRecordWrite(w, func() (model.Project, error) {
+		return service.ArchiveProject(context.Background(), projectID, archived)
+	}, func(p model.Project, err error) {
+		if err != nil {
+			w.enqueueErrorToast(failure, err)
+			return
+		}
+		w.upsertProjectInCache(p)
+		w.EnqueueToast(ToastProps{Title: success, Description: p.Name, Type: severity})
 	})
 }
 
@@ -1950,28 +1961,36 @@ func (w *Workbench) SoftDeleteProject(projectID string) {
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再操作"); err != nil {
 		return
 	}
-	ctx := context.Background()
-	if err := w.app.Projects.DeleteProject(ctx, projectID); err != nil {
-		w.enqueueErrorToast("移入回收站失败", err)
-		return
-	}
-	if w.activeProjectID == projectID {
-		w.resetSelectedTaskState()
-		w.activeProjectID = ""
-	}
-	w.ReloadProjects()
-	w.ReloadTrash()
-	if w.activeProjectID == "" {
-		if len(w.activeProjects) > 0 {
-			w.SelectProject(w.activeProjects[0].ID)
-		} else {
-			w.navPage = NavAllProjects
+	service, navigation := w.app.Projects, w.navigationVersion
+	runRecordWrite(w, func() (struct{}, error) {
+		return struct{}{}, service.DeleteProject(context.Background(), projectID)
+	}, func(_ struct{}, err error) {
+		if err != nil {
+			w.enqueueErrorToast("移入回收站失败", err)
+			return
 		}
-	}
-	w.EnqueueToast(ToastProps{
-		Title:       "项目已移入回收站",
-		Description: "可在回收站中随时恢复或彻底删除",
-		Type:        ToastInfo,
+		w.removeProjectFromCache(projectID)
+		delete(w.projectSummaries, projectID)
+		if w.activeProjectID == projectID {
+			samePage := w.navigationVersion == navigation
+			w.resetSelectedTaskState()
+			w.activeProjectID = ""
+			w.reloadBoardTasks(true)
+			if w.navPage == NavProjectBoard {
+				if samePage && len(w.activeProjects) > 0 {
+					w.SelectProject(w.activeProjects[0].ID)
+				} else {
+					w.NavigateTo(NavAllProjects)
+				}
+			}
+		}
+		w.reloadProjects(true)
+		w.reloadTrash(true)
+		w.EnqueueToast(ToastProps{
+			Title:       "项目已移入回收站",
+			Description: "可在回收站中随时恢复或彻底删除",
+			Type:        ToastInfo,
+		})
 	})
 }
 
@@ -1983,6 +2002,7 @@ func (w *Workbench) OpenCreateTaskModal(status model.Status) {
 	if status == "" {
 		status = model.Planned
 	}
+	w.taskModalVersion++
 	w.taskModalOpen = true
 	w.taskModalStatus = string(status)
 	w.taskModalPriority = string(model.Medium)
@@ -2012,8 +2032,16 @@ func (w *Workbench) SubmitTaskModal() bool {
 		return false
 	}
 
+	type taskFormDraft struct {
+		title, description, status, priority, tags string
+		due                                        time.Time
+	}
+	readDraft := func() taskFormDraft {
+		return taskFormDraft{w.taskModalTitle, w.taskModalDesc, w.taskModalStatus, w.taskModalPriority, w.taskModalTags, w.taskModalDueDate}
+	}
+	draft := readDraft()
 	var tags []string
-	for _, part := range strings.FieldsFunc(w.taskModalTags, func(r rune) bool {
+	for _, part := range strings.FieldsFunc(draft.tags, func(r rune) bool {
 		return r == ',' || r == '，' || r == ';' || r == '；'
 	}) {
 		if t := strings.TrimSpace(part); t != "" && !slices.Contains(tags, t) {
@@ -2022,35 +2050,41 @@ func (w *Workbench) SubmitTaskModal() bool {
 	}
 
 	dueStr := ""
-	if !w.taskModalDueDate.IsZero() {
-		dueStr = w.taskModalDueDate.Format("2006-01-02")
+	if !draft.due.IsZero() {
+		dueStr = draft.due.Format("2006-01-02")
 	}
 
-	ctx := context.Background()
-	created, err := w.app.Projects.CreateTask(ctx, w.activeProjectID, projects.TaskInput{
+	input := projects.TaskInput{
 		Title:       title,
-		Description: w.taskModalDesc,
-		Status:      model.Status(w.taskModalStatus),
-		Priority:    model.Priority(w.taskModalPriority),
+		Description: draft.description,
+		Status:      model.Status(draft.status),
+		Priority:    model.Priority(draft.priority),
 		Tags:        tags,
 		DueDate:     dueStr,
-	})
-	if err != nil {
-		w.taskModalErr = err.Error()
-		return false
 	}
-
-	w.taskModalOpen = false
-	w.ReloadBoardTasks()
-	w.EnqueueToast(ToastProps{
-		Title:       "已创建任务",
-		Description: created.Title,
-		Type:        ToastSuccess,
+	service, projectID, version := w.app.Projects, w.activeProjectID, w.taskModalVersion
+	_, err := runBoardWrite(w, projectID, func() (model.Task, error) {
+		return service.CreateTask(context.Background(), projectID, input)
+	}, func(created model.Task, err error) {
+		current := w.taskModalOpen && w.taskModalVersion == version && readDraft() == draft
+		if err != nil {
+			if current {
+				w.taskModalErr = err.Error()
+			} else {
+				w.enqueueErrorToast("创建任务失败", err)
+			}
+			return
+		}
+		if current {
+			w.taskModalOpen = false
+		}
+		w.EnqueueToast(ToastProps{Title: "已创建任务", Description: created.Title, Type: ToastSuccess})
 	})
-	return true
+	return err == nil
 }
 
-// QuickCreateTask creates a task directly in the specified column from its quick input.
+// QuickCreateTask creates a task from the quick input. With Dispatch, a nil error
+// means the write was accepted and the task will appear after acknowledgement.
 func (w *Workbench) QuickCreateTask(status model.Status, title string) (*model.Task, error) {
 	if w.IsRestoring() {
 		return nil, fmt.Errorf("%w: backup restore in progress", model.ErrConflict)
@@ -2067,24 +2101,34 @@ func (w *Workbench) QuickCreateTask(status model.Status, title string) (*model.T
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再新建任务"); err != nil {
 		return nil, err
 	}
-	ctx := context.Background()
-	created, err := w.app.Projects.CreateTask(ctx, w.activeProjectID, projects.TaskInput{
-		Title:    title,
-		Status:   status,
-		Priority: model.NoPriority,
+	service, projectID, draft := w.app.Projects, w.activeProjectID, w.quickTaskTitles[status]
+	created, err := runBoardWrite(w, projectID, func() (*model.Task, error) {
+		task, err := service.CreateTask(context.Background(), projectID, projects.TaskInput{
+			Title: title, Status: status, Priority: model.NoPriority,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &task, nil
+	}, func(_ *model.Task, err error) {
+		if err != nil {
+			w.enqueueErrorToast("创建任务失败", err)
+			return
+		}
+		if w.quickTaskTitles[status] == draft {
+			w.quickTaskTitles[status] = ""
+		}
 	})
-	if err != nil {
-		w.enqueueErrorToast("创建任务失败", err)
-		return nil, err
-	}
-	w.quickTaskTitles[status] = ""
-	w.ReloadBoardTasks()
-	return &created, nil
+	return created, err
 }
 
 // SoftDeleteTask moves a task to the Recycle Bin.
 func (w *Workbench) SoftDeleteTask(taskID string) {
 	if w.IsRestoring() || taskID == "" {
+		return
+	}
+	if w.recordWritePending {
+		w.enqueueErrorToast("正在保存更改", errRecordWritePending)
 		return
 	}
 	if w.saving && w.selectedTaskID == taskID {
@@ -2102,20 +2146,25 @@ func (w *Workbench) SoftDeleteTask(taskID string) {
 			return
 		}
 	}
-	ctx := context.Background()
-	if err := w.app.Projects.DeleteTask(ctx, taskID); err != nil {
-		w.enqueueErrorToast("移入回收站失败", err)
-		return
-	}
-	if w.selectedTaskID == taskID {
-		w.resetSelectedTaskState()
-	}
-	w.ReloadBoardTasks()
-	w.ReloadTrash()
-	w.EnqueueToast(ToastProps{
-		Title:       "任务已移入回收站",
-		Description: "可在回收站中恢复或永久删除",
-		Type:        ToastInfo,
+	service := w.app.Projects
+	w.deletingTaskID = taskID
+	runBoardWrite(w, w.activeProjectID, func() (struct{}, error) {
+		return struct{}{}, service.DeleteTask(context.Background(), taskID)
+	}, func(_ struct{}, err error) {
+		w.deletingTaskID = ""
+		if err != nil {
+			w.enqueueErrorToast("移入回收站失败", err)
+			return
+		}
+		if w.selectedTaskID == taskID {
+			w.resetSelectedTaskState()
+		}
+		w.reloadTrash(true)
+		w.EnqueueToast(ToastProps{
+			Title:       "任务已移入回收站",
+			Description: "可在回收站中恢复或永久删除",
+			Type:        ToastInfo,
+		})
 	})
 }
 
@@ -2153,7 +2202,7 @@ func (w *Workbench) applyImportedAttachments(imported int, toasts []ToastProps) 
 		w.EnqueueToast(t)
 	}
 	if imported > 0 {
-		w.ReloadBoardTasks()
+		w.reloadBoardTasks(true)
 	}
 }
 
@@ -2237,7 +2286,7 @@ func (w *Workbench) RemoveAttachmentFromSelectedTask(attachmentID string) {
 			delete(w.attachmentMissing, attachmentID)
 			delete(w.bitmapCache, attachmentID)
 			delete(w.bitmapFailed, attachmentID)
-			w.ReloadBoardTasks()
+			w.reloadBoardTasks(true)
 			if gcErr != nil {
 				// The row is gone; the file stays until the next successful cleanup.
 				w.EnqueueToast(ToastProps{
@@ -2419,10 +2468,20 @@ func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
 	if w.IsRestoring() {
 		return
 	}
-	ctx := context.Background()
-	err := w.app.RestoreTrash(ctx, item.Kind, item.ID)
-	if err != nil {
-		if errors.Is(err, model.ErrParentDeleted) {
+	app, navigation := w.app, w.navigationVersion
+	work := func() (model.JobApplication, error) {
+		ctx := context.Background()
+		if err := app.RestoreTrash(ctx, item.Kind, item.ID); err != nil {
+			return model.JobApplication{}, err
+		}
+		if item.Kind == jobapplications.TrashKind {
+			restored, _ := app.JobApplications.Get(ctx, item.ID)
+			return restored, nil
+		}
+		return model.JobApplication{}, nil
+	}
+	apply := func(restored model.JobApplication, err error) {
+		if errors.Is(err, model.ErrParentDeleted) && w.navigationVersion == navigation {
 			itemCopy := item
 			w.trashOrphanTask = &itemCopy
 			w.trashOrphanParent = nil
@@ -2436,21 +2495,31 @@ func (w *Workbench) RestoreTrashItem(item model.TrashItem) {
 			w.trashParentErrModalOpen = true
 			return
 		}
-		w.EnqueueToast(ToastProps{
-			Title:       "恢复失败",
-			Description: err.Error(),
-			Type:        ToastError,
-		})
-		return
+		if err != nil {
+			w.enqueueErrorToast("恢复失败", err)
+			return
+		}
+		if item.Kind != jobapplications.TrashKind {
+			w.reloadProjects(true)
+		} else if restored.ID != "" {
+			w.upsertJobInCache(restored)
+		} else {
+			w.reloadJobApplications(true)
+		}
+		w.removeRestoredTrashItem(item)
+		w.EnqueueToast(ToastProps{Title: "已从回收站恢复", Description: item.Name, Type: ToastSuccess})
 	}
-	w.ReloadProjects()
-	w.ReloadJobApplications()
-	w.ReloadTrash()
-	w.EnqueueToast(ToastProps{
-		Title:       "已从回收站恢复",
-		Description: item.Name,
-		Type:        ToastSuccess,
-	})
+	if item.Kind == projects.TrashTask && item.ProjectID != "" {
+		runBoardWrite(w, item.ProjectID, work, apply)
+	} else {
+		runRecordWrite(w, work, apply)
+	}
+}
+
+func (w *Workbench) removeRestoredTrashItem(item model.TrashItem) {
+	w.trashItems = slices.DeleteFunc(w.trashItems, func(t model.TrashItem) bool { return t.Kind == item.Kind && t.ID == item.ID })
+	w.rebuildProjectNames()
+	w.reloadTrash(true)
 }
 
 // RestoreOrphanTaskWithParent restores the deleted parent project and then restores the task.
@@ -2462,32 +2531,37 @@ func (w *Workbench) RestoreOrphanTaskWithParent() {
 		w.trashParentErrModalOpen = false
 		return
 	}
-	ctx := context.Background()
-	taskItem := *w.trashOrphanTask
-	if taskItem.ProjectID != "" {
-		if err := w.app.Projects.RestoreTrash(ctx, projects.TrashProject, taskItem.ProjectID); err != nil {
-			w.enqueueErrorToast("恢复所属项目失败", err)
+	selected, service := w.trashOrphanTask, w.app.Projects
+	taskItem := *selected
+	runBoardWrite(w, taskItem.ProjectID, func() (error, error) {
+		ctx := context.Background()
+		if taskItem.ProjectID != "" {
+			if err := service.RestoreProject(ctx, taskItem.ProjectID); err != nil {
+				return nil, err
+			}
+		}
+		if taskItem.ID != "" {
+			return service.RestoreTask(ctx, taskItem.ID), nil
+		}
+		return nil, nil
+	}, func(taskErr, parentErr error) {
+		if parentErr != nil {
+			w.enqueueErrorToast("恢复所属项目失败", parentErr)
 			return
 		}
-	}
-	// Independently deleted tasks require explicit restoration after restoring the parent project.
-	var taskErr error
-	if taskItem.ID != "" {
-		taskErr = w.app.Projects.RestoreTrash(ctx, projects.TrashTask, taskItem.ID)
-	}
-	w.trashParentErrModalOpen = false
-	w.trashOrphanTask = nil
-	w.trashOrphanParent = nil
-	w.ReloadProjects()
-	w.ReloadTrash()
-	if taskErr != nil {
-		w.enqueueErrorToast("恢复任务失败（所属项目已恢复）", taskErr)
-		return
-	}
-	w.EnqueueToast(ToastProps{
-		Title:       "已恢复项目与任务",
-		Description: taskItem.Name,
-		Type:        ToastSuccess,
+		if w.trashOrphanTask == selected {
+			w.trashParentErrModalOpen = false
+			w.trashOrphanTask = nil
+			w.trashOrphanParent = nil
+		}
+		w.reloadProjects(true)
+		if taskErr != nil {
+			w.reloadTrash(true)
+			w.enqueueErrorToast("恢复任务失败（所属项目已恢复）", taskErr)
+			return
+		}
+		w.removeRestoredTrashItem(taskItem)
+		w.EnqueueToast(ToastProps{Title: "已恢复项目与任务", Description: taskItem.Name, Type: ToastSuccess})
 	})
 }
 
@@ -2502,6 +2576,10 @@ func (w *Workbench) ConfirmPermanentDelete() {
 	}
 	if w.IsBusy() {
 		w.enqueueBusyToast()
+		return
+	}
+	if w.recordWritePending {
+		w.enqueueErrorToast("正在保存更改", errRecordWritePending)
 		return
 	}
 	item := *w.confirmPermDeleteItem
@@ -2520,9 +2598,9 @@ func (w *Workbench) ConfirmPermanentDelete() {
 				w.trashOrphanTask = nil
 				w.trashOrphanParent = nil
 			}
-			w.ReloadProjects()
-			w.ReloadJobApplications()
-			w.ReloadTrash()
+			w.reloadProjects(true)
+			w.reloadJobApplications(true)
+			w.reloadTrash(true)
 			w.pruneAttachmentCaches()
 			if cleanupErr != nil {
 				w.reportTrashCleanupError(cleanupErr)
@@ -2551,6 +2629,10 @@ func (w *Workbench) ConfirmClearTrash() {
 		w.enqueueBusyToast()
 		return
 	}
+	if w.recordWritePending {
+		w.enqueueErrorToast("正在保存更改", errRecordWritePending)
+		return
+	}
 	w.confirmClearTrashOpen = false
 	started := w.runAsyncTask("正在清空回收站并清理未引用附件...", func(ctx context.Context) func() {
 		err := w.app.ClearTrash(ctx)
@@ -2565,9 +2647,9 @@ func (w *Workbench) ConfirmClearTrash() {
 			w.trashOrphanParent = nil
 			w.confirmPermDeleteOpen = false
 			w.confirmPermDeleteItem = nil
-			w.ReloadProjects()
-			w.ReloadJobApplications()
-			w.ReloadTrash()
+			w.reloadProjects(true)
+			w.reloadJobApplications(true)
+			w.reloadTrash(true)
 			w.pruneAttachmentCaches()
 			if cleanupErr != nil {
 				w.reportTrashCleanupError(cleanupErr)
@@ -2617,21 +2699,27 @@ func (w *Workbench) reloadSettings(async bool) {
 		pol, policyErr := backups.GetPolicy(ctx)
 		st, statusErr := backups.Status(ctx)
 		return func() {
-			if themeErr == nil && w.themeSetting == initialTheme {
-				w.themeSetting = th
+			if !w.settingWritePending(themePreference) {
+				if themeErr == nil && w.themeSetting == initialTheme {
+					w.themeSetting = th
+				}
+				w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
 			}
-			w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
-			if policyErr == nil && w.backupPolicyDraft() == initialPolicy {
-				w.backupEnabled = pol.Enabled
-				w.backupIntervalSelect = formatIntervalOption(pol.Interval)
-				w.backupKeepSelect = fmt.Sprint(pol.Keep)
-				w.backupDirInput = pol.Directory
+			if policyErr == nil && !w.settingWritePending(backupPreference) && w.backupPolicyDraft() == initialPolicy {
+				w.applyBackupPolicy(pol)
 			}
 			if statusErr == nil {
 				w.backupStatus = st
 			}
 		}
 	})
+}
+
+func (w *Workbench) applyBackupPolicy(pol backup.Policy) {
+	w.backupEnabled = pol.Enabled
+	w.backupIntervalSelect = formatIntervalOption(pol.Interval)
+	w.backupKeepSelect = fmt.Sprint(pol.Keep)
+	w.backupDirInput = pol.Directory
 }
 
 // backupPolicyDraft compares the raw controls so an in-flight Settings load
@@ -2691,17 +2779,24 @@ func (w *Workbench) ApplyThemeSetting(th string) {
 		w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
 		return
 	}
-	ctx := context.Background()
-	if err := w.app.Settings.SetTheme(ctx, th); err != nil {
-		w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
-		w.enqueueErrorToast("保存主题设置失败", err)
-		return
-	}
-	w.themeSetting = th
 	w.themeSegmentIdx = themeSegmentForSetting(th)
-	if w.host.SetTheme != nil {
-		w.host.SetTheme(th)
-	}
+	settings := w.app.Settings
+	w.saveSetting(themePreference, func() func() {
+		err := settings.SetTheme(context.Background(), th)
+		return func() {
+			if err != nil {
+				w.enqueueErrorToast("保存主题设置失败", err)
+			} else {
+				w.themeSetting = th
+				if w.host.SetTheme != nil {
+					w.host.SetTheme(th)
+				}
+			}
+			if !w.settingWritePending(themePreference) {
+				w.themeSegmentIdx = themeSegmentForSetting(w.themeSetting)
+			}
+		}
+	})
 }
 
 // SaveBackupPolicy persists the current backup policy controls to SQLite and reconfigures the scheduler.
@@ -2709,28 +2804,34 @@ func (w *Workbench) SaveBackupPolicy() {
 	if w.IsRestoring() {
 		return
 	}
-	ctx := context.Background()
+	draft := w.backupPolicyDraft()
 	keep := 7
-	if rawKeep := strings.TrimSpace(w.backupKeepSelect); rawKeep != "" {
+	if rawKeep := strings.TrimSpace(draft.keep); rawKeep != "" {
 		if parsed, err := strconv.Atoi(rawKeep); err == nil {
 			keep = parsed
 		}
 	}
 	pol := backup.Policy{
-		Enabled:   w.backupEnabled,
-		Interval:  parseIntervalOption(w.backupIntervalSelect),
+		Enabled:   draft.enabled,
+		Interval:  parseIntervalOption(draft.interval),
 		Keep:      keep,
-		Directory: strings.TrimSpace(w.backupDirInput),
+		Directory: strings.TrimSpace(draft.dir),
 	}
-	if err := w.app.Backups.SetPolicy(ctx, pol); err != nil {
-		w.enqueueErrorToast("保存自动备份策略失败", err)
-		return
-	}
-	w.ReloadSettings()
-	w.EnqueueToast(ToastProps{
-		Title:       "自动备份策略已保存",
-		Description: "本地自动备份调度器已更新",
-		Type:        ToastSuccess,
+	backups := w.app.Backups
+	w.saveSetting(backupPreference, func() func() {
+		ctx := context.Background()
+		if err := backups.SetPolicy(ctx, pol); err != nil {
+			return func() { w.enqueueErrorToast("保存自动备份策略失败", err) }
+		}
+		saved, err := backups.GetPolicy(ctx)
+		return func() {
+			if err == nil && !w.settingWritePending(backupPreference) && w.backupPolicyDraft() == draft {
+				w.applyBackupPolicy(saved)
+			}
+			if !w.settingWritePending(backupPreference) {
+				w.EnqueueToast(ToastProps{Title: "自动备份策略已保存", Description: "本地自动备份调度器已更新", Type: ToastSuccess})
+			}
+		}
 	})
 }
 
@@ -2741,6 +2842,10 @@ func (w *Workbench) RunDueBackupNow() {
 	}
 	if w.IsBusy() {
 		w.enqueueBusyToast()
+		return
+	}
+	if w.recordWritePending || len(w.settingWrites) > 0 || len(w.jobWrites) > 0 {
+		w.EnqueueToast(ToastProps{Title: "正在保存更改", Description: "保存完成后再执行备份", Type: ToastInfo})
 		return
 	}
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再执行备份"); err != nil {
@@ -2803,6 +2908,10 @@ func (w *Workbench) PickAndExportManualBackup() {
 	}
 	if w.IsBusy() {
 		w.enqueueBusyToast()
+		return
+	}
+	if w.recordWritePending || len(w.settingWrites) > 0 || len(w.jobWrites) > 0 {
+		w.EnqueueToast(ToastProps{Title: "正在保存更改", Description: "保存完成后再导出备份", Type: ToastInfo})
 		return
 	}
 	if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再导出备份"); err != nil {
@@ -2949,7 +3058,7 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 
 // TriggerRestoreBackup executes app.Backups.Restore off the UI thread via runAsyncTask.
 func (w *Workbench) TriggerRestoreBackup() {
-	if w.saving || w.jobSaving || len(w.jobWrites) > 0 {
+	if w.saving || w.jobSaving || len(w.jobWrites) > 0 || w.recordWritePending || len(w.settingWrites) > 0 {
 		w.EnqueueToast(ToastProps{Title: "正在保存未完成修改", Description: "保存完成后再恢复备份", Type: ToastInfo})
 		return
 	}

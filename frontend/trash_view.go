@@ -220,7 +220,7 @@ func (w *Workbench) renderTrashRow(c *ui.Context, tk *uiTokens, item model.Trash
 			if uiButton(c.Key("restore-"+item.ID), "恢复", buttonProps{
 				Variant: buttonDefault,
 				Size:    sizeSmall,
-			}).Disabled(w.IsBusy()).Label("恢复 " + item.Name).Clicked() {
+			}).Disabled(w.IsBusy() || w.recordWritePending).Label("恢复 " + item.Name).Clicked() {
 				w.RestoreTrashItem(item)
 			}
 
