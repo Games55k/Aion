@@ -403,3 +403,49 @@ func TestSettingsWritesCoalesceAndKeepUnsubmittedInput(t *testing.T) {
 		t.Fatal("expected invalid first policy to report its failure")
 	}
 }
+
+// Auto-update check preference writes coalesce under a held Store lock, guard close/restore while pending, and sync the latest policy to Host once committed.
+func TestUpdateCheckPolicyWritesCoalesceUnderStoreLock(t *testing.T) {
+	ctx := context.Background()
+	app, w, tt, queue, hold := openWriteTestWorkbench(t)
+	var synced []backend.UpdateCheckPolicy
+	host := w.host
+	host.SetUpdateCheckPolicy = func(pol backend.UpdateCheckPolicy) {
+		synced = append(synced, pol)
+	}
+	w.SetHost(host)
+
+	p, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Update policy lock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.NavigateTo(NavSettings)
+	drainTestUI(w, queue)
+	tt.Frame()
+	tt.Scroll(500, 300, 0, 800)
+	tt.Frame()
+
+	unlock := hold(p.ID)
+	// Toggle off, then back on, then change interval to 6h while Store is held.
+	clickWriteControl(t, tt, "自动检查更新开关")
+	clickWriteControl(t, tt, "自动检查更新开关")
+	clickWriteControl(t, tt, "自动检查频率选择")
+	clickWriteControl(t, tt, "每 6 小时")
+	expectWriteGuards(t, w)
+	unlock()
+	drainTestUI(w, queue)
+
+	pol, err := app.Settings.UpdateCheckPolicy(ctx)
+	if err != nil || !pol.Enabled || pol.Interval != 6*time.Hour {
+		t.Fatalf("expected coalesced 6h enabled policy, got %+v, err=%v", pol, err)
+	}
+	if len(synced) == 0 {
+		t.Fatal("expected Host.SetUpdateCheckPolicy invoked after commit")
+	}
+	if last := synced[len(synced)-1]; !last.Enabled || last.Interval != 6*time.Hour {
+		t.Fatalf("expected final synced policy 6h enabled, got %+v", synced)
+	}
+	if !w.PrepareClose() {
+		t.Fatal("expected PrepareClose permitted after update check policy writes drained")
+	}
+}

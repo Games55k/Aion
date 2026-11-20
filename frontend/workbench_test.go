@@ -2095,6 +2095,63 @@ func TestSidebarUpdateIconAndInAppUpdateModalFlow(t *testing.T) {
 	if err := tt.Click("发现新版本 v0.2.0，点击查看更新"); err == nil {
 		t.Fatalf("expected sidebar update icon hidden in dev build")
 	}
+
+	// Install error with an available version surfaces error tooltip and offers direct retry-install, recheck, and skip actions.
+	wb.sideExpanded = true
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.6",
+		AvailableVersion: "0.2.0",
+		Status:           UpdateError,
+		LastError:        "network timeout",
+		CanSelfUpdate:    true,
+		ReleasesURL:      defaultReleasesURL,
+	})
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if err := tt.Click("更新 v0.2.0 失败，点击重试"); err != nil {
+		t.Fatalf("click sidebar update error icon: %v", err)
+	}
+	if !tt.HasText("network timeout") {
+		t.Fatalf("expected error details in update modal, got texts %v", tt.Texts())
+	}
+	if err := tt.Click("重试安装"); err != nil {
+		t.Fatalf("click 重试安装: %v", err)
+	}
+	if installCalls != 2 {
+		t.Fatalf("expected InstallUpdate retried (2 total), got %d", installCalls)
+	}
+
+	// Idle state never falsely reports up-to-date; triggering CheckForUpdatesAndShow switches immediately to Checking without flashing up-to-date.
+	wb.CloseUpdateModal()
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:       "0.1.6",
+		Status:        UpdateIdle,
+		CanSelfUpdate: true,
+		ReleasesURL:   defaultReleasesURL,
+	})
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	wb.OpenUpdateModal()
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if tt.HasText("当前已是最新版本") {
+		t.Fatalf("idle state must not report up-to-date")
+	}
+	wb.CheckForUpdatesAndShow()
+	tt.Frame()
+	if !tt.HasText("正在检查更新…") || tt.HasText("当前已是最新版本") {
+		t.Fatalf("expected immediate Checking state without flashing up-to-date, got texts %v", tt.Texts())
+	}
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:       "0.1.6",
+		Status:        UpdateUpToDate,
+		CanSelfUpdate: true,
+		ReleasesURL:   defaultReleasesURL,
+	})
+	tt.Frame()
+	if !tt.HasText("当前已是最新版本") {
+		t.Fatalf("expected up-to-date notice once check completes, got texts %v", tt.Texts())
+	}
 }
 
 // Auto-update check settings save asynchronously without blocking Store locks, keep the latest change, and resync the host after backup restore.

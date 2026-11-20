@@ -198,10 +198,13 @@ func (c *updateController) saveDiskState(st updaterDiskState) {
 		return
 	}
 	tmp := f.Name()
+	closed := false
 	ok := false
 	defer func() {
-		if !ok {
+		if !closed {
 			_ = f.Close()
+		}
+		if !ok {
 			_ = os.Remove(tmp)
 		}
 	}()
@@ -211,6 +214,7 @@ func (c *updateController) saveDiskState(st updaterDiskState) {
 	if err := f.Sync(); err != nil {
 		return
 	}
+	closed = true
 	if err := f.Close(); err != nil {
 		return
 	}
@@ -608,8 +612,11 @@ func (c *updateController) InstallUpdate() {
 			c.lastError = err.Error()
 			c.scheduleLocked()
 		}
+		wasClosed := c.closed
 		c.mu.Unlock()
-		c.emit()
+		if !wasClosed {
+			c.emit()
+		}
 	}()
 }
 

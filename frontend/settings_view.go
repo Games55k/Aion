@@ -412,8 +412,11 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 				}
 				if hasSidebarUpdateIndicator(info) {
 					actionLabel := "查看更新"
-					if info.Status == UpdateReady || installedVersion != "" {
+					switch {
+					case info.Status == UpdateReady || installedVersion != "":
 						actionLabel = "立即重启更新"
+					case info.Status == UpdateError && availVersion != "":
+						actionLabel = "重试更新"
 					}
 					if uiButton(c, actionLabel, buttonProps{
 						Variant: buttonPrimary,
@@ -465,6 +468,15 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 			uiAlert(c.Key("settings-updates-ready"), "新版本 v"+ver+" 已安装，重启即可生效", alertProps{
 				Type:        alertSuccess,
 				Description: "点击“立即重启更新”或侧边栏更新图标重启应用。",
+			})
+		case info.Status == UpdateError && availVersion != "":
+			desc := info.LastError
+			if desc == "" {
+				desc = "点击“重试更新”或侧边栏更新图标重试安装。"
+			}
+			uiAlert(c.Key("settings-updates-error"), "更新 v"+availVersion+" 失败", alertProps{
+				Type:        alertError,
+				Description: desc,
 			})
 		case availVersion != "":
 			uiAlert(c.Key("settings-updates-available"), "发现新版本 v"+availVersion, alertProps{

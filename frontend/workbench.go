@@ -444,6 +444,15 @@ func (w *Workbench) UpdateModalOpen() bool {
 func (w *Workbench) CheckForUpdates() {
 	w.mu.Lock()
 	check := w.host.CheckForUpdates
+	if check != nil &&
+		w.updateInfo.CanSelfUpdate && !w.updateInfo.IsDev &&
+		w.updateInfo.InstalledVersion == "" &&
+		w.updateInfo.Status != UpdateDownloading &&
+		w.updateInfo.Status != UpdateInstalling &&
+		w.updateInfo.Status != UpdateReady {
+		w.updateInfo.Status = UpdateChecking
+		w.updateInfo.LastError = ""
+	}
 	w.mu.Unlock()
 	if check == nil {
 		return

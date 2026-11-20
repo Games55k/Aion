@@ -54,6 +54,8 @@ func sidebarUpdateTooltip(info UpdateCapability) string {
 			return fmt.Sprintf("%s (%d%%)", label, pct)
 		}
 		return label
+	case info.Status == UpdateError && availVer != "":
+		return fmt.Sprintf("更新 v%s 失败，点击重试", availVer)
 	case availVer != "":
 		return fmt.Sprintf("发现新版本 v%s，点击查看更新", availVer)
 	default:
@@ -68,16 +70,22 @@ func (w *Workbench) renderSidebarUpdateButton(c *ui.Context, tk *uiTokens, info 
 		Label(tip)
 
 	isProgress := info.Status == UpdateDownloading || info.Status == UpdateInstalling
+	isError := info.Status == UpdateError
 	state := stateOfButton(b)
 	fg, bg := tk.Success, tk.SuccessFillQuaternary
 	if isProgress {
 		fg, bg = tk.Primary, tk.PrimaryFillQuaternary
+	} else if isError {
+		fg, bg = tk.Warning, tk.WarningFillQuaternary
 	}
 	switch state {
 	case buttonHover, buttonActive:
-		if isProgress {
+		switch {
+		case isProgress:
 			bg = tk.PrimaryFillTertiary
-		} else {
+		case isError:
+			bg = tk.WarningFillTertiary
+		default:
 			bg = tk.SuccessFillTertiary
 		}
 	}
@@ -214,10 +222,15 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 								})
 							})
 						}
-					default:
+					case info.Status == UpdateUpToDate:
 						uiAlert(c.Key("update-modal-uptodate"), "当前已是最新版本", alertProps{
 							Type:        alertSuccess,
 							Description: fmt.Sprintf("Aion v%s 是目前可用的最新版本。", curVer),
+						})
+					default:
+						uiAlert(c.Key("update-modal-idle"), "尚未检查更新", alertProps{
+							Type:        alertInfo,
+							Description: fmt.Sprintf("当前版本 v%s，点击“检查更新”以获取最新版本信息。", curVer),
 						})
 					}
 				})
@@ -231,13 +244,14 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 					if !info.IsDev && info.CanSelfUpdate && availVer != "" &&
 						info.Status != UpdateDownloading && info.Status != UpdateInstalling &&
 						info.Status != UpdateReady && installedVer == "" &&
-						info.Status != UpdateChecking && info.Status != UpdateError {
+						info.Status != UpdateChecking {
 						if uiButton(c.Key("update-skip-btn"), "跳过此版本", buttonProps{
 							Variant: buttonText,
 						}).Disabled(!w.canSkipUpdate()).Clicked() {
 							w.SkipUpdateVersion(info.AvailableVersion)
 						}
-					} else if info.IsDev || curVer == "" || !info.CanSelfUpdate || info.Status == UpdateError {
+					}
+					if info.IsDev || curVer == "" || !info.CanSelfUpdate || info.Status == UpdateError {
 						if uiButton(c.Key("update-modal-releases-btn"), "前往 Releases 下载", buttonProps{
 							Variant: buttonDefault,
 						}).Disabled(!canOpenURL).Clicked() {
@@ -291,15 +305,28 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 							w.CloseUpdateModal()
 						}
 					case info.Status == UpdateError:
-						if uiButton(c.Key("update-retry-btn"), "重试", buttonProps{
-							Variant: buttonDefault,
-						}).Disabled(!canCheck).Clicked() {
-							w.CheckForUpdates()
-						}
-						if uiButton(c.Key("update-error-close-btn"), "关闭", buttonProps{
-							Variant: buttonPrimary,
-						}).Clicked() {
-							w.CloseUpdateModal()
+						if availVer != "" && w.canInstallUpdate() {
+							if uiButton(c.Key("update-error-recheck-btn"), "重新检查", buttonProps{
+								Variant: buttonDefault,
+							}).Disabled(!canCheck).Clicked() {
+								w.CheckForUpdates()
+							}
+							if uiButton(c.Key("update-retry-install-btn"), "重试安装", buttonProps{
+								Variant: buttonPrimary,
+							}).Clicked() {
+								w.InstallUpdate()
+							}
+						} else {
+							if uiButton(c.Key("update-retry-btn"), "重试", buttonProps{
+								Variant: buttonDefault,
+							}).Disabled(!canCheck).Clicked() {
+								w.CheckForUpdates()
+							}
+							if uiButton(c.Key("update-error-close-btn"), "关闭", buttonProps{
+								Variant: buttonPrimary,
+							}).Clicked() {
+								w.CloseUpdateModal()
+							}
 						}
 					case availVer != "":
 						if uiButton(c.Key("update-remind-later-btn"), "稍后提醒", buttonProps{
@@ -312,7 +339,7 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 						}).Disabled(!w.canInstallUpdate()).Clicked() {
 							w.InstallUpdate()
 						}
-					default:
+					case info.Status == UpdateUpToDate:
 						if uiButton(c.Key("update-recheck-btn"), "重新检查", buttonProps{
 							Variant: buttonDefault,
 						}).Disabled(!canCheck).Clicked() {
@@ -322,6 +349,17 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 							Variant: buttonPrimary,
 						}).Clicked() {
 							w.CloseUpdateModal()
+						}
+					default:
+						if uiButton(c.Key("update-idle-close-btn"), "关闭", buttonProps{
+							Variant: buttonDefault,
+						}).Clicked() {
+							w.CloseUpdateModal()
+						}
+						if uiButton(c.Key("update-idle-check-btn"), "检查更新", buttonProps{
+							Variant: buttonPrimary,
+						}).Disabled(!canCheck).Clicked() {
+							w.CheckForUpdates()
 						}
 					}
 				})
