@@ -3,7 +3,6 @@ package frontend
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -21,6 +20,11 @@ var (
 		{Value: "7", Label: "保留最近 7 份 (默认)"},
 		{Value: "14", Label: "保留最近 14 份"},
 		{Value: "30", Label: "保留最近 30 份"},
+	}
+	updateCheckIntervalOptions = []selectOption{
+		{Value: "6h", Label: "每 6 小时"},
+		{Value: "12h", Label: "每 12 小时"},
+		{Value: "24h", Label: "每天 (每 24 小时)"},
 	}
 )
 
@@ -340,7 +344,9 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 	info := w.UpdateCapability()
 	canCheck, canOpenURL := w.updateActionsReady()
-	displayVersion := strings.TrimPrefix(strings.TrimSpace(info.Version), "v")
+	displayVersion := displayVersionNumber(info.Version)
+	availVersion := displayVersionNumber(info.AvailableVersion)
+	installedVersion := displayVersionNumber(info.InstalledVersion)
 	versionLine := "当前版本: 开发版本（未打包）"
 	if displayVersion != "" {
 		versionLine = "当前版本: v" + displayVersion
@@ -355,16 +361,38 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 
 	ui.Column(c.Key("settings-card-updates")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
 		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, iconRefreshCw()).FontSize(18).TextColor(tk.Primary)
-			ui.Text(c, "应用版本与更新").FontSize(16).FontWeight(600).TextColor(tk.Text)
-			if info.AvailableVersion != "" {
-				uiTag(c, "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagGreen,
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconRefreshCw()).FontSize(18).TextColor(tk.Primary)
+					ui.Text(c, "应用版本与更新").FontSize(16).FontWeight(600).TextColor(tk.Text)
+					if installedVersion != "" {
+						uiTag(c, "v"+installedVersion+" 待重启", tagProps{
+							Size:    sizeSmall,
+							Variant: tagFilled,
+							Color:   tagGreen,
+						})
+					} else if availVersion != "" {
+						uiTag(c, "发现新版本 v"+availVersion, tagProps{
+							Size:    sizeSmall,
+							Variant: tagFilled,
+							Color:   tagGreen,
+						})
+					}
 				})
-			}
+				ui.Text(c, "开启后仅在后台静默检查更新并在侧边栏提示，不会自动下载或安装。").
+					FontSize(13).TextColor(tk.TextSecondary)
+			})
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				ui.Text(c, "自动检查更新").FontSize(13).TextColor(tk.Text)
+				beforeAuto := w.updateCheckEnabled
+				uiSwitch(c.Key("update-auto-check-switch"), &w.updateCheckEnabled).
+					Label("自动检查更新开关")
+				if w.updateCheckEnabled != beforeAuto {
+					w.SaveUpdateCheckPolicy()
+				}
+			})
 		})
 
 		ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
@@ -382,13 +410,40 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 				}).Disabled(!canOpenURL).Clicked() {
 					w.OpenReleasesPage()
 				}
+				if hasSidebarUpdateIndicator(info) {
+					actionLabel := "查看更新"
+					if info.Status == UpdateReady || installedVersion != "" {
+						actionLabel = "立即重启更新"
+					}
+					if uiButton(c, actionLabel, buttonProps{
+						Variant: buttonPrimary,
+						Size:    sizeSmall,
+					}).Clicked() {
+						w.OpenUpdateModal()
+					}
+				}
+				checkVariant := buttonPrimary
+				if hasSidebarUpdateIndicator(info) {
+					checkVariant = buttonDefault
+				}
 				if uiButton(c, "检查更新", buttonProps{
-					Variant: buttonPrimary,
+					Variant: checkVariant,
 					Size:    sizeSmall,
 				}).Disabled(!canCheck).Clicked() {
-					w.CheckForUpdates()
+					w.CheckForUpdatesAndShow()
 				}
 			})
+		})
+
+		ui.Column(c.Key("settings-update-interval")).Gap(6).Width(260).AlignSelf(ui.Start).Children(func() {
+			ui.Text(c, "自动检查频率").FontSize(13).FontWeight(500).TextColor(tk.Text)
+			beforeInt := w.updateCheckIntervalSelect
+			uiSelect(c.Key("update-check-interval-select"), &w.updateCheckIntervalSelect, selectProps{
+				Options: withCurrentOption(updateCheckIntervalOptions, w.updateCheckIntervalSelect, intervalLabel(parseIntervalOption(w.updateCheckIntervalSelect))),
+			}).Label("自动检查频率选择").Disabled(!w.updateCheckEnabled)
+			if w.updateCheckIntervalSelect != beforeInt {
+				w.SaveUpdateCheckPolicy()
+			}
 		})
 
 		switch {
@@ -402,10 +457,19 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 				Type:        alertWarning,
 				Description: "请将 Aion.app 移动到当前用户有写入权限的“应用程序”目录后重试，或点击“前往 Releases 下载”手动下载。",
 			})
-		case info.AvailableVersion != "":
-			uiAlert(c.Key("settings-updates-available"), "发现新版本 v"+strings.TrimPrefix(info.AvailableVersion, "v"), alertProps{
+		case info.Status == UpdateReady || installedVersion != "":
+			ver := installedVersion
+			if ver == "" {
+				ver = availVersion
+			}
+			uiAlert(c.Key("settings-updates-ready"), "新版本 v"+ver+" 已安装，重启即可生效", alertProps{
 				Type:        alertSuccess,
-				Description: "点击“检查更新”查看更新说明、下载并安装新版本。",
+				Description: "点击“立即重启更新”或侧边栏更新图标重启应用。",
+			})
+		case availVersion != "":
+			uiAlert(c.Key("settings-updates-available"), "发现新版本 v"+availVersion, alertProps{
+				Type:        alertSuccess,
+				Description: "点击“查看更新”或侧边栏更新图标查看更新说明并决定是否安装。",
 			})
 		}
 	})

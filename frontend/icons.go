@@ -203,6 +203,10 @@ func iconChevronsRight() *ui.SVG {
 	return loadIcon("chevrons-right", `<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>`)
 }
 
+func iconCircleArrowUp() *ui.SVG {
+	return loadIcon("circle-arrow-up", `<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>`)
+}
+
 func iconCircleCheck() *ui.SVG {
 	return loadIcon("circle-check", `<circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/>`)
 }

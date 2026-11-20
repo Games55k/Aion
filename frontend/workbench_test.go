@@ -665,10 +665,11 @@ func TestRestoreFailureRetainsSafetyBackupLocation(t *testing.T) {
 func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
 	settingsOutPath := os.Getenv("AION_SAVE_SETTINGS_SNAPSHOT")
+	updateModalOutPath := os.Getenv("AION_SAVE_UPDATE_MODAL_SNAPSHOT")
 	jobsOutPath := os.Getenv("AION_SAVE_JOBS_SNAPSHOT")
 	jobsNarrowOutPath := os.Getenv("AION_SAVE_JOBS_NARROW_SNAPSHOT")
 	jobDetailOutPath := os.Getenv("AION_SAVE_JOB_DETAIL_SNAPSHOT")
-	if outPath == "" && settingsOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
+	if outPath == "" && settingsOutPath == "" && updateModalOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
 		t.Skip("set AION_SAVE_*_SNAPSHOT to export a PNG for visual inspection")
 	}
 	dataDir := t.TempDir()
@@ -677,11 +678,15 @@ func TestVisualSnapshotRender(t *testing.T) {
 	writeSamplePNG(t, imgPath)
 
 	_, wb, _ := openTestWorkbench(t, dataDir, Host{
-		OpenURL:         func(string) error { return nil },
-		CheckForUpdates: func() {},
+		OpenURL:           func(string) error { return nil },
+		CheckForUpdates:   func() {},
+		InstallUpdate:     func() {},
+		SkipUpdateVersion: func(string) {},
 		UpdateInfo: UpdateCapability{
 			Version:          "0.1.0",
 			AvailableVersion: "0.2.0",
+			AvailableNotes:   "### 更新内容\n- 支持后台静默定期检查更新\n- 发现新版本后在侧边栏展示极简更新图标\n- 点击图标可在应用内查看更新说明并安装",
+			Status:           UpdateAvailable,
 			LastCheck:        time.Date(2026, 11, 11, 15, 30, 0, 0, time.Local),
 			IsDev:            false,
 			CanSelfUpdate:    true,
@@ -742,6 +747,27 @@ func TestVisualSnapshotRender(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatalf("close settings snapshot file: %v", err)
 		}
+	}
+
+	if updateModalOutPath != "" {
+		wb.NavigateTo(NavProjectBoard)
+		wb.OpenUpdateModal()
+		wb.pendingToasts = nil
+		mt := ui.NewTester(wb.View, 1440, 900)
+		mt.Frame()
+		mt.Advance(500 * time.Millisecond)
+		f, err := os.Create(updateModalOutPath)
+		if err != nil {
+			t.Fatalf("create update modal snapshot file: %v", err)
+		}
+		if err := png.Encode(f, mt.Image()); err != nil {
+			_ = f.Close()
+			t.Fatalf("encode update modal png: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close update modal snapshot file: %v", err)
+		}
+		wb.CloseUpdateModal()
 	}
 
 	if jobsOutPath != "" || jobsNarrowOutPath != "" || jobDetailOutPath != "" {
@@ -1821,6 +1847,12 @@ func TestUpdaterSettingsAndHostIntegration(t *testing.T) {
 	if checkCalls != 1 {
 		t.Fatalf("expected Host.CheckForUpdates called once, got %d", checkCalls)
 	}
+	if !wb.UpdateModalOpen() {
+		t.Fatalf("expected clicking 检查更新 to open in-app update modal")
+	}
+	wb.CloseUpdateModal()
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
 
 	if err := tt.Click("前往 Releases 下载"); err != nil {
 		t.Fatalf("click 前往 Releases 下载: %v", err)
@@ -1934,6 +1966,221 @@ func TestUpdateStateChangeDoesNotWaitForStoreLock(t *testing.T) {
 	close(release)
 	if err := <-lockDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Sidebar displays an icon-only update button in both expanded and collapsed modes when an update is available, opening the in-app update modal across skip, download, cancel, and relaunch flows.
+func TestSidebarUpdateIconAndInAppUpdateModalFlow(t *testing.T) {
+	checkCalls := 0
+	installCalls := 0
+	cancelCalls := 0
+	relaunchCalls := 0
+	var skipped []string
+
+	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		UpdateInfo: UpdateCapability{
+			Version:       "0.1.6",
+			CanSelfUpdate: true,
+			ReleasesURL:   defaultReleasesURL,
+		},
+		CheckForUpdates:   func() { checkCalls++ },
+		InstallUpdate:     func() { installCalls++ },
+		CancelUpdate:      func() { cancelCalls++ },
+		SkipUpdateVersion: func(v string) { skipped = append(skipped, v) },
+		RelaunchToUpdate:  func() { relaunchCalls++ },
+		OpenURL:           func(string) error { return nil },
+	})
+
+	// Hidden when no update is available.
+	if err := tt.Click("发现新版本 v0.2.0，点击查看更新"); err == nil {
+		t.Fatalf("expected sidebar update icon hidden when no update is available")
+	}
+
+	// Silent check discovers v0.2.0: sidebar icon appears without opening the modal automatically.
+	avail := UpdateCapability{
+		Version:          "0.1.6",
+		AvailableVersion: "0.2.0",
+		AvailableNotes:   "## 新特性\n- 支持自动静默检查更新",
+		Status:           UpdateAvailable,
+		CanSelfUpdate:    true,
+		ReleasesURL:      defaultReleasesURL,
+	}
+	wb.SetUpdateCapability(avail)
+	tt.Frame()
+	if wb.UpdateModalOpen() {
+		t.Fatalf("silent update discovery must not auto-open the update modal")
+	}
+
+	// Clicking the sidebar icon opens the modal directly without issuing another CheckForUpdates call.
+	if err := tt.Click("发现新版本 v0.2.0，点击查看更新"); err != nil {
+		t.Fatalf("click sidebar update icon in expanded mode: %v", err)
+	}
+	if !wb.UpdateModalOpen() || checkCalls != 0 {
+		t.Fatalf("expected modal open with 0 extra check calls, open=%v checks=%d", wb.UpdateModalOpen(), checkCalls)
+	}
+	if !tt.HasText("支持自动静默检查更新") {
+		t.Fatalf("expected release notes in update modal, got texts %v", tt.Texts())
+	}
+
+	// Starting download and canceling through modal controls delegates to Host.
+	if err := tt.Click("下载并安装"); err != nil {
+		t.Fatalf("click 下载并安装: %v", err)
+	}
+	if installCalls != 1 {
+		t.Fatalf("expected InstallUpdate called once, got %d", installCalls)
+	}
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.6",
+		AvailableVersion: "0.2.0",
+		Status:           UpdateDownloading,
+		DownloadedBytes:  5 * 1024 * 1024,
+		TotalBytes:       10 * 1024 * 1024,
+		CanSelfUpdate:    true,
+		ReleasesURL:      defaultReleasesURL,
+	})
+	tt.Frame()
+	if !tt.HasText("5.0 MB / 10.0 MB") {
+		t.Fatalf("expected download progress text, got texts %v", tt.Texts())
+	}
+	if err := tt.Click("取消下载"); err != nil {
+		t.Fatalf("click 取消下载: %v", err)
+	}
+	if cancelCalls != 1 {
+		t.Fatalf("expected CancelUpdate called once, got %d", cancelCalls)
+	}
+
+	// Ready state triggers RelaunchToUpdate.
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.6",
+		AvailableVersion: "0.2.0",
+		InstalledVersion: "0.2.0",
+		Status:           UpdateReady,
+		CanSelfUpdate:    true,
+		ReleasesURL:      defaultReleasesURL,
+	})
+	tt.Frame()
+	if err := tt.Click("立即重启"); err != nil {
+		t.Fatalf("click 立即重启: %v", err)
+	}
+	if relaunchCalls != 1 {
+		t.Fatalf("expected RelaunchToUpdate called once, got %d", relaunchCalls)
+	}
+
+	// Collapsed sidebar still exposes the icon-only button and skipping closes the modal.
+	wb.CloseUpdateModal()
+	wb.sideExpanded = false
+	wb.SetUpdateCapability(avail)
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if err := tt.Click("发现新版本 v0.2.0，点击查看更新"); err != nil {
+		t.Fatalf("click sidebar update icon in collapsed mode: %v", err)
+	}
+	if err := tt.Click("跳过此版本"); err != nil {
+		t.Fatalf("click 跳过此版本: %v", err)
+	}
+	if !slices.Equal(skipped, []string{"0.2.0"}) || wb.UpdateModalOpen() {
+		t.Fatalf("expected version 0.2.0 skipped and modal closed, skipped=%v open=%v", skipped, wb.UpdateModalOpen())
+	}
+
+	// Dev and non-writable builds never show the sidebar update icon even if AvailableVersion is set.
+	wb.SetUpdateCapability(UpdateCapability{
+		Version:          "0.1.6",
+		AvailableVersion: "0.2.0",
+		IsDev:            true,
+		CanSelfUpdate:    false,
+		ReleasesURL:      defaultReleasesURL,
+	})
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if err := tt.Click("发现新版本 v0.2.0，点击查看更新"); err == nil {
+		t.Fatalf("expected sidebar update icon hidden in dev build")
+	}
+}
+
+// Auto-update check settings save asynchronously without blocking Store locks, keep the latest change, and resync the host after backup restore.
+func TestUpdateCheckPolicySettingsAsyncAndRestoreSync(t *testing.T) {
+	queue := make(chan func(), 64)
+	drain := func(w *Workbench) {
+		for {
+			w.WaitForTasks()
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	var synced []backend.UpdateCheckPolicy
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		Dispatch: func(fn func()) { queue <- fn },
+		UpdateInfo: UpdateCapability{
+			Version:       "0.1.6",
+			CanSelfUpdate: true,
+			ReleasesURL:   defaultReleasesURL,
+		},
+		CheckForUpdates: func() {},
+		OpenURL:         func(string) error { return nil },
+		SetUpdateCheckPolicy: func(pol backend.UpdateCheckPolicy) {
+			synced = append(synced, pol)
+		},
+	})
+
+	// Export a backup while auto-check is enabled (default 24h) to verify restore resync later.
+	zipPath := filepath.Join(t.TempDir(), "default-policy.zip")
+	if err := app.Backups.Export(context.Background(), zipPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tt.Click("设置"); err != nil {
+		t.Fatalf("click 设置: %v", err)
+	}
+	drain(wb)
+	tt.Frame()
+	tt.Scroll(500, 300, 0, 800)
+	tt.Frame()
+
+	// Toggle off auto-check while Settings is open and verify persistence + host notification.
+	if err := tt.Click("自动检查更新开关"); err != nil {
+		t.Fatalf("click 自动检查更新开关: %v", err)
+	}
+	drain(wb)
+	pol, err := app.Settings.UpdateCheckPolicy(context.Background())
+	if err != nil || pol.Enabled {
+		t.Fatalf("expected persisted disabled update check policy, got %+v, err=%v", pol, err)
+	}
+	if len(synced) == 0 || synced[len(synced)-1].Enabled {
+		t.Fatalf("expected Host.SetUpdateCheckPolicy called with disabled policy, got %+v", synced)
+	}
+
+	// Re-enable and switch interval to 12h.
+	if err := tt.Click("自动检查更新开关"); err != nil {
+		t.Fatalf("re-enable 自动检查更新开关: %v", err)
+	}
+	drain(wb)
+	tt.Frame()
+	if err := tt.Click("自动检查频率选择"); err != nil {
+		t.Fatalf("open 自动检查频率选择: %v", err)
+	}
+	if err := tt.Click("每 12 小时"); err != nil {
+		t.Fatalf("select 每 12 小时: %v", err)
+	}
+	drain(wb)
+	pol, err = app.Settings.UpdateCheckPolicy(context.Background())
+	if err != nil || !pol.Enabled || pol.Interval != 12*time.Hour {
+		t.Fatalf("expected persisted 12h policy, got %+v, err=%v", pol, err)
+	}
+	if last := synced[len(synced)-1]; !last.Enabled || last.Interval != 12*time.Hour {
+		t.Fatalf("expected host synced with 12h policy, got %+v", last)
+	}
+
+	// Restoring the earlier backup restores the default 24h policy and notifies Host.
+	wb.RequestRestoreBackup(zipPath)
+	wb.TriggerRestoreBackup()
+	drain(wb)
+	if last := synced[len(synced)-1]; !last.Enabled || last.Interval != 24*time.Hour {
+		t.Fatalf("expected backup restore to resync 24h policy to host, got %+v", synced)
 	}
 }
 

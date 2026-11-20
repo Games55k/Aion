@@ -33,6 +33,9 @@ AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test -count=1 ./frontend -run TestV
 # 渲染设置页视觉快照 PNG（1440×1280，可与上一条同时设置）
 AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test -count=1 ./frontend -run TestVisualSnapshotRender
 
+# 渲染应用内更新弹窗视觉快照 PNG（1440×900）
+AION_SAVE_UPDATE_MODAL_SNAPSHOT=/tmp/aion-update-modal.png go test -count=1 ./frontend -run TestVisualSnapshotRender
+
 # 渲染求职投递列表、窄窗口表格与投递详情视觉快照 PNG（可与其它快照环境变量组合使用）
 AION_SAVE_JOBS_SNAPSHOT=/tmp/aion-jobs.png \
 AION_SAVE_JOBS_NARROW_SNAPSHOT=/tmp/aion-jobs-narrow.png \
@@ -69,7 +72,9 @@ mygo-automation close
 
 ```text
 Aion/
-├── main.go                                 # 原生窗口宿主入口、应用菜单/更新插件与系统能力桥接
+├── main.go                                 # 原生窗口宿主入口、应用菜单与系统能力桥接
+├── updater_controller.go                   # 宿主层静默定期检查更新、下载安装进度与重启调度控制器
+├── updater_controller_test.go              # 静默检查、跳过版本、单飞合并、进度取消与旧状态迁移测试
 ├── automation_e2e.go                       # e2e 构建标签专用的 MyGo Automation 插件入口
 ├── main_test.go                            # 快照输出数据保护与原子替换回归测试
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
@@ -80,7 +85,8 @@ Aion/
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
 ├── frontend/                               # 原生界面层：工作台状态、模块切换侧栏、项目看板、求职投递、回收站、设置与附件预览
 │   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的设计令牌、控件、弹窗、Markdown 与 Lucide SVG 图标
-│   ├── sidebar.go                          # 展开/折叠双形态模块切换器与各模块导航侧栏
+│   ├── sidebar.go                          # 展开/折叠双形态模块切换器、更新图标入口与各模块导航侧栏
+│   ├── update_modal.go                     # 侧边栏更新图标按钮与应用内软件更新弹窗
 │   ├── task_save.go                        # 任务草稿串行保存、合并输入与保存后的导航
 │   ├── job_save.go                         # 求职投递详情草稿校验、串行保存与撤销恢复
 │   ├── job_controller.go                   # 求职投递筛选、分页、流转、备注、补录与回收站动作控制

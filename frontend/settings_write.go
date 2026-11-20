@@ -1,8 +1,9 @@
 package frontend
 
 const (
-	themePreference  = "theme"
-	backupPreference = "backup"
+	themePreference       = "theme"
+	backupPreference      = "backup"
+	updateCheckPreference = "update_check"
 )
 
 func (w *Workbench) settingWritePending(key string) bool {

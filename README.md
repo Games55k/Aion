@@ -33,7 +33,7 @@ Aion（读作 `EYE-on`，源自古希腊语 αἰών，意为“生命、时代
 
 ### 直接使用（推荐）
 
-前往 [GitHub Releases](https://github.com/Games55k/Aion/releases) 下载最新版本的 `.dmg` 安装包，将 `Aion.app` 拖入「应用程序」目录即可使用（支持在设置页检查并安装更新）。
+前往 [GitHub Releases](https://github.com/Games55k/Aion/releases) 下载最新版本的 `.dmg` 安装包，将 `Aion.app` 拖入「应用程序」目录即可使用（支持后台静默检查更新，发现新版本时在侧边栏展示更新图标，点击可在应用内查看说明并决定是否安装）。
 
 ### 从源码运行
 

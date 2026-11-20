@@ -20,18 +20,32 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 		HighlightHandle:         true,
 		Background:              tk.BgContainer,
 		Header: func(nav sideNavState) {
+			updateInfo := w.UpdateCapability()
+			showUpdate := hasSidebarUpdateIndicator(updateInfo)
 			ui.Column(c).Padding(topPad, 12, 10, 12).Gap(12).AlignSelf(ui.Stretch).DragWindow().Children(func() {
 				// Brand Row
 				brandRow := ui.Row(c).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch)
-				if !nav.Expanded {
+				if nav.Expanded {
+					brandRow.Justify(ui.SpaceBetween)
+				} else {
 					brandRow.Justify(ui.Center)
 				}
 				brandRow.Children(func() {
-					ui.Image(c, AionSymbolSVG()).Size(26, 26).Shrink(0)
-					if nav.Expanded {
-						ui.Text(c, "Aion").FontSize(17).FontWeight(700).TextColor(tk.Text).SingleLine()
+					ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+						ui.Image(c, AionSymbolSVG()).Size(26, 26).Shrink(0)
+						if nav.Expanded {
+							ui.Text(c, "Aion").FontSize(17).FontWeight(700).TextColor(tk.Text).SingleLine()
+						}
+					})
+					if nav.Expanded && showUpdate {
+						w.renderSidebarUpdateButton(c, tk, updateInfo)
 					}
 				})
+				if !nav.Expanded && showUpdate {
+					ui.Row(c).Justify(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+						w.renderSidebarUpdateButton(c, tk, updateInfo)
+					})
+				}
 
 				// Registered Module Switcher (shown in both expanded and collapsed sidebar modes)
 				if len(w.modules) > 1 {

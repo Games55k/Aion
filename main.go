@@ -12,14 +12,11 @@ import (
 	"strings"
 	"sync"
 
-	"aion/assets/icon"
 	"aion/backend"
 	"aion/frontend"
 
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/locales/zh-Hans"
-	"github.com/egoist/mygo/plugins/updater"
-	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -54,9 +51,13 @@ func run(dataDir, snapshotPath string) error {
 		return writeSnapshot(snapshotPath, app.DataDir(), wb.View)
 	}
 
-	// Sync initial saved theme before starting the native desktop window
+	// Sync initial saved preferences before starting the native desktop window
 	if savedTheme, err := app.Settings.Theme(ctx); err == nil {
 		applyNativeThemeSource(savedTheme)
+	}
+	initialUpdatePolicy := backend.DefaultUpdateCheckPolicy()
+	if savedPolicy, err := app.Settings.UpdateCheckPolicy(ctx); err == nil {
+		initialUpdatePolicy = savedPolicy
 	}
 
 	if dataDir != "" {
@@ -64,22 +65,23 @@ func run(dataDir, snapshotPath string) error {
 	}
 	mygo.App.SetLanguages("zh-Hans")
 	mygo.App.SetName("Aion")
-	mygo.Use(native.New(updater.Options{
-		DisableAutomaticChecks: true,
-		Icon:                   icon.PNG,
-		Language:               "zh-Hans",
-	}))
 
 	mygo.App.WhenReady(func() {
 		var openSettings func()
+		var checkUpdates func()
 		triggerOpenSettings := func() {
 			if openSettings != nil {
 				openSettings()
 			}
 		}
-		mygo.App.SetMenu(buildAppMenu(triggerOpenSettings))
+		triggerCheckUpdates := func() {
+			if checkUpdates != nil {
+				checkUpdates()
+			}
+		}
+		mygo.App.SetMenu(buildAppMenu(triggerOpenSettings, triggerCheckUpdates))
 		mygo.App.OnLocaleChanged(func(string) {
-			mygo.App.SetMenu(buildAppMenu(triggerOpenSettings))
+			mygo.App.SetMenu(buildAppMenu(triggerOpenSettings, triggerCheckUpdates))
 		})
 
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -93,7 +95,7 @@ func run(dataDir, snapshotPath string) error {
 			Content:              ui.View(wb.View),
 		})
 
-		openSettings = func() {
+		focusWindow := func() {
 			if win.IsMinimized() {
 				win.Restore()
 			}
@@ -103,21 +105,50 @@ func run(dataDir, snapshotPath string) error {
 			if !win.IsFocused() {
 				win.Focus()
 			}
+		}
+
+		openSettings = func() {
+			focusWindow()
 			win.Update(func() {
 				wb.OpenSettings()
 			})
 		}
 
-		readUpdateInfo := func() frontend.UpdateCapability {
-			return frontend.UpdateCapability{
-				Version:          mygo.App.Version(),
-				AvailableVersion: updater.AvailableVersion(),
-				LastCheck:        updater.LastCheck(),
-				IsDev:            mygo.IsDev(),
-				CanSelfUpdate:    mygo.Updater.Enabled(),
-				ReleasesURL:      releasesURL,
-			}
+		checkUpdates = func() {
+			focusWindow()
+			win.Update(func() {
+				wb.CheckForUpdatesAndShow()
+			})
 		}
+
+		updCtrl := newUpdateController(updateControllerOptions{
+			DataDir:       app.DataDir(),
+			Version:       mygo.App.Version(),
+			IsDev:         mygo.IsDev(),
+			CanSelfUpdate: mygo.Updater.Enabled(),
+			ReleasesURL:   releasesURL,
+			Policy:        initialUpdatePolicy,
+			Check: func(checkCtx context.Context) (*updateRelease, error) {
+				up, err := mygo.Updater.Check(checkCtx)
+				if err != nil || up == nil {
+					return nil, err
+				}
+				return &updateRelease{
+					Version: up.Version,
+					Notes:   up.Notes,
+					Date:    up.Date,
+					Install: up.Install,
+				}, nil
+			},
+			Relaunch: func() {
+				mygo.App.Relaunch()
+			},
+			OnChange: func(info frontend.UpdateCapability) {
+				win.Update(func() {
+					wb.SetUpdateCapability(info)
+				})
+			},
+		})
 
 		wb.SetHost(frontend.Host{
 			Dispatch: win.Update,
@@ -172,15 +203,17 @@ func run(dataDir, snapshotPath string) error {
 			SetTheme: func(th string) {
 				applyNativeThemeSource(th)
 			},
-			UpdateInfo:      readUpdateInfo(),
-			CheckForUpdates: updater.CheckForUpdates,
+			UpdateInfo:           updCtrl.Snapshot(),
+			CheckForUpdates:      updCtrl.CheckForUpdates,
+			InstallUpdate:        updCtrl.InstallUpdate,
+			CancelUpdate:         updCtrl.CancelUpdate,
+			SkipUpdateVersion:    updCtrl.SkipVersion,
+			RelaunchToUpdate:     updCtrl.Relaunch,
+			SetUpdateCheckPolicy: updCtrl.SetPolicy,
 		})
 
-		offUpdaterChange := updater.OnChange(func() {
-			win.Update(func() {
-				wb.SetUpdateCapability(readUpdateInfo())
-			})
-		})
+		offResume := mygo.Power.OnResume(updCtrl.OnResume)
+		updCtrl.Start()
 
 		win.OnClose(func(ev *mygo.CloseEvent) {
 			if !wb.PrepareClose() {
@@ -194,7 +227,8 @@ func run(dataDir, snapshotPath string) error {
 		})
 
 		mygo.App.OnQuit(func() {
-			offUpdaterChange()
+			offResume()
+			updCtrl.Close()
 			shutdown()
 		})
 
@@ -292,11 +326,18 @@ func writeSnapshot(path, dataDir string, view func(*ui.Context)) error {
 	return os.Rename(f.Name(), path)
 }
 
-func buildAppMenu(onOpenSettings func()) *mygo.Menu {
+func buildAppMenu(onOpenSettings, onCheckUpdates func()) *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Label: mygo.App.Name(), Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
-			updater.MenuItem(),
+			{
+				Label: "检查更新…",
+				Click: func(*mygo.MenuItem, *mygo.Window) {
+					if onCheckUpdates != nil {
+						onCheckUpdates()
+					}
+				},
+			},
 			mygo.Separator(),
 			{
 				Label:       "设置…",

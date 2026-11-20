@@ -53,10 +53,30 @@ func isJobNavPage(p NavPage) bool {
 
 const defaultReleasesURL = "https://github.com/Games55k/Aion/releases"
 
+// UpdateStatus describes the lifecycle stage of an in-app software update.
+type UpdateStatus string
+
+const (
+	UpdateIdle        UpdateStatus = ""
+	UpdateChecking    UpdateStatus = "checking"
+	UpdateAvailable   UpdateStatus = "available"
+	UpdateUpToDate    UpdateStatus = "up_to_date"
+	UpdateDownloading UpdateStatus = "downloading"
+	UpdateInstalling  UpdateStatus = "installing"
+	UpdateReady       UpdateStatus = "ready"
+	UpdateError       UpdateStatus = "error"
+)
+
 // UpdateCapability describes the application's version and self-update availability.
 type UpdateCapability struct {
 	Version          string
 	AvailableVersion string
+	AvailableNotes   string
+	InstalledVersion string
+	Status           UpdateStatus
+	DownloadedBytes  int64
+	TotalBytes       int64
+	LastError        string
 	LastCheck        time.Time
 	IsDev            bool
 	CanSelfUpdate    bool
@@ -66,15 +86,20 @@ type UpdateCapability struct {
 // Host provides desktop OS integrations (file dialogs, Finder, default app, theme sync, updates)
 // so that the UI works natively in a desktop window and deterministically in headless tests.
 type Host struct {
-	PickOpenFiles   func(title string, multiple bool, extensions ...string) ([]string, error)
-	PickDirectory   func(title, defaultPath string) (string, error)
-	PickSaveFile    func(title, defaultName string, extensions ...string) (string, error)
-	OpenPath        func(path string) error
-	RevealPath      func(path string) error
-	OpenURL         func(url string) error
-	SetTheme        func(theme string)
-	UpdateInfo      UpdateCapability
-	CheckForUpdates func()
+	PickOpenFiles        func(title string, multiple bool, extensions ...string) ([]string, error)
+	PickDirectory        func(title, defaultPath string) (string, error)
+	PickSaveFile         func(title, defaultName string, extensions ...string) (string, error)
+	OpenPath             func(path string) error
+	RevealPath           func(path string) error
+	OpenURL              func(url string) error
+	SetTheme             func(theme string)
+	UpdateInfo           UpdateCapability
+	CheckForUpdates      func()
+	InstallUpdate        func()
+	CancelUpdate         func()
+	SkipUpdateVersion    func(version string)
+	RelaunchToUpdate     func()
+	SetUpdateCheckPolicy func(policy backend.UpdateCheckPolicy)
 	// Now supplies the clock for save timestamps and default export names. Defaults to time.Now.
 	Now func() time.Time
 	// Dispatch, when set (e.g. win.Update in a desktop window), applies worker results
@@ -320,10 +345,13 @@ type Workbench struct {
 	lastExportedZipPath  string
 	lastRestoreResult    *backup.RestoreResult
 	lastRestoreError     string
-	confirmRestoreOpen   bool
-	pendingRestoreZip    string
-	updateInfo           UpdateCapability
-	settingWrites        map[string]func() func()
+	confirmRestoreOpen        bool
+	pendingRestoreZip         string
+	updateInfo                UpdateCapability
+	updateCheckEnabled        bool
+	updateCheckIntervalSelect string
+	updateModalOpen           bool
+	settingWrites             map[string]func() func()
 }
 
 // New creates and initializes a Workbench backed by app.
@@ -352,8 +380,10 @@ func New(app *backend.App, host Host) *Workbench {
 		jobPageSize:       20,
 		jobBackfillStage:  string(model.JobStageInterview1),
 		jobTimelineDesc:   true,
-		themeSetting:      ThemeSystem,
-		updateInfo:        host.UpdateInfo,
+		themeSetting:              ThemeSystem,
+		updateInfo:                host.UpdateInfo,
+		updateCheckEnabled:        true,
+		updateCheckIntervalSelect: "24h",
 	}
 	w.host.Dispatch = nil
 	w.ReloadAll()
@@ -395,6 +425,21 @@ func (w *Workbench) ReleasesURL() string {
 	return defaultReleasesURL
 }
 
+// OpenUpdateModal opens the in-app software update modal without acquiring Store locks.
+func (w *Workbench) OpenUpdateModal() {
+	w.updateModalOpen = true
+}
+
+// CloseUpdateModal closes the in-app software update modal.
+func (w *Workbench) CloseUpdateModal() {
+	w.updateModalOpen = false
+}
+
+// UpdateModalOpen reports whether the in-app software update modal is currently open.
+func (w *Workbench) UpdateModalOpen() bool {
+	return w.updateModalOpen
+}
+
 // CheckForUpdates delegates an update check to the configured Host without acquiring Store locks.
 func (w *Workbench) CheckForUpdates() {
 	w.mu.Lock()
@@ -404,6 +449,57 @@ func (w *Workbench) CheckForUpdates() {
 		return
 	}
 	check()
+}
+
+// CheckForUpdatesAndShow opens the update modal and triggers an update check without acquiring Store locks.
+func (w *Workbench) CheckForUpdatesAndShow() {
+	w.OpenUpdateModal()
+	w.CheckForUpdates()
+}
+
+// InstallUpdate delegates downloading and installing the available update to the configured Host.
+func (w *Workbench) InstallUpdate() {
+	w.mu.Lock()
+	install := w.host.InstallUpdate
+	w.mu.Unlock()
+	if install == nil {
+		return
+	}
+	install()
+}
+
+// CancelUpdate cancels an in-flight update check or download through the configured Host.
+func (w *Workbench) CancelUpdate() {
+	w.mu.Lock()
+	cancel := w.host.CancelUpdate
+	w.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+}
+
+// SkipUpdateVersion marks the given release version as skipped and closes the update modal.
+func (w *Workbench) SkipUpdateVersion(version string) {
+	w.CloseUpdateModal()
+	w.mu.Lock()
+	skip := w.host.SkipUpdateVersion
+	w.mu.Unlock()
+	if skip == nil {
+		return
+	}
+	skip(version)
+}
+
+// RelaunchToUpdate triggers an application relaunch into the installed update via Host.
+func (w *Workbench) RelaunchToUpdate() {
+	w.mu.Lock()
+	relaunch := w.host.RelaunchToUpdate
+	w.mu.Unlock()
+	if relaunch == nil {
+		return
+	}
+	relaunch()
 }
 
 // OpenReleasesPage opens the GitHub Releases page via Host.OpenURL.
@@ -423,6 +519,30 @@ func (w *Workbench) updateActionsReady() (canCheck, canOpenURL bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.host.CheckForUpdates != nil, w.host.OpenURL != nil
+}
+
+func (w *Workbench) canInstallUpdate() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.host.InstallUpdate != nil
+}
+
+func (w *Workbench) canCancelUpdate() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.host.CancelUpdate != nil
+}
+
+func (w *Workbench) canSkipUpdate() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.host.SkipUpdateVersion != nil
+}
+
+func (w *Workbench) canRelaunchUpdate() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.host.RelaunchToUpdate != nil
 }
 
 func (w *Workbench) now() time.Time {
@@ -2693,11 +2813,13 @@ func (w *Workbench) reloadSettings(async bool) {
 	settings, backups := w.app.Settings, w.app.Backups
 	initialTheme := w.themeSetting
 	initialPolicy := w.backupPolicyDraft()
+	initialUpdateCheck := w.updateCheckPolicyDraft()
 	w.loadUI("settings", async, func() func() {
 		ctx := context.Background()
 		th, themeErr := settings.Theme(ctx)
 		pol, policyErr := backups.GetPolicy(ctx)
 		st, statusErr := backups.Status(ctx)
+		upPol, upErr := settings.UpdateCheckPolicy(ctx)
 		return func() {
 			if !w.settingWritePending(themePreference) {
 				if themeErr == nil && w.themeSetting == initialTheme {
@@ -2711,6 +2833,9 @@ func (w *Workbench) reloadSettings(async bool) {
 			if statusErr == nil {
 				w.backupStatus = st
 			}
+			if upErr == nil && !w.settingWritePending(updateCheckPreference) && w.updateCheckPolicyDraft() == initialUpdateCheck {
+				w.applyUpdateCheckPolicy(upPol)
+			}
 		}
 	})
 }
@@ -2720,6 +2845,37 @@ func (w *Workbench) applyBackupPolicy(pol backup.Policy) {
 	w.backupIntervalSelect = formatIntervalOption(pol.Interval)
 	w.backupKeepSelect = fmt.Sprint(pol.Keep)
 	w.backupDirInput = pol.Directory
+}
+
+func (w *Workbench) applyUpdateCheckPolicy(pol backend.UpdateCheckPolicy) {
+	w.updateCheckEnabled = pol.Enabled
+	w.updateCheckIntervalSelect = formatUpdateCheckIntervalOption(pol.Interval)
+}
+
+func (w *Workbench) currentUpdateCheckPolicy() backend.UpdateCheckPolicy {
+	return backend.UpdateCheckPolicy{
+		Enabled:  w.updateCheckEnabled,
+		Interval: parseIntervalOption(w.updateCheckIntervalSelect),
+	}
+}
+
+func (w *Workbench) updateCheckPolicyDraft() struct {
+	enabled  bool
+	interval string
+} {
+	return struct {
+		enabled  bool
+		interval string
+	}{w.updateCheckEnabled, w.updateCheckIntervalSelect}
+}
+
+func formatUpdateCheckIntervalOption(d time.Duration) string {
+	for _, opt := range updateCheckIntervalOptions {
+		if parseIntervalOption(opt.Value) == d {
+			return opt.Value
+		}
+	}
+	return d.String()
 }
 
 // backupPolicyDraft compares the raw controls so an in-flight Settings load
@@ -2830,6 +2986,48 @@ func (w *Workbench) SaveBackupPolicy() {
 			}
 			if !w.settingWritePending(backupPreference) {
 				w.EnqueueToast(ToastProps{Title: "自动备份策略已保存", Description: "本地自动备份调度器已更新", Type: ToastSuccess})
+			}
+		}
+	})
+}
+
+// SaveUpdateCheckPolicy persists the silent background update check preference to SQLite
+// and notifies the desktop host scheduler once saved.
+func (w *Workbench) SaveUpdateCheckPolicy() {
+	if w.IsRestoring() {
+		return
+	}
+	draft := w.updateCheckPolicyDraft()
+	pol := backend.UpdateCheckPolicy{
+		Enabled:  draft.enabled,
+		Interval: parseIntervalOption(draft.interval),
+	}
+	settings := w.app.Settings
+	w.saveSetting(updateCheckPreference, func() func() {
+		ctx := context.Background()
+		if err := settings.SetUpdateCheckPolicy(ctx, pol); err != nil {
+			saved, loadErr := settings.UpdateCheckPolicy(ctx)
+			return func() {
+				w.enqueueErrorToast("保存自动检查更新设置失败", err)
+				if loadErr == nil && !w.settingWritePending(updateCheckPreference) {
+					w.applyUpdateCheckPolicy(saved)
+				}
+			}
+		}
+		saved, loadErr := settings.UpdateCheckPolicy(ctx)
+		return func() {
+			if loadErr == nil && !w.settingWritePending(updateCheckPreference) && w.updateCheckPolicyDraft() == draft {
+				w.applyUpdateCheckPolicy(saved)
+			}
+			w.mu.Lock()
+			notify := w.host.SetUpdateCheckPolicy
+			w.mu.Unlock()
+			if notify != nil {
+				if loadErr == nil {
+					notify(saved)
+				} else {
+					notify(pol)
+				}
 			}
 		}
 	})
@@ -3049,6 +3247,9 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	if w.host.SetTheme != nil {
 		w.host.SetTheme(w.themeSetting)
 	}
+	if w.host.SetUpdateCheckPolicy != nil {
+		w.host.SetUpdateCheckPolicy(w.currentUpdateCheckPolicy())
+	}
 	w.EnqueueToast(ToastProps{
 		Title:       "已从备份完整恢复数据",
 		Description: "恢复前安全备份已保存至: " + res.SafetyBackupPath,
@@ -3158,6 +3359,7 @@ func (w *Workbench) View(c *ui.Context) {
 	w.renderJobCloseModal(c, tk)
 	w.renderTrashModals(c, tk)
 	w.renderSettingsModals(c, tk)
+	w.renderUpdateModal(c, tk)
 
 	// Drain queued toasts right before ToastHost so same-frame action toasts display immediately.
 	w.drainPendingToasts(c)

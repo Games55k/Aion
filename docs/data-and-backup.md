@@ -8,9 +8,10 @@ Aion 所有数据 100% 存储在本地 Mac，不依赖云服务。本文档说�
 
 ```text
 ~/Library/Application Support/Aion/
-├── aion.sqlite     # SQLite 主数据库（Schema v3：项目、任务、子任务、求职投递与时间线、回收站、设置）
-├── attachments/    # 受管本地附件存储
-└── backups/        # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip）
+├── aion.sqlite          # SQLite 主数据库（Schema v3：项目、任务、子任务、求职投递与时间线、回收站、设置）
+├── attachments/         # 受管本地附件存储
+├── backups/             # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip）
+└── .updater-state.json  # 本机更新检查运行态（最近检查时间与已跳过版本，不随备份恢复覆盖）
 ```
 
 ## 本地受管附件

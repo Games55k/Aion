@@ -7,10 +7,31 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"aion/backend/model"
 	"aion/backend/store"
 )
+
+// UpdateCheckPolicy controls background silent update checks.
+type UpdateCheckPolicy struct {
+	Enabled  bool          `json:"enabled"`
+	Interval time.Duration `json:"interval"`
+}
+
+const (
+	defaultUpdateCheckInterval = 24 * time.Hour
+	minUpdateCheckInterval     = time.Minute
+	maxUpdateCheckInterval     = 365 * 24 * time.Hour
+)
+
+// DefaultUpdateCheckPolicy returns the default silent update check preference.
+func DefaultUpdateCheckPolicy() UpdateCheckPolicy {
+	return UpdateCheckPolicy{
+		Enabled:  true,
+		Interval: defaultUpdateCheckInterval,
+	}
+}
 
 // Settings stores versionable module preferences. Keys are namespaced, e.g.
 // app.theme or projects.card_density. Backup policy is owned by backup.Service.
@@ -67,6 +88,26 @@ func (s *Settings) SetTheme(ctx context.Context, theme string) error {
 		return model.ErrInvalid
 	}
 	return s.Set(ctx, "app.theme", theme)
+}
+func (s *Settings) UpdateCheckPolicy(ctx context.Context) (UpdateCheckPolicy, error) {
+	var pol UpdateCheckPolicy
+	err := s.Get(ctx, "app.update_check", &pol)
+	if errors.Is(err, model.ErrNotFound) {
+		return DefaultUpdateCheckPolicy(), nil
+	}
+	if err != nil {
+		return UpdateCheckPolicy{}, err
+	}
+	if pol.Interval < minUpdateCheckInterval || pol.Interval > maxUpdateCheckInterval {
+		pol.Interval = defaultUpdateCheckInterval
+	}
+	return pol, nil
+}
+func (s *Settings) SetUpdateCheckPolicy(ctx context.Context, pol UpdateCheckPolicy) error {
+	if pol.Interval < minUpdateCheckInterval || pol.Interval > maxUpdateCheckInterval {
+		return fmt.Errorf("%w: update check interval must be between 1m and 365d", model.ErrInvalid)
+	}
+	return s.Set(ctx, "app.update_check", pol)
 }
 func validKey(key string) bool {
 	if len(key) == 0 || len(key) > 128 || !strings.Contains(key, ".") {
