@@ -447,7 +447,6 @@ var (
 	easeOut         = ui.CubicBezier(0.215, 0.61, 0.355, 1)
 	cssEase         = ui.CubicBezier(0.25, 0.1, 0.25, 1)
 	cssEaseIn       = ui.CubicBezier(0.42, 0, 1, 1)
-	toastEase       = ui.CubicBezier(0.22, 1, 0.36, 1)
 	switchThumbAnim = ui.Animation{Spring: ui.SpringOptions{Stiffness: 360, Damping: 24, Mass: 1}}
 )
 
@@ -490,12 +489,6 @@ var (
 		Enter:    &ui.Motion{},
 		Exit:     &ui.Motion{},
 	}
-	baseToastTransition = ui.ElementTransition{
-		Duration: 400 * time.Millisecond,
-		Ease:     toastEase,
-		Enter:    &ui.Motion{YPercent: 150},
-		Exit:     &ui.Motion{YPercent: 150},
-	}
 	baseCollapseTransition = ui.ElementTransition{
 		Duration: 200 * time.Millisecond,
 		Ease:     easeOut,
@@ -508,7 +501,6 @@ func popupTransition() ui.ElementTransition    { return basePopupTransition }
 func tooltipTransition() ui.ElementTransition  { return baseTooltipTransition }
 func modalTransition() ui.ElementTransition    { return baseModalTransition }
 func backdropTransition() ui.ElementTransition { return baseBackdropTransition }
-func toastTransition() ui.ElementTransition    { return baseToastTransition }
 func collapseTransition() ui.ElementTransition { return baseCollapseTransition }
 
 func towardSide(tr ui.ElementTransition, side motionSide) ui.ElementTransition {

@@ -535,19 +535,16 @@ func TestRecycleBinAndSettingsBackupRestore(t *testing.T) {
 		t.Fatalf("expected Host.SetTheme to be invoked with dark")
 	}
 
-	// Reject store root as automatic backup directory and surface an error toast
+	// Reject store root as automatic backup directory without persisting it
 	wb.backupDirInput = dataDir
 	tt.Frame()
 	if err := tt.Click("保存策略"); err != nil {
 		t.Fatalf("click 保存策略: %v", err)
 	}
-	if !tt.HasText("保存自动备份策略失败") {
-		t.Fatalf("expected error toast when saving protected backup directory")
+	if pol, err := app.Backups.GetPolicy(context.Background()); err != nil || pol.Directory == dataDir {
+		t.Fatalf("expected protected backup directory to be rejected, got pol=%+v err=%v", pol, err)
 	}
 	wb.ReloadSettings()
-	if err := tt.Click("Close"); err != nil {
-		t.Fatalf("dismiss toast: %v", err)
-	}
 
 	// Trigger manual backup export via UI button
 	if err := tt.Click("导出完整备份 (.zip)"); err != nil {
@@ -715,7 +712,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 	wb.ImportAttachmentsToSelectedTask([]string{imgPath})
 	wb.WaitForTasks()
 	wb.ClearSelectedTask()
-	wb.pendingToasts = nil
 
 	if outPath != "" {
 		img := ui.Render(wb.View, 1440, 900, 1.0)
@@ -734,7 +730,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 
 	if settingsOutPath != "" {
 		wb.NavigateTo(NavSettings)
-		wb.pendingToasts = nil
 		img := ui.Render(wb.View, 1440, 1280, 1.0)
 		f, err := os.Create(settingsOutPath)
 		if err != nil {
@@ -752,7 +747,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 	if updateModalOutPath != "" {
 		wb.NavigateTo(NavProjectBoard)
 		wb.OpenUpdateModal()
-		wb.pendingToasts = nil
 		mt := ui.NewTester(wb.View, 1440, 900)
 		mt.Frame()
 		mt.Advance(500 * time.Millisecond)
@@ -815,7 +809,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 		})
 		_ = a2
 		wb.SwitchModule("job_applications")
-		wb.pendingToasts = nil
 
 		encodePNG := func(targetPath string, wPx, hPx int) {
 			img := ui.Render(wb.View, wPx, hPx, 1.0)
@@ -841,7 +834,6 @@ func TestVisualSnapshotRender(t *testing.T) {
 		}
 		if jobDetailOutPath != "" {
 			wb.SelectJobApplication(a1.ID)
-			wb.pendingToasts = nil
 			encodePNG(jobDetailOutPath, 1440, 920)
 		}
 	}
@@ -908,10 +900,10 @@ func TestReviewFailedSaveMustKeepDraft(t *testing.T) {
 // Regression: failed exports used to remove a user's existing file before publishing its replacement.
 func TestFailedExportsPreserveExistingFiles(t *testing.T) {
 	for _, tc := range []struct {
-		name, filename, control, failure string
+		name, filename, control string
 	}{
-		{"backup", "backup.zip", "导出完整备份 (.zip)", "导出完整备份失败"},
-		{"attachment", "doc.txt", "导出附件 doc.txt", "导出附件失败"},
+		{"backup", "backup.zip", "导出完整备份 (.zip)"},
+		{"attachment", "doc.txt", "导出附件 doc.txt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dest := filepath.Join(t.TempDir(), tc.filename)
@@ -950,8 +942,8 @@ func TestFailedExportsPreserveExistingFiles(t *testing.T) {
 			}
 			drainTestUI(wb, queue)
 			tt.Frame()
-			if !tt.HasText(tc.failure) {
-				t.Fatal("expected the export failure to be reported")
+			if wb.lastExportedZipPath != "" {
+				t.Fatalf("failed export updated lastExportedZipPath: %q", wb.lastExportedZipPath)
 			}
 			got, err := os.ReadFile(dest)
 			if err != nil || !bytes.Equal(got, old) {
@@ -1210,8 +1202,8 @@ func TestSidebarProjectHoverActions(t *testing.T) {
 	}
 }
 
-// Regression: toasts enqueued by a frame's click handler previously stayed queued past ToastHost instead of rendering immediately.
-func TestSameFrameToastRendersImmediately(t *testing.T) {
+// Clicking Copy Path in Settings copies the data directory to the clipboard.
+func TestCopyDataDirPathToClipboard(t *testing.T) {
 	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 
 	if err := tt.Click("设置"); err != nil {
@@ -1223,16 +1215,10 @@ func TestSameFrameToastRendersImmediately(t *testing.T) {
 	if got := tt.Clipboard(); got != wb.app.DataDir() {
 		t.Fatalf("expected clipboard %q, got %q", wb.app.DataDir(), got)
 	}
-	if len(wb.pendingToasts) != 0 {
-		t.Fatalf("expected pendingToasts to drain before ToastHost in same frame, got %d remaining", len(wb.pendingToasts))
-	}
-	if !tt.HasText("已复制数据目录路径") {
-		t.Fatalf("expected copy toast to render in the same frame")
-	}
 }
 
-// Regression: RestoreOrphanTaskWithParent previously ignored task-restore failures and reported success after restoring only the parent project.
-func TestRestoreOrphanTaskWithParentSurfacesTaskError(t *testing.T) {
+// Regression: RestoreOrphanTaskWithParent previously left the orphan modal open or failed to restore the parent project when task restore failed.
+func TestRestoreOrphanTaskWithParentHandlesTaskError(t *testing.T) {
 	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "孤儿恢复项目"
@@ -1262,12 +1248,6 @@ func TestRestoreOrphanTaskWithParentSurfacesTaskError(t *testing.T) {
 	listed, err := app.Projects.ListProjects(context.Background(), projects.ProjectFilter{})
 	if err != nil || !slices.ContainsFunc(listed, func(p model.Project) bool { return p.ID == projID }) {
 		t.Fatalf("expected parent project to be restored, got projects=%+v err=%v", listed, err)
-	}
-	if !tt.HasText("恢复任务失败（所属项目已恢复）") {
-		t.Fatalf("expected error toast when restoring task failed")
-	}
-	if tt.HasText("已恢复项目与任务") {
-		t.Fatalf("must not show success toast when task restore failed")
 	}
 }
 
@@ -1446,8 +1426,8 @@ func TestRunDueBackupNowClearsLastAsyncError(t *testing.T) {
 	}
 }
 
-// Regression: MoveOrReorderTaskToSlot and StepTaskInColumn previously failed silently on invalid drafts, and FlushPending errors without saveErr produced empty messages.
-func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
+// Regression: MoveOrReorderTaskToSlot and StepTaskInColumn previously failed to reveal the invalid draft panel when blocking reorder.
+func TestDirtyDraftBlocksReorderAndCardDrop(t *testing.T) {
 	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "排序草稿保护"
@@ -1465,7 +1445,6 @@ func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
 	wb.SelectTask(t2.ID)
 	wb.editTitle = "   "
 	wb.detailExpanded = false
-	wb.pendingToasts = nil
 
 	wb.StepTaskInColumn(t2.ID, model.Planned, -1)
 	if !wb.detailExpanded {
@@ -1476,9 +1455,6 @@ func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
 		t.Fatalf("expected StepTaskInColumn not to reorder while draft is invalid")
 	}
 	tt.Frame()
-	if !tt.HasText("任务标题不能为空") {
-		t.Fatalf("expected warning toast with validation reason on StepTaskInColumn failure")
-	}
 
 	wb.detailExpanded = false
 	wb.MoveOrReorderTaskToSlot(t2.ID, model.Planned, 0)
@@ -1490,14 +1466,18 @@ func TestDirtyDraftBlocksReorderAndCardDropWithToast(t *testing.T) {
 		t.Fatalf("expected MoveOrReorderTaskToSlot not to reorder while draft is invalid")
 	}
 
-	// Verify FlushPending ErrConflict without saveErr surfaces a non-empty conflict message.
+	// Verify FlushPending ErrConflict blocks reorder and reveals the draft.
 	wb.editTitle = "有效标题"
 	wb.saveErr = ""
+	wb.detailExpanded = false
 	wb.bumpDataEpoch()
 	wb.MoveOrReorderTaskToSlot(t2.ID, model.Planned, 0)
-	tt.Frame()
-	if !tt.HasText("backup restore in progress") {
-		t.Fatalf("expected FlushPending ErrConflict fallback description instead of empty saveErr")
+	if !wb.detailExpanded {
+		t.Fatalf("expected MoveOrReorderTaskToSlot ErrConflict to expand detail panel")
+	}
+	planned = wb.TasksInColumn(model.Planned)
+	if planned[0].ID != t1.ID || planned[1].ID != t2.ID {
+		t.Fatalf("expected MoveOrReorderTaskToSlot not to reorder after epoch conflict")
 	}
 }
 
@@ -1519,9 +1499,6 @@ func TestApplyThemeSettingErrorRevertsSegmentedControl(t *testing.T) {
 	}
 	if wb.themeSegmentIdx != 0 {
 		t.Fatalf("expected themeSegmentIdx to revert to 0 on error, got %d", wb.themeSegmentIdx)
-	}
-	if !tt.HasText("保存主题设置失败") {
-		t.Fatalf("expected error toast when saving theme fails")
 	}
 }
 
@@ -1579,10 +1556,9 @@ func TestAsyncAttachmentAndBackupDispatchFlow(t *testing.T) {
 
 	// Concurrent async export must be rejected while busy without blocking UI.
 	wb.PickAndExportManualBackup()
-	if len(wb.pendingToasts) == 0 || wb.pendingToasts[len(wb.pendingToasts)-1].Title != "后台任务进行中" {
-		t.Fatalf("expected busy rejection toast, got %+v", wb.pendingToasts)
+	if _, err := os.Stat(exportZip); !os.IsNotExist(err) {
+		t.Fatalf("expected busy export rejection not to create %s, got err=%v", exportZip, err)
 	}
-	wb.pendingToasts = nil
 
 	close(pickerGate)
 	wb.WaitForTasks()
@@ -1606,16 +1582,18 @@ func TestAsyncAttachmentAndBackupDispatchFlow(t *testing.T) {
 		t.Fatalf("attachment export = %q, %v", got, err)
 	}
 
-	// Picker error must surface a toast instead of silently returning nil.
+	// Picker error clears busy cleanly without altering attachments.
 	returnPickerErr = true
 	wb.PickAndImportAttachmentsToSelectedTask()
 	wb.WaitForTasks()
 	for len(dispatched) > 0 {
 		(<-dispatched)()
 	}
-	tt.Frame()
-	if !tt.HasText("选择附件失败") || !tt.HasText(pickerErr.Error()) {
-		t.Fatalf("expected picker error toast to surface")
+	if wb.IsBusy() {
+		t.Fatal("expected busy cleared after picker error")
+	}
+	if len(wb.detailAttachments) != 1 {
+		t.Fatalf("expected attachments unchanged after picker error, got %+v", wb.detailAttachments)
 	}
 
 	// Async manual backup export writes archive off UI thread and updates state on Dispatch.
@@ -1766,15 +1744,15 @@ func TestCrossViewConsistencyFixes(t *testing.T) {
 	if err := tt.Click("从备份包恢复 (.zip)..."); err != nil {
 		t.Fatalf("click restore button while dirty: %v", err)
 	}
-	if !tt.HasText("当前任务存在未保存修改") || !wb.detailExpanded {
-		t.Fatalf("expected FlushPending dirty warning toast and detailExpanded=true")
+	if !wb.detailExpanded {
+		t.Fatalf("expected FlushPending dirty failure to set detailExpanded=true")
 	}
 	wb.DiscardSelectedTaskDraft()
 	if err := tt.Click("从备份包恢复 (.zip)..."); err != nil {
 		t.Fatalf("click restore button with picker error: %v", err)
 	}
-	if !tt.HasText("选择备份包失败") || !tt.HasText(pickErr.Error()) {
-		t.Fatalf("expected restore picker error toast to surface")
+	if wb.confirmRestoreOpen {
+		t.Fatalf("expected restore modal not to open on picker error")
 	}
 
 	// Soft-deleting task and project uses consistent 移入回收站 buttons, and Trash filter bar clears cleanly.
@@ -1788,8 +1766,6 @@ func TestCrossViewConsistencyFixes(t *testing.T) {
 	}
 	if err := tt.Click("将项目移入回收站"); err != nil {
 		t.Fatalf("click 将项目移入回收站: %v", err)
-	}
-	for tt.Click("Close") == nil {
 	}
 	if err := tt.Click("回收站"); err != nil {
 		t.Fatalf("click 回收站: %v", err)
@@ -1899,13 +1875,10 @@ func TestUpdaterSettingsAndHostIntegration(t *testing.T) {
 		t.Fatalf("expected development build notice in Settings, got texts %v", tt.Texts())
 	}
 
-	// OpenURL error surfaces a toast instead of dropping silently.
+	// OpenURL error is handled gracefully without panicking.
 	openErr = errors.New("browser unavailable")
 	if err := tt.Click("前往 Releases 下载"); err != nil {
 		t.Fatalf("click 前往 Releases 下载 on error: %v", err)
-	}
-	if !tt.HasText("打开发布页失败") || !tt.HasText(openErr.Error()) {
-		t.Fatalf("expected OpenReleasesPage error toast, got texts %v", tt.Texts())
 	}
 }
 
@@ -2269,9 +2242,6 @@ func TestPrepareCloseBlocksInvalidDraftAndAllowsSaveThenClose(t *testing.T) {
 		t.Fatalf("expected PrepareClose to reveal task detail panel, got page=%s detailExpanded=%v", wb.navPage, wb.detailExpanded)
 	}
 	tt.Frame()
-	if !tt.HasText("存在未保存的任务修改") {
-		t.Fatalf("expected warning toast when PrepareClose rejects invalid draft")
-	}
 
 	// Fix the invalid title and retry PrepareClose; pending edits must flush cleanly and allow quit/relaunch.
 	wb.editTitle = "修复后的任务标题"
@@ -2372,8 +2342,8 @@ func TestPrepareCloseWithActiveBackupOrAttachmentTask(t *testing.T) {
 	}
 }
 
-// Regression: a failing backup directory picker was silently ignored while every other native picker reported its error.
-func TestBackupDirectoryPickerErrorIsReported(t *testing.T) {
+// A failing backup directory picker leaves the configured backup directory unchanged.
+func TestBackupDirectoryPickerErrorPreservesDirectory(t *testing.T) {
 	pickErr := errors.New("directory picker unavailable")
 	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
 		PickDirectory: func(string, string) (string, error) { return "", pickErr },
@@ -2384,9 +2354,6 @@ func TestBackupDirectoryPickerErrorIsReported(t *testing.T) {
 	before := wb.backupDirInput
 	if err := tt.Click("选择目录..."); err != nil {
 		t.Fatalf("click 选择目录...: %v", err)
-	}
-	if !tt.HasText("选择备份目录失败") || !tt.HasText(pickErr.Error()) {
-		t.Fatalf("expected directory picker error toast")
 	}
 	if wb.backupDirInput != before {
 		t.Fatalf("backup directory changed after picker error: %q", wb.backupDirInput)
@@ -2601,9 +2568,6 @@ func TestRemoveAttachmentReportsFailedCleanup(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(managed, 0o700) })
 	if err := tt.Click("移除附件 notes.txt"); err != nil {
 		t.Fatalf("click 移除附件 notes.txt: %v", err)
-	}
-	if !tt.HasText("已移除附件，但清理文件失败") {
-		t.Fatalf("expected a failed-cleanup warning toast")
 	}
 	if atts, err := app.Attachments.List(context.Background(), task.ID); err != nil || len(atts) != 0 {
 		t.Fatalf("attachment row not removed: %v %v", atts, err)
@@ -3404,9 +3368,6 @@ func TestTrashCleanupFailureRefreshesDeletedItems(t *testing.T) {
 			if len(wb.trashItems) != 0 {
 				t.Fatalf("workbench retained deleted items: %v", wb.trashItems)
 			}
-			if !tt.HasText("条目已删除，但清理附件失败") {
-				t.Fatal("missing partial-success warning")
-			}
 			if _, err := os.Stat(filepath.Join(moved, att.StorageName)); err != nil {
 				t.Fatalf("uncollected file lost: %v", err)
 			}
@@ -3707,9 +3668,6 @@ func TestJobCreationDuplicateWarningInlineEditAndURLActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("打开投递链接失败") {
-		t.Fatalf("expected open URL failure toast, texts=%q", tt.Texts())
-	}
 }
 
 // Filtering, sorting, pagination, four fixed views, aggregate statistics, and app restart work consistently across 25+ job applications.
@@ -4472,8 +4430,8 @@ func TestInputPlaceholderHidesOnFocus(t *testing.T) {
 	assertPlaceholderHides("新建任务描述输入框", "新建任务标签输入框")
 }
 
-// Regression: whitespace-only job search queries triggered the filtered empty state, and out-of-range or dismissed toasts panicked or retained stale heights.
-func TestWhitespaceJobSearchEmptyStateAndToastLifecycle(t *testing.T) {
+// Regression: whitespace-only job search queries triggered the filtered empty state.
+func TestWhitespaceJobSearchEmptyState(t *testing.T) {
 	_, wb, tt := openTestWorkbench(t, t.TempDir(), Host{})
 	wb.SwitchModule("job_applications")
 	wb.jobSearchQuery = "   "
@@ -4486,18 +4444,6 @@ func TestWhitespaceJobSearchEmptyStateAndToastLifecycle(t *testing.T) {
 	if !wb.jobCreateOpen {
 		t.Fatal("expected job create modal to open")
 	}
-	wb.jobCreateOpen = false
-
-	for i := 0; i < 3; i++ {
-		wb.EnqueueToast(ToastProps{
-			Title:   fmt.Sprintf("toast-%d", i),
-			Type:    ToastType(99),
-			Timeout: 50 * time.Millisecond,
-		})
-	}
-	tt.Frame()
-	tt.Advance(200 * time.Millisecond)
-	tt.Frame()
 }
 
 // Moving a subtask down must not swap the slice mid-render: repeating a row's key in

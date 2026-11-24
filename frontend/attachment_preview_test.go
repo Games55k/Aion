@@ -247,7 +247,6 @@ func TestAttachmentPreviewLoadsWhenScrolledIntoView(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "photo.png")
 	writeSamplePNG(t, path)
 	wb.ImportAttachmentsToSelectedTask([]string{path})
-	wb.pendingToasts = nil
 	att := wb.detailAttachments[0]
 	dispatched := make(chan func(), 1)
 	wb.host.Dispatch = func(fn func()) { dispatched <- fn }

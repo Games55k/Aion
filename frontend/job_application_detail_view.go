@@ -347,7 +347,6 @@ func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *uiTokens) {
 					copyBtn.Disabled(true)
 				} else if copyBtn.Clicked() {
 					c.Services().WriteClipboard(strings.TrimSpace(w.editJobURL))
-					w.EnqueueToast(ToastProps{Title: "已复制投递链接", Type: ToastSuccess})
 				}
 				openBtn := uiButton(c, "打开链接", buttonProps{Variant: buttonDefault, Size: sizeSmall})
 				if strings.TrimSpace(w.editJobURL) == "" {

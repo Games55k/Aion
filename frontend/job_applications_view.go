@@ -450,11 +450,6 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 					Title: "复制链接: " + app.CompanyName + " " + app.PositionName,
 				}).Clicked() {
 					c.Services().WriteClipboard(app.ApplicationURL)
-					w.EnqueueToast(ToastProps{
-						Title:       "已复制投递链接",
-						Description: app.ApplicationURL,
-						Type:        ToastSuccess,
-					})
 				}
 				if uiActionIcon(c.Key("open-url-"+app.ID), iconExternalLink(), actionIconProps{
 					Title: "打开链接: " + app.CompanyName + " " + app.PositionName,

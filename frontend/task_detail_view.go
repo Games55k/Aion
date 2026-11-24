@@ -690,14 +690,14 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens) {
 							Variant: buttonDefault,
 							Size:    sizeSmall,
 						}).Label("打开附件 " + att.Name).Clicked() {
-							w.openOrRevealAttachment("打开附件失败", w.host.OpenPath, att)
+							w.openOrRevealAttachment(w.host.OpenPath, att)
 						}
 
 						if uiButton(c.Key("reveal-att-"+att.ID), "Finder", buttonProps{
 							Variant: buttonDefault,
 							Size:    sizeSmall,
 						}).Label("在 Finder 中显示 " + att.Name).Clicked() {
-							w.openOrRevealAttachment("在 Finder 中显示失败", w.host.RevealPath, att)
+							w.openOrRevealAttachment(w.host.RevealPath, att)
 						}
 
 						if uiButton(c.Key("export-att-"+att.ID), "另存为", buttonProps{
@@ -720,26 +720,15 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens) {
 	})
 }
 
-func (w *Workbench) openOrRevealAttachment(failTitle string, actionFn func(string) error, att model.Attachment) {
+func (w *Workbench) openOrRevealAttachment(actionFn func(string) error, att model.Attachment) {
 	if actionFn == nil {
 		return
 	}
 	managedPath := w.AttachmentManagedPath(att)
 	if managedPath == "" {
-		w.EnqueueToast(ToastProps{
-			Title:       failTitle,
-			Description: "附件文件不存在或路径无效",
-			Type:        ToastError,
-		})
 		return
 	}
-	if err := actionFn(managedPath); err != nil {
-		w.EnqueueToast(ToastProps{
-			Title:       failTitle,
-			Description: err.Error(),
-			Type:        ToastError,
-		})
-	}
+	_ = actionFn(managedPath)
 }
 
 func formatByteSize(b int64) string {

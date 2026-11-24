@@ -112,28 +112,15 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 								Size:    sizeSmall,
 							}).Clicked() {
 								c.Services().WriteClipboard(dataDir)
-								w.EnqueueToast(ToastProps{
-									Title:       "已复制数据目录路径",
-									Description: dataDir,
-									Type:        ToastSuccess,
-								})
 							}
 							if uiButton(c, "在 Finder 中打开", buttonProps{
 								Variant: buttonDefault,
 								Size:    sizeSmall,
 							}).Clicked() {
-								var openErr error
 								if w.host.OpenPath != nil {
-									openErr = w.host.OpenPath(dataDir)
+									_ = w.host.OpenPath(dataDir)
 								} else if w.host.RevealPath != nil {
-									openErr = w.host.RevealPath(dataDir)
-								}
-								if openErr != nil {
-									w.EnqueueToast(ToastProps{
-										Title:       "在 Finder 中打开失败",
-										Description: openErr.Error(),
-										Type:        ToastError,
-									})
+									_ = w.host.RevealPath(dataDir)
 								}
 							}
 						})
@@ -242,12 +229,7 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 									curDir := w.backupDirInput
 									w.runDialog(func() func() {
 										dir, err := pick("选择自动备份存储目录", curDir)
-										if err != nil {
-											return func() {
-												w.enqueueErrorToast("选择备份目录失败", err)
-											}
-										}
-										if dir == "" {
+										if err != nil || dir == "" {
 											return nil
 										}
 										return func() {
@@ -311,18 +293,13 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 							if w.IsBusy() {
 								return
 							}
-							if err := w.flushPendingOrToast("当前任务存在未保存修改", "，请先修正保存或放弃修改后再恢复备份"); err != nil {
+							if err := w.flushPendingOrRevealDraft(); err != nil {
 								return
 							}
 							if pick := w.host.PickOpenFiles; pick != nil {
 								w.runDialog(func() func() {
 									paths, err := pick("选择要恢复的 Aion 备份包 (.zip)", false, "zip")
-									if err != nil {
-										return func() {
-											w.enqueueErrorToast("选择备份包失败", err)
-										}
-									}
-									if len(paths) == 0 {
+									if err != nil || len(paths) == 0 {
 										return nil
 									}
 									return func() {

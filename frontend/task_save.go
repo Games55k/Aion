@@ -19,7 +19,7 @@ type taskSave struct {
 
 // afterPendingSave keeps the active task or job draft visible until persistence succeeds.
 // Repeated navigation replaces the intent, and failures never silently discard a draft.
-func (w *Workbench) afterPendingSave(next func(), title, suffix string) bool {
+func (w *Workbench) afterPendingSave(next func()) bool {
 	err := w.FlushPending()
 	if errors.Is(err, errSavePending) || errors.Is(err, errJobSavePending) {
 		w.afterSave = next
@@ -29,13 +29,9 @@ func (w *Workbench) afterPendingSave(next func(), title, suffix string) bool {
 		w.afterSave = nil
 		if w.jobSelected() {
 			w.jobDetailOpen = true
-			if title == "当前任务存在未保存修改" {
-				title = "当前投递存在未保存修改"
-			}
 		} else {
 			w.detailExpanded = true
 		}
-		w.EnqueueToast(ToastProps{Title: title, Description: w.flushErrorDetail(err) + suffix, Type: ToastWarning})
 		return false
 	}
 	w.afterSave = nil

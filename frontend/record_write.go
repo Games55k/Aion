@@ -18,7 +18,6 @@ func runRecordWrite[T any](w *Workbench, work func() (T, error), apply func(T, e
 		return zero, model.ErrConflict
 	}
 	if w.recordWritePending {
-		w.enqueueErrorToast("正在保存更改", errRecordWritePending)
 		return zero, errRecordWritePending
 	}
 	w.recordWritePending = true
@@ -26,7 +25,9 @@ func runRecordWrite[T any](w *Workbench, work func() (T, error), apply func(T, e
 		w.recordWritePending = false
 		next := w.afterRecordWrite
 		w.afterRecordWrite = nil
-		apply(result, err)
+		if apply != nil {
+			apply(result, err)
+		}
 		if next != nil {
 			next()
 		}
@@ -73,7 +74,9 @@ func runBoardWrite[T any](w *Workbench, projectID string, work func() (T, error)
 				w.reloadProjects(true)
 			}
 		}
-		apply(result, err)
+		if apply != nil {
+			apply(result, err)
+		}
 	})
 }
 

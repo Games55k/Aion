@@ -50,7 +50,6 @@ func (w *Workbench) reloadJobApplications(async bool) {
 		apps, err := service.List(context.Background())
 		return func() {
 			if err != nil {
-				w.enqueueErrorToast("加载投递记录失败", err)
 				return
 			}
 			w.jobApps = apps
@@ -248,8 +247,6 @@ func (w *Workbench) SubmitJobCreateModal() {
 		if err != nil {
 			if current {
 				w.jobCreateErr = err.Error()
-			} else {
-				w.enqueueErrorToast("新增投递失败", err)
 			}
 			return
 		}
@@ -261,11 +258,6 @@ func (w *Workbench) SubmitJobCreateModal() {
 			w.jobPage = 0
 		}
 		w.upsertJobInCache(created)
-		w.EnqueueToast(ToastProps{
-			Title:       "已新增投递记录",
-			Description: fmt.Sprintf("%s / %s", created.CompanyName, created.PositionName),
-			Type:        ToastSuccess,
-		})
 	})
 }
 
@@ -280,7 +272,7 @@ func (w *Workbench) SelectJobApplication(appID string) {
 		w.jobDetailOpen = true
 		return
 	}
-	if !w.afterPendingSave(func() { w.SelectJobApplication(appID) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再打开其他记录") {
+	if !w.afterPendingSave(func() { w.SelectJobApplication(appID) }) {
 		return
 	}
 	service := w.app.JobApplications
@@ -292,7 +284,6 @@ func (w *Workbench) SelectJobApplication(appID string) {
 		}
 		return func() {
 			if err != nil {
-				w.enqueueErrorToast("无法打开投递详情", err)
 				return
 			}
 			w.selectLoadedJob(app, events)
@@ -321,7 +312,7 @@ func (w *Workbench) selectLoadedJob(app model.JobApplication, events []model.Job
 
 // CloseJobDetail flushes any pending job draft before closing the detail modal.
 func (w *Workbench) CloseJobDetail() {
-	if !w.afterPendingSave(func() { w.CloseJobDetail() }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再关闭详情") {
+	if !w.afterPendingSave(func() { w.CloseJobDetail() }) {
 		return
 	}
 	w.navigationVersion++
@@ -356,7 +347,6 @@ func (w *Workbench) ChangeJobStage(appID string, toStage model.JobStage) {
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("更新阶段失败", err)
 			return
 		}
 		if w.pendingStageAppID == appID && w.pendingStageTarget == toStage && w.pendingStageOpID == opID {
@@ -410,7 +400,7 @@ func (w *Workbench) QuickCloseJobApplication(appID string, outcome model.JobOutc
 	if w.IsRestoring() || appID == "" || !outcome.Valid() {
 		return
 	}
-	if !w.afterPendingSave(func() { w.QuickCloseJobApplication(appID, outcome) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再结束流程") {
+	if !w.afterPendingSave(func() { w.QuickCloseJobApplication(appID, outcome) }) {
 		return
 	}
 	if outcome.RequiresOfferStage() && w.currentStageForJob(appID) != model.JobStageOffer {
@@ -442,7 +432,6 @@ func (w *Workbench) QuickCloseJobApplication(appID string, outcome model.JobOutc
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("结束流程失败", err)
 			return
 		}
 		if w.pendingQuickCloseAppID == appID && w.pendingQuickCloseOpID == opID {
@@ -451,11 +440,6 @@ func (w *Workbench) QuickCloseJobApplication(appID string, outcome model.JobOutc
 		}
 		w.upsertJobInCache(updated)
 		w.applyClosedJobToDetail(appID, updated, events)
-		w.EnqueueToast(ToastProps{
-			Title:       "流程已结束",
-			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
-			Type:        ToastInfo,
-		})
 	})
 }
 
@@ -464,7 +448,7 @@ func (w *Workbench) OpenJobCloseModal(appID string) {
 	if w.IsRestoring() {
 		return
 	}
-	if !w.afterPendingSave(func() { w.OpenJobCloseModal(appID) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再结束流程") {
+	if !w.afterPendingSave(func() { w.OpenJobCloseModal(appID) }) {
 		return
 	}
 	w.jobCloseAppID = appID
@@ -523,8 +507,6 @@ func (w *Workbench) SubmitJobCloseModal() {
 		if err != nil {
 			if current {
 				w.jobCloseErr = err.Error()
-			} else {
-				w.enqueueErrorToast("结束流程失败", err)
 			}
 			return
 		}
@@ -535,11 +517,6 @@ func (w *Workbench) SubmitJobCloseModal() {
 		}
 		w.upsertJobInCache(updated)
 		w.applyClosedJobToDetail(appID, updated, events)
-		w.EnqueueToast(ToastProps{
-			Title:       "流程已结束",
-			Description: fmt.Sprintf("%s · %s", updated.Stage.Label(), updated.Outcome.Label()),
-			Type:        ToastInfo,
-		})
 	})
 }
 
@@ -548,7 +525,7 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 	if w.IsRestoring() || appID == "" {
 		return
 	}
-	if !w.afterPendingSave(func() { w.ReopenJobApplication(appID) }, "当前投递存在未保存修改", "，请先修正保存或放弃修改后再重新开启") {
+	if !w.afterPendingSave(func() { w.ReopenJobApplication(appID) }) {
 		return
 	}
 	service := w.app.JobApplications
@@ -564,7 +541,6 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("重新开启失败", err)
 			return
 		}
 		w.upsertJobInCache(updated)
@@ -581,11 +557,6 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 				w.detailJobEvents = events
 			}
 		}
-		w.EnqueueToast(ToastProps{
-			Title:       "已重新开启流程",
-			Description: updated.CompanyName + " / " + updated.PositionName,
-			Type:        ToastSuccess,
-		})
 	})
 }
 
@@ -629,8 +600,6 @@ func (w *Workbench) AddJobTimelineNote(appID string) {
 		if err != nil {
 			if current {
 				w.jobNoteErr = err.Error()
-			} else {
-				w.enqueueErrorToast("保存时间线失败", err)
 			}
 			return
 		}
@@ -700,8 +669,6 @@ func (w *Workbench) BackfillJobStageEvent(appID string) {
 		if err != nil {
 			if current {
 				w.jobBackfillErr = err.Error()
-			} else {
-				w.enqueueErrorToast("保存时间线失败", err)
 			}
 			return
 		}
@@ -761,7 +728,6 @@ func (w *Workbench) SaveJobTimelineEventNote(appID, eventID string) {
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("保存时间线备注失败", err)
 			return
 		}
 		w.upsertJobInCache(updated)
@@ -773,10 +739,6 @@ func (w *Workbench) SaveJobTimelineEventNote(appID, eventID string) {
 			w.editingJobEventID = ""
 			w.editingJobEventNote = ""
 		}
-		w.EnqueueToast(ToastProps{
-			Title: "已更新节点备注",
-			Type:  ToastSuccess,
-		})
 	})
 }
 
@@ -801,7 +763,6 @@ func (w *Workbench) DeleteJobTimelineEvent(appID, eventID string) {
 		return err
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("删除时间线节点失败", err)
 			return
 		}
 		w.upsertJobInCache(updated)
@@ -813,10 +774,6 @@ func (w *Workbench) DeleteJobTimelineEvent(appID, eventID string) {
 			w.editingJobEventID = ""
 			w.editingJobEventNote = ""
 		}
-		w.EnqueueToast(ToastProps{
-			Title: "已删除时间线节点",
-			Type:  ToastInfo,
-		})
 	})
 }
 
@@ -826,7 +783,6 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		return
 	}
 	if w.jobSaving && w.selectedJobID == appID {
-		w.EnqueueToast(ToastProps{Title: "正在保存投递记录", Description: "保存完成后再移入回收站", Type: ToastInfo})
 		return
 	}
 	if w.selectedJobID == appID {
@@ -840,7 +796,6 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		return service.Delete(context.Background(), appID)
 	}, func(err error) {
 		if err != nil {
-			w.enqueueErrorToast("移入回收站失败", err)
 			return
 		}
 		if w.selectedJobID == appID {
@@ -848,42 +803,14 @@ func (w *Workbench) DeleteJobApplication(appID string) {
 		}
 		w.removeJobFromCache(appID)
 		w.reloadTrash(true)
-		w.EnqueueToast(ToastProps{
-			Title:       "已移入回收站",
-			Description: "可在全局回收站中恢复或彻底删除",
-			Type:        ToastInfo,
-		})
 	})
 }
 
-// OpenJobURL validates HTTP/HTTPS and delegates opening to Host.OpenURL with failure feedback.
+// OpenJobURL validates HTTP/HTTPS and delegates opening to Host.OpenURL.
 func (w *Workbench) OpenJobURL(rawURL string) {
 	cleaned, err := model.ValidateJobURL(rawURL)
-	if err != nil || cleaned == "" {
-		desc := "请填写有效的 http:// 或 https:// 投递链接"
-		if err != nil {
-			desc = err.Error()
-		}
-		w.EnqueueToast(ToastProps{
-			Title:       "投递链接无效",
-			Description: desc,
-			Type:        ToastWarning,
-		})
+	if err != nil || cleaned == "" || w.host.OpenURL == nil {
 		return
 	}
-	if w.host.OpenURL == nil {
-		w.EnqueueToast(ToastProps{
-			Title:       "无法打开链接",
-			Description: "当前窗口未提供浏览器打开能力",
-			Type:        ToastError,
-		})
-		return
-	}
-	if err := w.host.OpenURL(cleaned); err != nil {
-		w.EnqueueToast(ToastProps{
-			Title:       "打开投递链接失败",
-			Description: err.Error(),
-			Type:        ToastError,
-		})
-	}
+	_ = w.host.OpenURL(cleaned)
 }

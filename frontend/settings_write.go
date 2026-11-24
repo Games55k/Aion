@@ -33,7 +33,9 @@ func (w *Workbench) startSettingWrite(key string, work func() func()) {
 			delete(w.settingWrites, key)
 		}
 		w.loadVersions["settings"]++
-		apply()
+		if apply != nil {
+			apply()
+		}
 		if next != nil {
 			w.startSettingWrite(key, next)
 		}
