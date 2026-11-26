@@ -33,8 +33,10 @@ func (w *Workbench) HandleExternalChange(change ExternalChange) {
 	switch change.Scope {
 	case "projects":
 		w.reloadProjects(true)
+		w.reloadFocusTasks(true)
 	case "tasks":
 		w.reloadProjects(true)
+		w.reloadFocusTasks(true)
 	case "job_applications":
 		w.reloadJobApplications(true)
 		if w.selectedJobID != "" && (change.JobID == "" || change.JobID == w.selectedJobID) {
@@ -43,12 +45,14 @@ func (w *Workbench) HandleExternalChange(change ExternalChange) {
 	case "trash":
 		w.reloadTrash(true)
 		w.reloadProjects(true)
+		w.reloadFocusTasks(true)
 		w.reloadJobApplications(true)
 		if w.selectedJobID != "" {
 			w.reloadSelectedJobExternal(w.selectedJobID)
 		}
 	default:
 		w.reloadProjects(true)
+		w.reloadFocusTasks(true)
 		w.reloadJobApplications(true)
 		w.reloadTrash(true)
 		if w.selectedJobID != "" {

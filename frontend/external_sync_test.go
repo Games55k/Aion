@@ -198,7 +198,7 @@ func TestSettingsMCPCardCopiesAntigravityAndCodexConfig(t *testing.T) {
 	})
 	wb.NavigateTo(NavSettings)
 	tt.Frame()
-	tt.Scroll(500, 300, 0, 500)
+	tt.Scroll(500, 300, 0, 700)
 	tt.Frame()
 
 	if err := tt.Click("复制 Antigravity 配置"); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -108,6 +109,46 @@ func (s *Settings) SetUpdateCheckPolicy(ctx context.Context, pol UpdateCheckPoli
 		return fmt.Errorf("%w: update check interval must be between 1m and 365d", model.ErrInvalid)
 	}
 	return s.Set(ctx, "app.update_check", pol)
+}
+
+// HiddenModules returns the sorted, deduplicated IDs of modules hidden in the workbench UI.
+// Hiding a module never deletes its data; newly added built-in modules are visible by default.
+func (s *Settings) HiddenModules(ctx context.Context) ([]string, error) {
+	var raw []string
+	err := s.Get(ctx, "app.hidden_modules", &raw)
+	if errors.Is(err, model.ErrNotFound) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return normalizeModuleIDs(raw)
+}
+
+// SetHiddenModules persists the list of hidden module IDs.
+func (s *Settings) SetHiddenModules(ctx context.Context, ids []string) error {
+	norm, err := normalizeModuleIDs(ids)
+	if err != nil {
+		return err
+	}
+	return s.Set(ctx, "app.hidden_modules", norm)
+}
+
+func normalizeModuleIDs(ids []string) ([]string, error) {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if !validModuleID(id) {
+			return nil, fmt.Errorf("%w: invalid module id %q", model.ErrInvalid, id)
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 func validKey(key string) bool {
 	if len(key) == 0 || len(key) > 128 || !strings.Contains(key, ".") {

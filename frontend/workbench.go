@@ -32,6 +32,7 @@ const (
 type NavPage string
 
 const (
+	NavFocus            NavPage = "focus"
 	NavAllProjects      NavPage = "all_projects"
 	NavProjectBoard     NavPage = "project_board"
 	NavArchivedProjects NavPage = "archived_projects"
@@ -149,11 +150,13 @@ type Workbench struct {
 
 	// Navigation & Module state
 	modules         []backend.ModuleDescriptor
+	hiddenModules   map[string]bool
 	activeModule    string
 	navPage         NavPage
 	lastProjectPage NavPage
 	lastJobPage     NavPage
 	activeProjectID string
+	focusTasks      []model.Task
 
 	// Job Applications module state (filter/sort/page preserved across module switches)
 	jobApps              []model.JobApplication
@@ -364,6 +367,7 @@ func New(app *backend.App, host Host) *Workbench {
 		sideExpanded:      true,
 		detailExpanded:    false,
 		activeModule:      "projects",
+		hiddenModules:     make(map[string]bool),
 		navPage:           NavAllProjects,
 		lastProjectPage:   NavAllProjects,
 		lastJobPage:       NavJobAll,
@@ -810,9 +814,11 @@ func (w *Workbench) ReloadAll() {
 	}
 
 	w.ReloadProjects()
+	w.ReloadFocusTasks()
 	w.ReloadJobApplications()
 	w.ReloadTrash()
 	w.ReloadSettings()
+	w.ensureVisibleModuleSelection()
 }
 
 func (w *Workbench) rebuildProjectNames() {
@@ -937,7 +943,7 @@ func (w *Workbench) SelectProject(projectID string) {
 
 // SwitchModule switches between registered modules while protecting drafts and preserving per-module navigation/filter state.
 func (w *Workbench) SwitchModule(modID string) {
-	if w.IsRestoring() || modID == "" {
+	if w.IsRestoring() || modID == "" || !w.IsModuleVisible(modID) {
 		return
 	}
 	if isProjectNavPage(w.navPage) {
@@ -981,9 +987,9 @@ func (w *Workbench) SwitchModule(modID string) {
 	}
 }
 
-// IsGlobalPage reports whether the current navigation page is shared across modules (Trash or Settings).
+// IsGlobalPage reports whether the current navigation page is shared across modules (Focus, Trash, or Settings).
 func (w *Workbench) IsGlobalPage() bool {
-	return w.navPage == NavTrash || w.navPage == NavSettings
+	return w.navPage == NavFocus || w.navPage == NavTrash || w.navPage == NavSettings
 }
 
 // NavigateTo switches the top-level page after flushing any pending task or job edits.
@@ -1013,6 +1019,10 @@ func (w *Workbench) NavigateTo(page NavPage) {
 		return
 	}
 	switch page {
+	case NavFocus:
+		w.reloadFocusTasks(true)
+		w.reloadProjects(true)
+		w.reloadJobApplications(true)
 	case NavAllProjects, NavArchivedProjects:
 		w.reloadProjects(true)
 	case NavJobAll, NavJobActive, NavJobOffer, NavJobClosed:
@@ -2613,12 +2623,14 @@ func (w *Workbench) reloadSettings(async bool) {
 	initialTheme := w.themeSetting
 	initialPolicy := w.backupPolicyDraft()
 	initialUpdateCheck := w.updateCheckPolicyDraft()
+	initialHidden := w.hiddenModulesList()
 	w.loadUI("settings", async, func() func() {
 		ctx := context.Background()
 		th, themeErr := settings.Theme(ctx)
 		pol, policyErr := backups.GetPolicy(ctx)
 		st, statusErr := backups.Status(ctx)
 		upPol, upErr := settings.UpdateCheckPolicy(ctx)
+		hidden, hiddenErr := settings.HiddenModules(ctx)
 		return func() {
 			if !w.settingWritePending(themePreference) {
 				if themeErr == nil && w.themeSetting == initialTheme {
@@ -2634,6 +2646,9 @@ func (w *Workbench) reloadSettings(async bool) {
 			}
 			if upErr == nil && !w.settingWritePending(updateCheckPreference) && w.updateCheckPolicyDraft() == initialUpdateCheck {
 				w.applyUpdateCheckPolicy(upPol)
+			}
+			if hiddenErr == nil && !w.settingWritePending(modulesPreference) && slices.Equal(w.hiddenModulesList(), initialHidden) {
+				w.applyHiddenModules(hidden)
 			}
 		}
 	})
@@ -2919,6 +2934,8 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.afterSave = nil
 	w.boardNeedsReload = false
 	w.activeProjectID = ""
+	w.focusTasks = nil
+	w.hiddenModules = make(map[string]bool)
 	w.boardTasks = nil
 	w.filteredTasks = nil
 	w.allBoardTags = nil
@@ -3076,6 +3093,8 @@ func (w *Workbench) View(c *ui.Context) {
 		// Center Main Workspace Content
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).MinHeight(0).AlignSelf(ui.Stretch).Background(tk.BgLayout).Children(func() {
 			switch w.navPage {
+			case NavFocus:
+				w.renderFocusView(c, tk)
 			case NavAllProjects:
 				w.renderProjectsView(c, tk, false)
 			case NavArchivedProjects:

@@ -78,6 +78,20 @@ type TaskFilter struct {
 	Priority model.Priority `json:"priority"`
 }
 
+// SearchTasksFilter queries non-deleted tasks across projects (excluding archived
+// projects by default). Date bounds use inclusive YYYY-MM-DD calendar comparisons.
+type SearchTasksFilter struct {
+	ProjectID       string         `json:"project_id,omitempty"`
+	IncludeArchived bool           `json:"include_archived,omitempty"`
+	Query           string         `json:"query,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	Status          model.Status   `json:"status,omitempty"`
+	Priority        model.Priority `json:"priority,omitempty"`
+	DueBefore       string         `json:"due_before,omitempty"`
+	DueAfter        string         `json:"due_after,omitempty"`
+	HasDueDate      *bool          `json:"has_due_date,omitempty"`
+}
+
 func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", model.ErrInvalid, fmt.Sprintf(format, args...))
 }

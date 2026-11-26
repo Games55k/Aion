@@ -116,6 +116,98 @@ func (s *Service) ListTasks(ctx context.Context, projectID string, filter TaskFi
 	return result, nil
 }
 
+// SearchTasks queries non-deleted tasks across visible projects in a single read snapshot.
+// By default archived projects are excluded unless filter.IncludeArchived is true.
+func (s *Service) SearchTasks(ctx context.Context, filter SearchTasksFilter) ([]model.Task, error) {
+	if (filter.Status != "" && !filter.Status.Valid()) || (filter.Priority != "" && !filter.Priority.Valid()) {
+		return nil, invalid("invalid filter status or priority")
+	}
+	if filter.DueBefore != "" {
+		if d, err := time.Parse("2006-01-02", filter.DueBefore); err != nil || d.Format("2006-01-02") != filter.DueBefore {
+			return nil, invalid("due_before must be a real YYYY-MM-DD calendar date")
+		}
+	}
+	if filter.DueAfter != "" {
+		if d, err := time.Parse("2006-01-02", filter.DueAfter); err != nil || d.Format("2006-01-02") != filter.DueAfter {
+			return nil, invalid("due_after must be a real YYYY-MM-DD calendar date")
+		}
+	}
+	wantedTags := make([]string, 0, len(filter.Tags))
+	for _, tag := range filter.Tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			return nil, invalid("filter tag cannot be blank")
+		}
+		wantedTags = append(wantedTags, trimmed)
+	}
+	queryText := strings.ToLower(strings.TrimSpace(filter.Query))
+
+	const qualifiedTaskColumns = `t.id,t.project_id,t.title,t.description,t.status,t.priority,t.tags,t.subtasks,t.due_date,t.position,t.created_at,t.updated_at,t.completed_at,t.deleted_at`
+	result := make([]model.Task, 0)
+	err := s.store.Read(ctx, func(tx *sql.Tx) error {
+		query := `SELECT ` + qualifiedTaskColumns + ` FROM tasks t
+			JOIN projects p ON p.id=t.project_id
+			WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL`
+		var args []any
+		if !filter.IncludeArchived {
+			query += ` AND p.archived=0`
+		}
+		if pid := strings.TrimSpace(filter.ProjectID); pid != "" {
+			query += ` AND t.project_id=?`
+			args = append(args, pid)
+		}
+		if filter.Status != "" {
+			query += ` AND t.status=?`
+			args = append(args, filter.Status)
+		}
+		if filter.Priority != "" {
+			query += ` AND t.priority=?`
+			args = append(args, filter.Priority)
+		}
+		if filter.HasDueDate != nil {
+			if *filter.HasDueDate {
+				query += ` AND t.due_date <> ''`
+			} else {
+				query += ` AND t.due_date = ''`
+			}
+		}
+		if filter.DueBefore != "" {
+			query += ` AND t.due_date <> '' AND t.due_date <= ?`
+			args = append(args, filter.DueBefore)
+		}
+		if filter.DueAfter != "" {
+			query += ` AND t.due_date <> '' AND t.due_date >= ?`
+			args = append(args, filter.DueAfter)
+		}
+		query += ` ORDER BY
+			CASE t.status WHEN 'in_progress' THEN 0 WHEN 'planned' THEN 1 ELSE 2 END,
+			CASE WHEN t.due_date = '' THEN 1 ELSE 0 END,
+			t.due_date ASC,
+			CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+			t.updated_at DESC,
+			t.id ASC`
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			t, err := scanTask(rows)
+			if err != nil {
+				return err
+			}
+			if matchesTextAndTags(t, wantedTags, queryText) {
+				result = append(result, t)
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func matchesTextAndTags(t model.Task, wantedTags []string, queryText string) bool {
 	for _, wanted := range wantedTags {
 		found := false

@@ -311,12 +311,62 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 					})
 				})
 
-				// 5. Local AI / MCP Integration Card
+				// 5. Workspace Modules Visibility Card
+				w.renderSettingsModulesCard(c, tk)
+
+				// 6. Local AI / MCP Integration Card
 				w.renderSettingsMCPCard(c, tk)
 
-				// 6. App Version & Updates Card
+				// 7. App Version & Updates Card
 				w.renderSettingsUpdatesCard(c, tk)
 			})
+		})
+	})
+}
+
+func (w *Workbench) renderSettingsModulesCard(c *ui.Context, tk *uiTokens) {
+	visibleCount := len(w.VisibleModules())
+	ui.Column(c.Key("settings-card-modules")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
+		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
+		ui.Column(c).Gap(4).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconLayers()).FontSize(18).TextColor(tk.Primary)
+				ui.Text(c, "工作区模块").FontSize(16).FontWeight(600).TextColor(tk.Text)
+			})
+			ui.Text(c, "按当前阶段按需显示或隐藏内置模块；隐藏仅收起侧边栏入口，不会删除任何本地数据。").
+				FontSize(13).TextColor(tk.TextSecondary)
+		})
+
+		ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+			for _, mod := range w.modules {
+				m := mod
+				visible := w.IsModuleVisible(m.ID)
+				lockedLast := visible && visibleCount <= 1
+				ui.Row(c.Key("module-toggle-"+m.ID)).Padding(10, 12).Gap(12).Radius(tk.BorderRadius).
+					Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+						ui.Icon(c, ModuleIconSVG(m)).FontSize(16).TextColor(tk.Primary)
+						ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+							ui.Text(c, m.Name).FontSize(14).FontWeight(500).TextColor(tk.Text).SingleLine()
+							ui.Text(c, moduleDescription(m.ID)).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+						})
+					})
+
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+						if lockedLast {
+							ui.Text(c, "至少保留一个模块").FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+						}
+						checked := visible
+						uiSwitch(c.Key("module-switch-"+m.ID), &checked).
+							Label("显示模块 " + m.Name).
+							Disabled(lockedLast)
+						if checked != visible {
+							w.SetModuleVisible(m.ID, checked)
+						}
+					})
+				})
+			}
 		})
 	})
 }

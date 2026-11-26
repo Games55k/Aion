@@ -4,6 +4,7 @@ const (
 	themePreference       = "theme"
 	backupPreference      = "backup"
 	updateCheckPreference = "update_check"
+	modulesPreference     = "modules"
 )
 
 func (w *Workbench) settingWritePending(key string) bool {

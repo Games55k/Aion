@@ -47,12 +47,13 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 					})
 				}
 
-				// Registered Module Switcher (shown in both expanded and collapsed sidebar modes)
-				if len(w.modules) > 1 {
+				// Registered Module Switcher (shown only when >1 module is visible)
+				visibleMods := w.VisibleModules()
+				if len(visibleMods) > 1 {
 					if nav.Expanded {
 						ui.Row(c).Gap(6).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
-							for _, mod := range w.modules {
-								active := w.activeModule == mod.ID
+							for _, mod := range visibleMods {
+								active := w.activeModule == mod.ID && !w.IsGlobalPage()
 								btn := ui.ButtonBase(c.Key(mod.ID)).Grow(1).Height(28).PaddingX(10).Gap(6).
 									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
 									Label("切换模块 " + mod.Name)
@@ -72,8 +73,8 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 						})
 					} else {
 						ui.Column(c).Gap(4).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
-							for _, mod := range w.modules {
-								active := w.activeModule == mod.ID
+							for _, mod := range visibleMods {
+								active := w.activeModule == mod.ID && !w.IsGlobalPage()
 								btn := ui.ButtonBase(c.Key("collapsed-"+mod.ID)).Height(28).PaddingX(6).
 									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).AlignSelf(ui.Stretch).
 									Cursor(ui.CursorPointer).Label("切换模块 " + mod.Name)
@@ -136,11 +137,44 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 		},
 	}, func(nav sideNavState) {
 		ui.Column(c).Padding(4, 8, 12, 8).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-			if w.activeModule == "job_applications" {
+			// Global Focus Overview entry shared across all enabled modules
+			focusActive := ""
+			if w.navPage == NavFocus {
+				focusActive = "nav:focus"
+			}
+			focusExtra := ""
+			if n := w.focusBadgeCount(); n > 0 {
+				focusExtra = fmt.Sprint(n)
+			}
+			if chosen := uiList(c.Key("global-focus-nav"), listProps{
+				Active:    focusActive,
+				Collapse:  nav.Collapse,
+				RailWidth: nav.RailWidth,
+				Items: []listItem{
+					{
+						Key:   "nav:focus",
+						Label: "聚焦",
+						Icon:  iconTarget(),
+						Extra: focusExtra,
+					},
+				},
+			}); chosen == "nav:focus" {
+				w.NavigateTo(NavFocus)
+			}
+
+			if nav.Expanded {
+				ui.Box(c).Height(1).Margin(2, 6).Background(tk.BorderSecondary)
+			}
+
+			if w.activeModule == "job_applications" && w.IsModuleVisible("job_applications") {
 				w.renderJobSidebar(c, tk, nav)
 				return
 			}
-			w.renderProjectSidebar(c, tk, nav)
+			if w.IsModuleVisible("projects") {
+				w.renderProjectSidebar(c, tk, nav)
+				return
+			}
+			w.renderJobSidebar(c, tk, nav)
 		})
 	})
 }

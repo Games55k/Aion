@@ -662,11 +662,12 @@ func TestRestoreFailureRetainsSafetyBackupLocation(t *testing.T) {
 func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
 	settingsOutPath := os.Getenv("AION_SAVE_SETTINGS_SNAPSHOT")
+	focusOutPath := os.Getenv("AION_SAVE_FOCUS_SNAPSHOT")
 	updateModalOutPath := os.Getenv("AION_SAVE_UPDATE_MODAL_SNAPSHOT")
 	jobsOutPath := os.Getenv("AION_SAVE_JOBS_SNAPSHOT")
 	jobsNarrowOutPath := os.Getenv("AION_SAVE_JOBS_NARROW_SNAPSHOT")
 	jobDetailOutPath := os.Getenv("AION_SAVE_JOB_DETAIL_SNAPSHOT")
-	if outPath == "" && settingsOutPath == "" && updateModalOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
+	if outPath == "" && settingsOutPath == "" && focusOutPath == "" && updateModalOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
 		t.Skip("set AION_SAVE_*_SNAPSHOT to export a PNG for visual inspection")
 	}
 	dataDir := t.TempDir()
@@ -745,6 +746,38 @@ func TestVisualSnapshotRender(t *testing.T) {
 		}
 		if err := f.Close(); err != nil {
 			t.Fatalf("close settings snapshot file: %v", err)
+		}
+	}
+
+	if focusOutPath != "" {
+		ctx := context.Background()
+		_, _ = wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:  "示例云科技",
+			PositionName: "资深 Go 后端架构师",
+			AppliedDate:  "2026-11-22",
+			Stage:        model.JobStageInterview2,
+			Channel:      "内部推荐",
+		})
+		_, _ = wb.app.JobApplications.Create(ctx, jobapplications.CreateInput{
+			CompanyName:  "星辰实验室",
+			PositionName: "平台引擎工程师",
+			AppliedDate:  "2026-11-18",
+			Stage:        model.JobStageOffer,
+			Channel:      "官网直投",
+		})
+		wb.ReloadAll()
+		wb.NavigateTo(NavFocus)
+		img := ui.Render(wb.View, 1440, 900, 1.0)
+		f, err := os.Create(focusOutPath)
+		if err != nil {
+			t.Fatalf("create focus snapshot file: %v", err)
+		}
+		if err := png.Encode(f, img); err != nil {
+			_ = f.Close()
+			t.Fatalf("encode focus png: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close focus snapshot file: %v", err)
 		}
 	}
 
