@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -268,5 +270,51 @@ func TestMCPServerEndToEndAndSafetyBoundary(t *testing.T) {
 	}
 	if len(summary.Projects) != 1 || summary.JobStats.Total != 1 || summary.TrashCount != 1 {
 		t.Fatalf("unexpected summary via live socket: %+v", summary)
+	}
+
+	// Verify restore -> attach_file_to_task -> search_tasks flow through MCP.
+	sampleFile := filepath.Join(t.TempDir(), "design.md")
+	if err := os.WriteFile(sampleFile, []byte("# Design"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resps = sendSession(t, srv, []map[string]any{
+		{
+			"jsonrpc": "2.0",
+			"id":      21,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      "restore_trash_item",
+				"arguments": map[string]any{"kind": "task", "id": task.ID},
+			},
+		},
+		{
+			"jsonrpc": "2.0",
+			"id":      22,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      "attach_file_to_task",
+				"arguments": map[string]any{"task_id": task.ID, "path": sampleFile},
+			},
+		},
+		{
+			"jsonrpc": "2.0",
+			"id":      23,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      "search_tasks",
+				"arguments": map[string]any{"tags": []string{"distributed"}, "status": "in_progress"},
+			},
+		},
+	})
+	if txt, errFlag := extractToolText(t, resps[0]); errFlag {
+		t.Fatalf("restore_trash_item failed: %s", txt)
+	}
+	attTxt, attErr := extractToolText(t, resps[1])
+	if attErr || !strings.Contains(attTxt, `"name": "design.md"`) {
+		t.Fatalf("attach_file_to_task failed: err=%v text=%s", attErr, attTxt)
+	}
+	searchTxt, searchErr := extractToolText(t, resps[2])
+	if searchErr || !strings.Contains(searchTxt, `"project_name": "Interview Prep"`) || !strings.Contains(searchTxt, task.ID) {
+		t.Fatalf("search_tasks failed: err=%v text=%s", searchErr, searchTxt)
 	}
 }

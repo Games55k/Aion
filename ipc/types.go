@@ -25,10 +25,12 @@ const (
 	MethodProjectsTrash   = "projects.trash"
 
 	MethodTasksList   = "tasks.list"
+	MethodTasksSearch = "tasks.search"
 	MethodTasksGet    = "tasks.get"
 	MethodTasksCreate = "tasks.create"
 	MethodTasksUpdate = "tasks.update"
 	MethodTasksMove   = "tasks.move"
+	MethodTasksAttach = "tasks.attach"
 	MethodTasksTrash  = "tasks.trash"
 
 	MethodJobsList          = "jobs.list"
@@ -191,6 +193,29 @@ type ListTasksParams struct {
 	Tags      []string       `json:"tags,omitempty"`
 	Status    model.Status   `json:"status,omitempty"`
 	Priority  model.Priority `json:"priority,omitempty"`
+}
+
+type SearchTasksParams struct {
+	ProjectID       string         `json:"project_id,omitempty"`
+	IncludeArchived bool           `json:"include_archived,omitempty"`
+	Query           string         `json:"query,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	Status          model.Status   `json:"status,omitempty"`
+	Priority        model.Priority `json:"priority,omitempty"`
+	DueBefore       string         `json:"due_before,omitempty"`
+	DueAfter        string         `json:"due_after,omitempty"`
+	HasDueDate      *bool          `json:"has_due_date,omitempty"`
+	Limit           int            `json:"limit,omitempty"`
+}
+
+type TaskSearchItem struct {
+	Task        model.Task `json:"task"`
+	ProjectName string     `json:"project_name"`
+}
+
+type AttachTaskFileParams struct {
+	TaskID string `json:"task_id"`
+	Path   string `json:"path"`
 }
 
 type TaskDetail struct {

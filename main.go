@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"aion/backend"
+	"aion/cli"
 	"aion/frontend"
 	"aion/ipc"
 	"aion/mcp"
@@ -31,6 +32,16 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		if err := runMCP(os.Args[2:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "aion mcp: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && cli.IsSubcommand(os.Args[1]) {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err := cli.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+		stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aion: %v\n", err)
 			os.Exit(1)
 		}
 		return

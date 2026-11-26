@@ -134,6 +134,23 @@ func builtinTools() []toolSpec {
 
 		// Tasks
 		{
+			Name:        "search_tasks",
+			Description: "Search non-deleted tasks across all active projects (or optionally archived projects too), with optional query, status, priority, tags, and due-date range filters. Each result includes project_name.",
+			InputSchema: objSchema(map[string]any{
+				"project_id":       strProp("Optional project ID to restrict search."),
+				"include_archived": boolProp("Set true to include tasks in archived projects (default false)."),
+				"query":            strProp("Optional case-insensitive substring matched against title, description, or tags."),
+				"status":           enumProp("Optional board column status filter.", taskStatuses...),
+				"priority":         enumProp("Optional priority filter.", taskPriority...),
+				"tags":             strArrayProp("Optional exact tags filter (task must match all listed tags)."),
+				"due_before":       strProp("Optional inclusive upper bound on due_date (YYYY-MM-DD)."),
+				"due_after":        strProp("Optional inclusive lower bound on due_date (YYYY-MM-DD)."),
+				"has_due_date":     boolProp("Optional filter for whether due_date is set."),
+				"limit":            intProp("Maximum number of results to return (default 50, max 200)."),
+			}),
+			ipcMethod: ipc.MethodTasksSearch,
+		},
+		{
 			Name:        "list_tasks",
 			Description: "List non-deleted tasks inside a project, with optional search query, status, priority, and tag filters.",
 			InputSchema: objSchema(map[string]any{
@@ -192,6 +209,15 @@ func builtinTools() []toolSpec {
 				"index":  intProp("0-based target index in the column (0 = top)."),
 			}, "id", "status", "index"),
 			ipcMethod: ipc.MethodTasksMove,
+		},
+		{
+			Name:        "attach_file_to_task",
+			Description: "Copy a local regular file into Aion's managed attachment storage and attach it to a task.",
+			InputSchema: objSchema(map[string]any{
+				"task_id": strProp("Target task ID."),
+				"path":    strProp("Absolute path to an existing local regular file to import as a managed attachment."),
+			}, "task_id", "path"),
+			ipcMethod: ipc.MethodTasksAttach,
 		},
 		{
 			Name:        "trash_task",

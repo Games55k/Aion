@@ -160,6 +160,70 @@ func (h *Handler) Call(ctx context.Context, method string, rawParams json.RawMes
 		}
 		return list, nil
 
+	case MethodTasksSearch:
+		var p SearchTasksParams
+		if err := decodeParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		tasks, err := h.app.Projects.SearchTasks(ctx, projects.SearchTasksFilter{
+			ProjectID:       p.ProjectID,
+			IncludeArchived: p.IncludeArchived,
+			Query:           p.Query,
+			Tags:            p.Tags,
+			Status:          p.Status,
+			Priority:        p.Priority,
+			DueBefore:       p.DueBefore,
+			DueAfter:        p.DueAfter,
+			HasDueDate:      p.HasDueDate,
+		})
+		if err != nil {
+			return nil, err
+		}
+		limit := p.Limit
+		if limit <= 0 {
+			limit = 50
+		} else if limit > 200 {
+			limit = 200
+		}
+		if len(tasks) > limit {
+			tasks = tasks[:limit]
+		}
+		allProjects, err := h.app.Projects.ListProjects(ctx, projects.ProjectFilter{})
+		if err != nil {
+			return nil, err
+		}
+		projNames := make(map[string]string, len(allProjects))
+		for _, proj := range allProjects {
+			projNames[proj.ID] = proj.Name
+		}
+		out := make([]TaskSearchItem, 0, len(tasks))
+		for _, t := range tasks {
+			out = append(out, TaskSearchItem{
+				Task:        t,
+				ProjectName: projNames[t.ProjectID],
+			})
+		}
+		return out, nil
+
+	case MethodTasksAttach:
+		var p AttachTaskFileParams
+		if err := decodeParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(p.TaskID) == "" || strings.TrimSpace(p.Path) == "" {
+			return nil, fmt.Errorf("%w: task_id and path are required", model.ErrInvalid)
+		}
+		task, err := h.app.Projects.GetTask(ctx, p.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		att, err := h.app.Attachments.Import(ctx, p.TaskID, p.Path)
+		if err != nil {
+			return nil, err
+		}
+		h.notify(ChangeEvent{Scope: ScopeTasks, ProjectID: task.ProjectID, TaskID: task.ID})
+		return att, nil
+
 	case MethodTasksGet:
 		var p IDParams
 		if err := decodeParams(rawParams, &p); err != nil {

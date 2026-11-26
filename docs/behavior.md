@@ -43,7 +43,8 @@
 
 ## 本地 MCP 接入与实时联动
 
-- 可通过 `Aion mcp [-data-dir <路径>]` 启动标准 stdio MCP Server，供 Antigravity、Codex 等本地 AI 客户端直接读写项目、任务、求职投递（含阶段流转、备注与历史补录）及回收站恢复；**不开放**彻底删除、清空回收站、备份恢复与系统设置写入。
+- 可通过 `Aion mcp [-data-dir <路径>]` 启动标准 stdio MCP Server，供 Antigravity、Codex 等本地 AI 客户端直接读写项目、任务（含跨项目搜索 `search_tasks` 与受管附件导入 `attach_file_to_task`）、求职投递（含阶段流转、备注与历史补录）及回收站恢复；**不开放**彻底删除、清空回收站、备份恢复与系统设置写入。
+- 同一套本地 IPC/降级路由同时驱动轻量 CLI（`Aion summary`、`Aion project`、`Aion task`、`Aion job`、`Aion trash`，均支持 `-data-dir` 与 `-json`），仓库中的 [aion-workbench Skill](../skills/aion-workbench/SKILL.md) 约定了每日聚焦复盘、JD 建单与面试时间线维护流程。
 - 所有 `update_*` 工具采用局部更新语义：未传入的字段保留原值，避免 AI 修改局部信息时误清空描述、标签、子任务或备注。
 - `aion mcp` 空闲时不持有 `.aion.lock` 或 SQLite 连接，可随时与桌面端并存或同时挂载多个客户端：桌面端运行时经由本地 Unix Socket（`aion.sock`）复用主进程并在写成功后实时刷新界面；桌面端未运行时按单次调用短打开本地数据库并立即释放锁。
 - 外部写入触发实时刷新时严格遵守草稿保护：若当前任务或投递详情弹窗中存在未保存草稿或正在后台保存，外部变更不会覆盖正在编辑的表单内容，也不静默关闭未保存草稿；无脏草稿时详情视图随外部变更静默同步。
