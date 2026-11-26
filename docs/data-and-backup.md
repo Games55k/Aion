@@ -11,8 +11,11 @@ Aion 所有数据 100% 存储在本地 Mac，不依赖云服务。本文档说�
 ├── aion.sqlite          # SQLite 主数据库（Schema v3：项目、任务、子任务、求职投递与时间线、回收站、设置）
 ├── attachments/         # 受管本地附件存储
 ├── backups/             # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip）
+├── aion.sock            # 桌面端运行期间的本地 IPC Unix Socket（0600，退出自动清理，不纳入备份）
 └── .updater-state.json  # 本机更新检查运行态（最近检查时间与已跳过版本，不随备份恢复覆盖）
 ```
+
+> 注：若自定义 `-data-dir` 路径过长导致超过 macOS Unix Socket 路径长度限制，本地 IPC Socket 会自动回退到当前用户独占（`0700`）的 `/tmp/aion-ipc-<uid>/` 目录，并沿用非符号链接校验。
 
 ## 本地受管附件
 

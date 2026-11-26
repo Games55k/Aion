@@ -10,6 +10,7 @@ Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS 原生窗�
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
 | `go run . -data-dir /tmp/aion-dev` | 使用独立测试数据目录启动（不影响正式数据） |
+| `go run . mcp [-data-dir <路径>]` | 启动本地 stdio MCP Server（桌面端在线时经 Unix Socket 实时联动，离线时按次直连） |
 | `go tool mygo dev` | 开发模式运行 |
 | `go tool mygo build` | 构建 macOS 原生 `.app` 与 `.dmg`（默认输出到 `build/darwin-arm64/`；Universal 构建可加 `-platform darwin/universal`） |
 | `go test ./...` | 运行入口、后端与无头 UI 交互测试 |
@@ -72,11 +73,13 @@ mygo-automation close
 
 ```text
 Aion/
-├── main.go                                 # 原生窗口宿主入口、应用菜单与系统能力桥接
+├── main.go                                 # 原生窗口宿主入口、`mcp` 子命令分发、应用菜单与系统能力桥接
 ├── updater_controller.go                   # 宿主层静默定期检查更新、下载安装进度与重启调度控制器
 ├── updater_controller_test.go              # 静默检查、跳过版本、单飞合并、进度取消与旧状态迁移测试
 ├── automation_e2e.go                       # e2e 构建标签专用的 MyGo Automation 插件入口
-├── main_test.go                            # 快照输出数据保护与原子替换回归测试
+├── main_test.go                            # 快照输出数据保护、原子替换与 `mcp` 子命令往返回归测试
+├── ipc/                                    # 本地 Unix Socket IPC 服务端、按次降级路由、局部更新处理与安全路径校验
+├── mcp/                                    # 标准 stdio JSON-RPC 2.0 MCP Server 与仅含安全读写/软删的工具集定义
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
 ├── docs/                                   # 详细文档与实现计划（交互行为、数据与备份、开发发布、plans/）
@@ -93,9 +96,11 @@ Aion/
 │   ├── job_applications_view.go            # 求职投递主视图、统计摘要、响应式表格与新增弹窗
 │   ├── job_application_detail_view.go      # 求职投递详情弹窗、流程时间线、备注/补录表单与结束流程弹窗
 │   ├── workbench_load.go                   # 后台加载与过期结果保护
+│   ├── external_sync.go / mcp_config.go    # 外部 IPC/MCP 变更实时刷新（草稿保护）与 Antigravity/Codex 配置格式化
 │   ├── record_write.go / settings_write.go # 后台记录操作与设置写入
 │   ├── async_persistence_test.go           # 长持锁输入/导航、保存失败与并发回调回归测试
 │   ├── async_record_write_test.go          # Store 持锁时的看板、表单、回收站和设置写入回归测试
+│   ├── external_sync_test.go               # 外部变更实时刷新、未保存草稿保护与设置页 MCP 配置复制测试
 │   ├── workbench_test.go                   # 基于 ui.Tester 的端到端无头 UI 交互测试
 │   └── attachment_preview_test.go          # 图片缩略图解码、方向校正与有界缓存测试
 ├── backend/                                # 后端总入口、模块注册、全局回收站分发、设置与自动备份调度生命周期

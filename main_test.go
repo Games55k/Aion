@@ -168,3 +168,26 @@ func TestShutdownFlushesAndClosesOnce(t *testing.T) {
 		t.Fatalf("unexpected closed-store error during shutdown: %q", buf.String())
 	}
 }
+
+// The `mcp` subcommand serves JSON-RPC over stdio against -data-dir without printing diagnostics to stdout.
+func TestRunMCPSubcommandStdioRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	in := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_workspace_summary","arguments":{}}}` + "\n",
+	)
+	var out bytes.Buffer
+	if err := runMCP([]string{"-data-dir", root}, in, &out); err != nil {
+		t.Fatalf("runMCP: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 JSON-RPC response lines, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `"protocolVersion":"2025-03-26"`) {
+		t.Fatalf("unexpected initialize response: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `\"trash_count\": 0`) || !strings.Contains(lines[1], `"isError":false`) {
+		t.Fatalf("unexpected workspace summary response: %s", lines[1])
+	}
+}

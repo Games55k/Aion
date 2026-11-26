@@ -689,6 +689,10 @@ func TestVisualSnapshotRender(t *testing.T) {
 			CanSelfUpdate:    true,
 			ReleasesURL:      defaultReleasesURL,
 		},
+		MCPInfo: MCPCapability{
+			Ready:          true,
+			ExecutablePath: "/Applications/Aion.app/Contents/MacOS/Aion",
+		},
 	})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "Aion 1.0 桌面端发布"

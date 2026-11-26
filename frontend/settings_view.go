@@ -311,10 +311,77 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 					})
 				})
 
-				// 5. App Version & Updates Card
+				// 5. Local AI / MCP Integration Card
+				w.renderSettingsMCPCard(c, tk)
+
+				// 6. App Version & Updates Card
 				w.renderSettingsUpdatesCard(c, tk)
 			})
 		})
+	})
+}
+
+func (w *Workbench) renderSettingsMCPCard(c *ui.Context, tk *uiTokens) {
+	info := w.MCPCapability()
+	cmd, args := mcpCommandAndArgs(info)
+	cmdPreview := shellQuote(cmd)
+	for _, a := range args {
+		cmdPreview += " " + shellQuote(a)
+	}
+
+	ui.Column(c.Key("settings-card-mcp")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
+		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconTerminal()).FontSize(18).TextColor(tk.Primary)
+					ui.Text(c, "AI 与 MCP 接入").FontSize(16).FontWeight(600).TextColor(tk.Text)
+					if info.Ready {
+						uiTag(c, "实时联动已就绪", tagProps{
+							Size:    sizeSmall,
+							Variant: tagFilled,
+							Color:   tagGreen,
+						})
+					} else if info.LastError != "" {
+						uiTag(c, "仅离线可用", tagProps{
+							Size:    sizeSmall,
+							Variant: tagFilled,
+							Color:   tagOrange,
+						})
+					}
+				})
+				ui.Text(c, "通过标准 stdio MCP 让 Antigravity、Codex 等本地 AI 助手读写项目、任务与求职投递（仅限软删除进回收站）。").
+					FontSize(13).TextColor(tk.TextSecondary)
+			})
+		})
+
+		ui.Row(c).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
+			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+			AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, cmdPreview).Font("monospace").FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				if uiButton(c, "复制 Antigravity 配置", buttonProps{
+					Variant: buttonPrimary,
+					Size:    sizeSmall,
+				}).Clicked() {
+					c.Services().WriteClipboard(FormatMCPJSONConfig(info))
+				}
+				if uiButton(c, "复制 Codex 命令", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
+				}).Clicked() {
+					c.Services().WriteClipboard(FormatCodexMCPCommand(info))
+				}
+			})
+		})
+
+		if info.LastError != "" {
+			uiAlert(c.Key("settings-mcp-error"), "本地实时联动未启动", alertProps{
+				Type:        alertWarning,
+				Description: info.LastError,
+			})
+		}
 	})
 }
 

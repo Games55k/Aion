@@ -6,14 +6,19 @@ import (
 	"flag"
 	"fmt"
 	"image/png"
+	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"aion/backend"
 	"aion/frontend"
+	"aion/ipc"
+	"aion/mcp"
 
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/locales/zh-Hans"
@@ -23,6 +28,14 @@ import (
 const releasesURL = "https://github.com/Games55k/Aion/releases"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		if err := runMCP(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "aion mcp: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	dataDir := flag.String("data-dir", "", "custom local data directory (defaults to ~/Library/Application Support/Aion)")
 	snapshotPath := flag.String("snapshot", "", "render a headless PNG snapshot of the UI to this path and exit")
 	flag.Parse()
@@ -30,6 +43,39 @@ func main() {
 	if err := run(*dataDir, *snapshotPath); err != nil {
 		log.Fatalf("aion: %v", err)
 	}
+}
+
+func runMCP(args []string, in io.Reader, out io.Writer) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dataDir := fs.String("data-dir", "", "custom local data directory (defaults to ~/Library/Application Support/Aion)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	router, err := ipc.NewRouter(ipc.RouterOptions{DataDir: *dataDir})
+	if err != nil {
+		return fmt.Errorf("init local router: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	srv := mcp.NewServer(router, mcp.ServerInfo{Name: "aion", Version: mygo.App.Version()})
+	err = srv.Serve(ctx, in, out)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+func resolveExecutablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 func run(dataDir, snapshotPath string) error {
@@ -43,7 +89,20 @@ func run(dataDir, snapshotPath string) error {
 	}
 
 	wb := frontend.New(app, frontend.Host{})
-	shutdown := newShutdownFunc(wb, app)
+	var (
+		ipcMu  sync.Mutex
+		ipcSrv *ipc.Server
+	)
+	closeIPC := func() {
+		ipcMu.Lock()
+		srv := ipcSrv
+		ipcSrv = nil
+		ipcMu.Unlock()
+		if srv != nil {
+			_ = srv.Close()
+		}
+	}
+	shutdown := newShutdownFunc(wb, app, closeIPC)
 	defer shutdown()
 
 	// Headless snapshot rendering mode for verification
@@ -150,6 +209,30 @@ func run(dataDir, snapshotPath string) error {
 			},
 		})
 
+		mcpCap := frontend.MCPCapability{
+			ExecutablePath: resolveExecutablePath(),
+			DataDirArg:     dataDir,
+		}
+		if srv, err := ipc.StartServer(app.DataDir(), ipc.NewHandler(app, func(ev ipc.ChangeEvent) {
+			win.Update(func() {
+				wb.HandleExternalChange(frontend.ExternalChange{
+					Scope:     string(ev.Scope),
+					ProjectID: ev.ProjectID,
+					TaskID:    ev.TaskID,
+					JobID:     ev.JobID,
+				})
+			})
+		})); err != nil {
+			mcpCap.LastError = err.Error()
+			log.Printf("aion: local IPC server unavailable: %v", err)
+		} else {
+			ipcMu.Lock()
+			ipcSrv = srv
+			ipcMu.Unlock()
+			mcpCap.Ready = true
+			mcpCap.SocketPath = srv.SocketPath()
+		}
+
 		wb.SetHost(frontend.Host{
 			Dispatch: win.Update,
 			PickOpenFiles: func(title string, multiple bool, extensions ...string) ([]string, error) {
@@ -204,6 +287,7 @@ func run(dataDir, snapshotPath string) error {
 				applyNativeThemeSource(th)
 			},
 			UpdateInfo:           updCtrl.Snapshot(),
+			MCPInfo:              mcpCap,
 			CheckForUpdates:      updCtrl.CheckForUpdates,
 			InstallUpdate:        updCtrl.InstallUpdate,
 			CancelUpdate:         updCtrl.CancelUpdate,
@@ -251,8 +335,13 @@ func run(dataDir, snapshotPath string) error {
 	return nil
 }
 
-func newShutdownFunc(wb *frontend.Workbench, app *backend.App) func() {
+func newShutdownFunc(wb *frontend.Workbench, app *backend.App, beforeClose ...func()) func() {
 	return sync.OnceFunc(func() {
+		for _, fn := range beforeClose {
+			if fn != nil {
+				fn()
+			}
+		}
 		wb.WaitForTasks()
 		if err := wb.FlushPending(); err != nil {
 			log.Printf("aion: failed to flush pending edits: %v", err)

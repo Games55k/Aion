@@ -27,6 +27,7 @@ Test behaviour that can regress. Cover input effects, backend invariants, render
 - Restore accepts only the current database schema and rejects older archives before creating a safety backup. Keep local database migrations independent of restore. Verify that upgrading a v2 local database removes the follow-up column and preserves job records and their timeline.
 - Keep the global trash list in a single read snapshot and sort parsed deletion timestamps. Cover cross-module rollback when clearing trash fails, partial-success deletion (metadata committed but attachment GC failed), project visibility in counts, and default backup-directory validation. Snapshot CLI tests must use temporary data and verify that output cannot overwrite managed data or truncate hard-linked files.
 - Cover missing IDs and invalid deletion states across projects, tasks, and job applications for soft deletion, restore, and permanent deletion. Verify that a recycled parent blocks task restore and that an independently recycled task can still be purged.
+- For local IPC and MCP (`ipc/`, `mcp/`), verify both live Unix-socket routing and offline per-call fallback release `.aion.lock` cleanly, verify partial update tools preserve omitted fields, verify destructive operations (permanent delete, clear trash, backup restore, settings writes) are never exposed, and verify GUI external-change refreshes never overwrite active task or job drafts.
 
 ## Documentation
 

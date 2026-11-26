@@ -94,6 +94,7 @@ type Host struct {
 	OpenURL              func(url string) error
 	SetTheme             func(theme string)
 	UpdateInfo           UpdateCapability
+	MCPInfo              MCPCapability
 	CheckForUpdates      func()
 	InstallUpdate        func()
 	CancelUpdate         func()
@@ -347,6 +348,7 @@ type Workbench struct {
 	confirmRestoreOpen        bool
 	pendingRestoreZip         string
 	updateInfo                UpdateCapability
+	mcpInfo                   MCPCapability
 	updateCheckEnabled        bool
 	updateCheckIntervalSelect string
 	updateModalOpen           bool
@@ -381,6 +383,7 @@ func New(app *backend.App, host Host) *Workbench {
 		jobTimelineDesc:   true,
 		themeSetting:              ThemeSystem,
 		updateInfo:                host.UpdateInfo,
+		mcpInfo:                   host.MCPInfo,
 		updateCheckEnabled:        true,
 		updateCheckIntervalSelect: "24h",
 	}
@@ -398,6 +401,7 @@ func (w *Workbench) SetHost(host Host) {
 	w.mu.Lock()
 	w.host = host
 	w.updateInfo = host.UpdateInfo
+	w.mcpInfo = host.MCPInfo
 	w.mu.Unlock()
 }
 
@@ -875,7 +879,9 @@ func (w *Workbench) reloadProjects(async bool) {
 					w.filteredTasks = nil
 					w.allBoardTags = nil
 					w.taskAttachments = make(map[string][]model.Attachment)
-					w.resetSelectedTaskState()
+					if !w.hasActiveTaskDraft() {
+						w.resetSelectedTaskState()
+					}
 					if w.navPage == NavProjectBoard {
 						w.navPage = NavAllProjects
 					}
@@ -1098,13 +1104,17 @@ func (w *Workbench) boardReader(projectID string) func() func() {
 					return t.ID == w.selectedTaskID
 				})
 				if idx < 0 {
-					w.resetSelectedTaskState()
+					if !w.hasActiveTaskDraft() {
+						w.resetSelectedTaskState()
+					}
 				} else {
 					t := unfiltered[idx]
-					if !w.dirty && !w.hasUnsavedChangesFromDetailTask() {
+					if !w.hasActiveTaskDraft() {
 						w.syncDetailFromTask(t)
 					} else {
-						w.detailTask = &t
+						if !w.saving && w.pendingSave == nil && !w.discardRebase {
+							w.detailTask = &t
+						}
 						w.detailAttachments = slices.Clone(attMap[t.ID])
 						w.cacheAttachments(w.detailAttachments)
 					}
