@@ -78,6 +78,12 @@ func FormatCodexMCPCommand(info MCPCapability) string {
 	return strings.Join(parts, " ")
 }
 
+// FormatCLISymlinkCommand formats a shell command that installs an `aion` CLI symlink in ~/.local/bin.
+func FormatCLISymlinkCommand(info MCPCapability) string {
+	cmd, _ := mcpCommandAndArgs(info)
+	return "mkdir -p ~/.local/bin && ln -sf " + shellQuote(cmd) + " ~/.local/bin/aion"
+}
+
 func shellQuote(s string) string {
 	if s == "" {
 		return "''"

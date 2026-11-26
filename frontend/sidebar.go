@@ -137,6 +137,24 @@ func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
 		},
 	}, func(nav sideNavState) {
 		ui.Column(c).Padding(4, 8, 12, 8).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+			// Global Command Palette Trigger + Focus Overview
+			if nav.Expanded {
+				cmdBtn := ui.ButtonBase(c.Key("sidebar-cmd-palette")).Height(30).Padding(0, 10).Gap(8).
+					Radius(tk.BorderRadius).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
+					Cursor(ui.CursorPointer).Label("打开全局命令面板")
+				cmdBtn.Children(func() {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, iconSearch()).FontSize(13).TextColor(tk.TextTertiary)
+						ui.Text(c, "快速搜索或跳转…").FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+					})
+					ui.Text(c, "⌘K").Font("monospace").FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+				})
+				if cmdBtn.Clicked() {
+					w.OpenCommandPalette()
+				}
+			}
+
 			// Global Focus Overview entry shared across all enabled modules
 			focusActive := ""
 			if w.navPage == NavFocus {

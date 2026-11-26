@@ -119,7 +119,7 @@ func (w *Workbench) renderJobFilterBar(c *ui.Context, tk *uiTokens) {
 		searchWrap.Children(func() {
 			search := uiSearchBar(c, &w.jobSearchQuery, searchBarProps{
 				Placeholder: "搜索公司或岗位...",
-				ShortKey:    "mod+k",
+				ShortKey:    "mod+f",
 				Size:        sizeSmall,
 			})
 			search.Label("搜索投递记录")

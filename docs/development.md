@@ -35,8 +35,10 @@ AION_SAVE_SNAPSHOT=/tmp/aion-snapshot.png go test -count=1 ./frontend -run TestV
 # 渲染设置页视觉快照 PNG（1440×1280，可与上一条同时设置）
 AION_SAVE_SETTINGS_SNAPSHOT=/tmp/aion-settings.png go test -count=1 ./frontend -run TestVisualSnapshotRender
 
-# 渲染跨模块聚焦总览视觉快照 PNG（1440×900）
-AION_SAVE_FOCUS_SNAPSHOT=/tmp/aion-focus.png go test -count=1 ./frontend -run TestVisualSnapshotRender
+# 渲染跨模块聚焦总览与全局命令面板视觉快照 PNG（1440×900）
+AION_SAVE_FOCUS_SNAPSHOT=/tmp/aion-focus.png \
+AION_SAVE_PALETTE_SNAPSHOT=/tmp/aion-palette.png \
+go test -count=1 ./frontend -run TestVisualSnapshotRender
 
 # 渲染应用内更新弹窗视觉快照 PNG（1440×900）
 AION_SAVE_UPDATE_MODAL_SNAPSHOT=/tmp/aion-update-modal.png go test -count=1 ./frontend -run TestVisualSnapshotRender
@@ -102,11 +104,13 @@ Aion/
 │   ├── job_applications_view.go            # 求职投递主视图、统计摘要、响应式表格与新增弹窗
 │   ├── job_application_detail_view.go      # 求职投递详情弹窗、流程时间线、备注/补录表单与结束流程弹窗
 │   ├── workbench_load.go                   # 后台加载与过期结果保护
-│   ├── focus_view.go / modules_visibility.go # 跨模块聚焦总览视图与工作区模块显隐偏好控制
-│   ├── external_sync.go / mcp_config.go    # 外部 IPC/MCP 变更实时刷新（草稿保护）与 Antigravity/Codex 配置格式化
+│   ├── focus_view.go / modules_visibility.go # 跨模块聚焦总览视图（含行内快捷流转）与工作区模块显隐偏好控制
+│   ├── command_palette.go                  # 全局 ⌘K 命令面板（跨模块搜索项目/任务/投递与快捷命令）
+│   ├── external_sync.go / mcp_config.go    # 外部 IPC/MCP 变更实时刷新（草稿保护）与 Antigravity/Codex/CLI 配置格式化
 │   ├── record_write.go / settings_write.go # 后台记录操作与设置写入
 │   ├── async_persistence_test.go           # 长持锁输入/导航、保存失败与并发回调回归测试
 │   ├── async_record_write_test.go          # Store 持锁时的看板、表单、回收站和设置写入回归测试
+│   ├── command_palette_test.go             # 全局 ⌘K 命令面板、⌘1/⌘2/⌘3 快捷键与聚焦页行内快捷操作测试
 │   ├── external_sync_test.go               # 外部变更实时刷新、未保存草稿保护与设置页 MCP 配置复制测试
 │   ├── focus_modules_test.go               # 工作区模块显隐持久化与跨模块聚焦总览跳转测试
 │   ├── workbench_test.go                   # 基于 ui.Tester 的端到端无头 UI 交互测试

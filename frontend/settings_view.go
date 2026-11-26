@@ -407,10 +407,12 @@ func (w *Workbench) renderSettingsMCPCard(c *ui.Context, tk *uiTokens) {
 
 		ui.Row(c).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
 			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
-			AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, cmdPreview).Font("monospace").FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
+		})
 
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				if uiButton(c, "复制 Antigravity 配置", buttonProps{
 					Variant: buttonPrimary,
 					Size:    sizeSmall,
@@ -423,7 +425,15 @@ func (w *Workbench) renderSettingsMCPCard(c *ui.Context, tk *uiTokens) {
 				}).Clicked() {
 					c.Services().WriteClipboard(FormatCodexMCPCommand(info))
 				}
+				if uiButton(c, "复制 CLI 软链命令", buttonProps{
+					Variant: buttonDefault,
+					Size:    sizeSmall,
+				}).Clicked() {
+					c.Services().WriteClipboard(FormatCLISymlinkCommand(info))
+				}
 			})
+			ui.Text(c, "软链后可在终端直接使用 aion summary / task / job").
+				FontSize(12).TextColor(tk.TextTertiary).SingleLine()
 		})
 
 		if info.LastError != "" {

@@ -355,6 +355,10 @@ type Workbench struct {
 	updateCheckEnabled        bool
 	updateCheckIntervalSelect string
 	updateModalOpen           bool
+	cmdPaletteOpen            bool
+	cmdPaletteQuery           string
+	cmdPaletteIndex           int
+	cmdPaletteNeedFocus       bool
 	settingWrites             map[string]func() func()
 }
 
@@ -1054,7 +1058,9 @@ func (w *Workbench) hasOpenModal() bool {
 		w.trashParentErrModalOpen ||
 		w.confirmPermDeleteOpen ||
 		w.confirmClearTrashOpen ||
-		w.confirmRestoreOpen
+		w.confirmRestoreOpen ||
+		w.cmdPaletteOpen ||
+		w.updateModalOpen
 }
 
 // OpenSettings navigates to the global Settings view unless a modal dialog is
@@ -2968,6 +2974,10 @@ func (w *Workbench) applyRestoredState(res backup.RestoreResult) {
 	w.taskModalErr = ""
 	w.pendingRestoreZip = ""
 	w.confirmRestoreOpen = false
+	w.cmdPaletteOpen = false
+	w.cmdPaletteQuery = ""
+	w.cmdPaletteIndex = 0
+	w.cmdPaletteNeedFocus = false
 	w.lastSavedAt = time.Time{}
 
 	// Reset Job Applications UI/filter/modal/draft state cleanly without writing old drafts into restored DB.
@@ -3085,6 +3095,26 @@ func (w *Workbench) View(c *ui.Context) {
 			w.OpenSettings()
 		}
 	})
+	c.OnWindowShortcut(ui.Cmd, ui.KeyK, func() {
+		if !c.ShortcutRepeated() {
+			w.ToggleCommandPalette()
+		}
+	})
+	c.OnWindowShortcut(ui.Cmd, ui.Key1, func() {
+		if !c.ShortcutRepeated() && !w.hasOpenModal() {
+			w.NavigateTo(NavFocus)
+		}
+	})
+	c.OnWindowShortcut(ui.Cmd, ui.Key2, func() {
+		if !c.ShortcutRepeated() && !w.hasOpenModal() && w.IsModuleVisible("projects") {
+			w.SwitchModule("projects")
+		}
+	})
+	c.OnWindowShortcut(ui.Cmd, ui.Key3, func() {
+		if !c.ShortcutRepeated() && !w.hasOpenModal() && w.IsModuleVisible("job_applications") {
+			w.SwitchModule("job_applications")
+		}
+	})
 
 	ui.Row(c).Fill().Background(tk.BgLayout).TextColor(tk.Text).FontSize(tk.FontSize).Children(func() {
 		// Left Collapsible & Resizable Navigation Sidebar
@@ -3122,5 +3152,6 @@ func (w *Workbench) View(c *ui.Context) {
 	w.renderJobCloseModal(c, tk)
 	w.renderTrashModals(c, tk)
 	w.renderSettingsModals(c, tk)
+	w.renderCommandPaletteModal(c, tk)
 	w.renderUpdateModal(c, tk)
 }

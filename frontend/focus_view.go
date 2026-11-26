@@ -165,6 +165,36 @@ func (w *Workbench) OpenFocusJob(appID string) {
 	w.SelectJobApplication(appID)
 }
 
+// QuickSetFocusTaskStatus moves a task directly from the Focus overview without blocking on Store locks.
+func (w *Workbench) QuickSetFocusTaskStatus(task model.Task, targetStatus model.Status) {
+	if w.IsRestoring() || task.ID == "" || !targetStatus.Valid() || task.Status == targetStatus {
+		return
+	}
+	service := w.app.Projects
+	_, _ = runRecordWrite(w, func() (model.Task, error) {
+		return service.MoveTask(context.Background(), task.ID, targetStatus, 0)
+	}, func(moved model.Task, err error) {
+		if err != nil {
+			return
+		}
+		w.reloadFocusTasks(true)
+		w.reloadProjects(true)
+		if w.activeProjectID == moved.ProjectID {
+			w.reloadBoardTasks(true)
+		}
+	})
+}
+
+func nextJobStage(cur model.JobStage) (model.JobStage, bool) {
+	stages := model.AllJobStages()
+	for i, st := range stages {
+		if st == cur && i+1 < len(stages) {
+			return stages[i+1], true
+		}
+	}
+	return "", false
+}
+
 func (w *Workbench) renderFocusView(c *ui.Context, tk *uiTokens) {
 	showProjects := w.IsModuleVisible("projects")
 	showJobs := w.IsModuleVisible("job_applications")
@@ -343,106 +373,135 @@ func (w *Workbench) renderFocusTaskRow(c *ui.Context, tk *uiTokens, task model.T
 	if projName == "" {
 		projName = "未命名项目"
 	}
-	row := ui.ButtonBase(c.Key("focus-task-"+task.ID)).Padding(10, 14).Gap(10).Radius(tk.BorderRadius).
+	ui.Row(c.Key("focus-task-wrap-"+task.ID)).Padding(6, 10, 6, 6).Gap(8).Radius(tk.BorderRadius).
 		Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignItems(ui.Center).
-		Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
-		Label("打开聚焦任务 " + task.Title)
-	row.Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-			if task.Priority != model.NoPriority {
-				uiTag(c, priorityLabel(task.Priority), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   priorityTagColor(task.Priority),
-				})
-			}
-			ui.Text(c, task.Title).FontSize(14).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
-		})
-
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-			uiTag(c, projName, tagProps{
-				Size:    sizeSmall,
-				Variant: tagOutlined,
-				Color:   tagGray,
-			})
-			if task.Status == model.InProgress {
-				uiTag(c, "进行中", tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagProcessing,
-				})
-			}
-			if len(task.Subtasks) > 0 {
-				doneCnt := 0
-				for _, s := range task.Subtasks {
-					if s.Done {
-						doneCnt++
-					}
+		Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+		row := ui.ButtonBase(c.Key("focus-task-"+task.ID)).Padding(4, 8).Gap(10).Radius(tk.BorderRadiusSM).
+			AlignItems(ui.Center).Justify(ui.SpaceBetween).Grow(1).MinWidth(0).Cursor(ui.CursorPointer).
+			Label("打开聚焦任务 " + task.Title)
+		row.Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+				if task.Priority != model.NoPriority {
+					uiTag(c, priorityLabel(task.Priority), tagProps{
+						Size:    sizeSmall,
+						Variant: tagFilled,
+						Color:   priorityTagColor(task.Priority),
+					})
 				}
-				uiTag(c, fmt.Sprintf("%d/%d", doneCnt, len(task.Subtasks)), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagGray,
-				})
-			}
-			if task.DueDate != "" {
-				dueColor := tagGray
-				dueText := task.DueDate
-				if task.DueDate < todayStr {
-					dueColor = tagError
-					dueText = "已逾期 " + task.DueDate
-				} else if task.DueDate <= soonCutoff {
-					dueColor = tagOrange
-					dueText = "截止 " + task.DueDate
-				}
-				uiTag(c, dueText, tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   dueColor,
-				})
-			}
-		})
-	})
-	if row.Clicked() {
-		w.OpenFocusTask(task)
-	}
-}
-
-func (w *Workbench) renderFocusJobRow(c *ui.Context, tk *uiTokens, app model.JobApplication) {
-	title := strings.TrimSpace(app.CompanyName + " · " + app.PositionName)
-	row := ui.ButtonBase(c.Key("focus-job-"+app.ID)).Padding(10, 14).Gap(10).Radius(tk.BorderRadius).
-		Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignItems(ui.Center).
-		Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
-		Label("打开聚焦投递 " + title)
-	row.Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-			ui.Text(c, app.CompanyName).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
-			ui.Text(c, app.PositionName).FontSize(13).TextColor(tk.TextSecondary).Grow(1).SingleLine()
-		})
-
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-			stageColor := tagProcessing
-			if app.Stage == model.JobStageOffer {
-				stageColor = tagGreen
-			}
-			uiTag(c, app.Stage.Label(), tagProps{
-				Size:    sizeSmall,
-				Variant: tagFilled,
-				Color:   stageColor,
+				ui.Text(c, task.Title).FontSize(14).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
 			})
-			if app.Channel != "" {
-				uiTag(c, app.Channel, tagProps{
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				uiTag(c, projName, tagProps{
 					Size:    sizeSmall,
 					Variant: tagOutlined,
 					Color:   tagGray,
 				})
+				if task.Status == model.InProgress {
+					uiTag(c, "进行中", tagProps{
+						Size:    sizeSmall,
+						Variant: tagFilled,
+						Color:   tagProcessing,
+					})
+				}
+				if len(task.Subtasks) > 0 {
+					doneCnt := 0
+					for _, s := range task.Subtasks {
+						if s.Done {
+							doneCnt++
+						}
+					}
+					uiTag(c, fmt.Sprintf("%d/%d", doneCnt, len(task.Subtasks)), tagProps{
+						Size:    sizeSmall,
+						Variant: tagFilled,
+						Color:   tagGray,
+					})
+				}
+				if task.DueDate != "" {
+					dueColor := tagGray
+					dueText := task.DueDate
+					if task.DueDate < todayStr {
+						dueColor = tagError
+						dueText = "已逾期 " + task.DueDate
+					} else if task.DueDate <= soonCutoff {
+						dueColor = tagOrange
+						dueText = "截止 " + task.DueDate
+					}
+					uiTag(c, dueText, tagProps{
+						Size:    sizeSmall,
+						Variant: tagFilled,
+						Color:   dueColor,
+					})
+				}
+			})
+		})
+		if row.Clicked() {
+			w.OpenFocusTask(task)
+		}
+
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(0).Children(func() {
+			if task.Status == model.Planned {
+				if uiActionIcon(c.Key("focus-start-"+task.ID), iconArrowRight(), actionIconProps{
+					Title: "开始任务 " + task.Title,
+				}).Disabled(w.recordWritePending).Clicked() {
+					w.QuickSetFocusTaskStatus(task, model.InProgress)
+				}
 			}
-			ui.Text(c, "投递于 "+app.AppliedDate).FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+			if uiActionIcon(c.Key("focus-done-"+task.ID), iconCheck(), actionIconProps{
+				Title: "完成任务 " + task.Title,
+			}).Disabled(w.recordWritePending).Clicked() {
+				w.QuickSetFocusTaskStatus(task, model.Done)
+			}
 		})
 	})
-	if row.Clicked() {
-		w.OpenFocusJob(app.ID)
-	}
+}
+
+func (w *Workbench) renderFocusJobRow(c *ui.Context, tk *uiTokens, app model.JobApplication) {
+	title := strings.TrimSpace(app.CompanyName + " · " + app.PositionName)
+	ui.Row(c.Key("focus-job-wrap-"+app.ID)).Padding(6, 10, 6, 6).Gap(8).Radius(tk.BorderRadius).
+		Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).AlignItems(ui.Center).
+		Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+		row := ui.ButtonBase(c.Key("focus-job-"+app.ID)).Padding(4, 8).Gap(10).Radius(tk.BorderRadiusSM).
+			AlignItems(ui.Center).Justify(ui.SpaceBetween).Grow(1).MinWidth(0).Cursor(ui.CursorPointer).
+			Label("打开聚焦投递 " + title)
+		row.Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, app.CompanyName).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
+				ui.Text(c, app.PositionName).FontSize(13).TextColor(tk.TextSecondary).Grow(1).SingleLine()
+			})
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				stageColor := tagProcessing
+				if app.Stage == model.JobStageOffer {
+					stageColor = tagGreen
+				}
+				uiTag(c, app.Stage.Label(), tagProps{
+					Size:    sizeSmall,
+					Variant: tagFilled,
+					Color:   stageColor,
+				})
+				if app.Channel != "" {
+					uiTag(c, app.Channel, tagProps{
+						Size:    sizeSmall,
+						Variant: tagOutlined,
+						Color:   tagGray,
+					})
+				}
+				ui.Text(c, "投递于 "+app.AppliedDate).FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+			})
+		})
+		if row.Clicked() {
+			w.OpenFocusJob(app.ID)
+		}
+
+		if nextStage, ok := nextJobStage(app.Stage); ok {
+			if uiActionIcon(c.Key("focus-job-next-"+app.ID), iconArrowRight(), actionIconProps{
+				Title: "推进阶段至 " + nextStage.Label() + " " + app.CompanyName,
+			}).Clicked() {
+				w.ChangeJobStage(app.ID, nextStage)
+			}
+		}
+	})
 }
 
 func priorityLabel(p model.Priority) string {

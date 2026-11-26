@@ -127,7 +127,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 					beforeQ := w.searchQuery
 					uiSearchBar(c, &w.searchQuery, searchBarProps{
 						Placeholder: "搜索任务标题、描述或标签...",
-						ShortKey:    "mod+k",
+						ShortKey:    "mod+f",
 						Size:        sizeSmall,
 					}).Label("搜索任务")
 					if w.searchQuery != beforeQ {

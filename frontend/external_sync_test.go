@@ -232,4 +232,12 @@ func TestSettingsMCPCardCopiesAntigravityAndCodexConfig(t *testing.T) {
 	if got := tt.Clipboard(); got != wantCmd {
 		t.Fatalf("unexpected Codex command:\ngot:  %s\nwant: %s", got, wantCmd)
 	}
+
+	if err := tt.Click("复制 CLI 软链命令"); err != nil {
+		t.Fatalf("click 复制 CLI 软链命令: %v", err)
+	}
+	wantLink := "mkdir -p ~/.local/bin && ln -sf '/Applications/My Apps/Aion.app/Contents/MacOS/Aion' ~/.local/bin/aion"
+	if got := tt.Clipboard(); got != wantLink {
+		t.Fatalf("unexpected CLI symlink command:\ngot:  %s\nwant: %s", got, wantLink)
+	}
 }

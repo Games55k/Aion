@@ -663,11 +663,12 @@ func TestVisualSnapshotRender(t *testing.T) {
 	outPath := os.Getenv("AION_SAVE_SNAPSHOT")
 	settingsOutPath := os.Getenv("AION_SAVE_SETTINGS_SNAPSHOT")
 	focusOutPath := os.Getenv("AION_SAVE_FOCUS_SNAPSHOT")
+	paletteOutPath := os.Getenv("AION_SAVE_PALETTE_SNAPSHOT")
 	updateModalOutPath := os.Getenv("AION_SAVE_UPDATE_MODAL_SNAPSHOT")
 	jobsOutPath := os.Getenv("AION_SAVE_JOBS_SNAPSHOT")
 	jobsNarrowOutPath := os.Getenv("AION_SAVE_JOBS_NARROW_SNAPSHOT")
 	jobDetailOutPath := os.Getenv("AION_SAVE_JOB_DETAIL_SNAPSHOT")
-	if outPath == "" && settingsOutPath == "" && focusOutPath == "" && updateModalOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
+	if outPath == "" && settingsOutPath == "" && focusOutPath == "" && paletteOutPath == "" && updateModalOutPath == "" && jobsOutPath == "" && jobsNarrowOutPath == "" && jobDetailOutPath == "" {
 		t.Skip("set AION_SAVE_*_SNAPSHOT to export a PNG for visual inspection")
 	}
 	dataDir := t.TempDir()
@@ -779,6 +780,27 @@ func TestVisualSnapshotRender(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatalf("close focus snapshot file: %v", err)
 		}
+	}
+
+	if paletteOutPath != "" {
+		wb.ReloadAll()
+		wb.NavigateTo(NavFocus)
+		wb.OpenCommandPalette()
+		pt := ui.NewTester(wb.View, 1440, 900)
+		pt.Frame()
+		pt.Advance(500 * time.Millisecond)
+		f, err := os.Create(paletteOutPath)
+		if err != nil {
+			t.Fatalf("create palette snapshot file: %v", err)
+		}
+		if err := png.Encode(f, pt.Image()); err != nil {
+			_ = f.Close()
+			t.Fatalf("encode palette png: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close palette snapshot file: %v", err)
+		}
+		wb.CloseCommandPalette()
 	}
 
 	if updateModalOutPath != "" {
