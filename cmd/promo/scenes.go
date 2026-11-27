@@ -39,31 +39,37 @@ func buildComposition(assets *demoAssets, sfx *soundBank) render.Composition {
 			// Studio-mastered stereo soundtrack (~ -14 dBFS RMS) across the 54s film.
 			f.Audio(sfx.Score, render.AudioOptions{Volume: 1.0})
 
-			// Dynamic editorial pacing (54 seconds = 3240 frames @ 60fps):
-			// brisk on low-density beats (Opening, Wipe, Pillars, Finale),
-			// lingering on dense real-UI scenes (Kanban+Detail, BAT+Mag-7 Jobs+Timeline, MCP).
-			f.Sequence(c, 0, 216, func(f render.Frame) { // 0.0s – 3.6s (Brisk Opening)
+			// 8 acts with dynamic fast-slow editorial pacing AND 8 distinct cinema camera moves:
+			//   Act 1: Optical Rack Focus + Pull-Back + Crane Exit
+			//   Act 2: Low-Angle 3D Crane Rise + 3D Turntable Orbit (with moving glass sheen)
+			//   Act 3: Whip-Pan Entry + Macro-to-Wide Dolly-Out + 3D Z-Depth Parallax Rack Focus
+			//   Act 4: Dutch-Angle Roll-to-Level + Vertical Tilt-Down Scan + 3D Multi-Plane Elevation
+			//   Act 5: Architectural Curtain Wipe + Overhead Crane Drop-In
+			//   Act 6: Motivated 3D Studio Arc Orbit (follows flowing aion.sock data packet!)
+			//   Act 7: 3D Floor-Tilt Cascade + Jib Crane Up
+			//   Act 8: Optical Pull-Out + Soft Defocus Bookend
+			f.Sequence(c, 0, 216, func(f render.Frame) { // 0.0s – 3.6s
 				act1BrandOpening(c, f, assets, sfx)
 			})
-			f.Sequence(c, 192, 372, func(f render.Frame) { // 3.2s – 9.4s (6.2s Today Focus + 3D Reveal)
+			f.Sequence(c, 192, 372, func(f render.Frame) { // 3.2s – 9.4s
 				act2TodayFocus(c, f, assets, sfx)
 			})
-			f.Sequence(c, 540, 684, func(f render.Frame) { // 9.0s – 20.4s (11.4s Kanban Pan + Drawer Zoom)
+			f.Sequence(c, 540, 684, func(f render.Frame) { // 9.0s – 20.4s
 				act3KanbanAndDrawer(c, f, assets, sfx)
 			})
-			f.Sequence(c, 1200, 696, func(f render.Frame) { // 20.0s – 31.6s (11.6s BAT+Mag-7 Jobs + Timeline)
+			f.Sequence(c, 1200, 696, func(f render.Frame) { // 20.0s – 31.6s
 				act4JobsAndTimeline(c, f, assets, sfx)
 			})
-			f.Sequence(c, 1872, 492, func(f render.Frame) { // 31.2s – 39.4s (8.2s Crisp Dark Wipe + ⌘K Push-In)
+			f.Sequence(c, 1872, 492, func(f render.Frame) { // 31.2s – 39.4s
 				act5DarkSweepAndPalette(c, f, assets, sfx)
 			})
-			f.Sequence(c, 2340, 528, func(f render.Frame) { // 39.0s – 47.8s (8.8s Flowing MCP & CLI Studio)
+			f.Sequence(c, 2340, 528, func(f render.Frame) { // 39.0s – 47.8s
 				act6LocalMCPAndCLI(c, f, assets, sfx)
 			})
-			f.Sequence(c, 2844, 228, func(f render.Frame) { // 47.4s – 51.2s (3.8s Brisk 2×2 Pillars)
+			f.Sequence(c, 2844, 228, func(f render.Frame) { // 47.4s – 51.2s
 				act7ApplePillars(c, f, sfx)
 			})
-			f.Sequence(c, 3048, 192, func(f render.Frame) { // 50.8s – 54.0s (3.2s Decisive Finale)
+			f.Sequence(c, 3048, 192, func(f render.Frame) { // 50.8s – 54.0s
 				act8FinaleOutro(c, f, assets, sfx)
 			})
 		},
@@ -71,228 +77,280 @@ func buildComposition(assets *demoAssets, sfx *soundBank) render.Composition {
 }
 
 // -----------------------------------------------------------------------------
-// Act 1: Crisp Apple Brand Opening (0.0s – 3.6s, 216 frames)
-// Low info density -> fast, confident dolly-in with delicate 3D pitch settle.
+// Act 1: Optical Rack Focus + Pull-Back Reveal + Crane Exit (0.0s – 3.6s)
+// Starts close & softly defocused -> snaps razor-sharp as lens pulls back ->
+// lifts upward on a jib crane into Act 2.
 // -----------------------------------------------------------------------------
 func act1BrandOpening(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 14 {
 		f.Audio(sfx.ChimeMid, render.AudioOptions{Volume: 0.48})
 	}
 
-	fadeOut := f.Interpolate([]float64{186, 215}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
-	iconIn := f.Interpolate([]float64{6, 46}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	// Rack focus pulls from soft blur (12px) to crisp optical sharpness (0px)
+	focusPull := f.Interpolate([]float64{0, 48}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	blurSigma := float32(12.0 * (1.0 - focusPull))
+
+	// Pull-back dolly (1.24 -> 1.0) then subtle crane lift exit
+	pullBack := f.Interpolate([]float64{0, 110}, []float64{1.24, 1.00}, render.Interpolation{Easing: ui.EaseOut})
+	craneExit := f.Interpolate([]float64{176, 215}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseIn})
+	fadeOut := 1.0 - craneExit
+
 	titleIn := f.Interpolate([]float64{26, 62}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 	lineIn := f.Interpolate([]float64{50, 88}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-
-	// Camera: subtle push-in dolly across the 3.6s opening
-	camScale := float32(f.Interpolate([]float64{0, 216}, []float64{0.93, 1.04}, render.Interpolation{Easing: ui.EaseOut}))
-	camPitch := float32(10.0 * (1.0 - iconIn))
 
 	ui.Box(c).Fill().Background(colBlack).Opacity(float32(fadeOut)).Children(func() {
 		ui.Box(c).Absolute().Left(0).Top(0).Size(960, 540).
 			RadialGradient(ui.RadialGradient{
 				Center: ui.Point{X: 0.50, Y: 0.44},
-				Radius: 300,
+				Radius: 310,
 				Stops: []ui.GradientStop{
-					{Color: ui.RGBA(168, 217, 108, float32(0.11*iconIn)), At: 0},
+					{Color: ui.RGBA(168, 217, 108, float32(0.12*focusPull)), At: 0},
 					{Color: ui.Transparent, At: 1},
 				},
 			})
 
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(18).
-			Perspective(1200).RotateX(camPitch).Scale(camScale, camScale).
-			Children(func() {
-				iScale := float32(0.84 + 0.16*iconIn)
-				ui.Box(c).Size(104, 104).Center().Radius(26).
-					Border(1, ui.RGBA(255, 255, 255, 0.12)).
-					Shadow(0, 24, 60, 0, ui.RGBA(0, 0, 0, 0.75)).
-					Scale(iScale, iScale).Opacity(float32(iconIn)).
-					Children(func() {
-						ui.Image(c, assets.LogoSVG).Size(102, 102).Radius(25)
-					})
+		stage := ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(18).
+			Scale(float32(pullBack), float32(pullBack)).
+			Translate(0, float32(-54.0*craneExit))
+		if blurSigma > 0.15 {
+			stage.Blur(blurSigma)
+		}
+		stage.Children(func() {
+			ui.Box(c).Size(104, 104).Center().Radius(26).
+				Border(1, ui.RGBA(255, 255, 255, 0.14)).
+				Shadow(0, 24, 60, 0, ui.RGBA(0, 0, 0, 0.75)).
+				Opacity(float32(min(focusPull*1.6, 1))).
+				Children(func() {
+					ui.Image(c, assets.LogoSVG).Size(102, 102).Radius(25)
+				})
 
-				ui.Text(c, "Aion").FontSize(68).Bold().LetterSpacing(-2.2).TextColor(colAppleLightTxt).
-					Opacity(float32(titleIn)).Translate(0, float32(16*(1-titleIn)))
+			ui.Text(c, "Aion").FontSize(68).Bold().LetterSpacing(-2.2).TextColor(colAppleLightTxt).
+				Opacity(float32(titleIn)).Translate(0, float32(18*(1-titleIn)))
 
-				ui.Text(c, "项目与求职，本地原生。").FontSize(22).TextColor(colAppleDarkSub).
-					Opacity(float32(lineIn)).Translate(0, float32(12*(1-lineIn)))
-			})
+			ui.Text(c, "项目与求职，本地原生。").FontSize(22).TextColor(colAppleDarkSub).
+				Opacity(float32(lineIn)).Translate(0, float32(12*(1-lineIn)))
+		})
 	})
 }
 
 // -----------------------------------------------------------------------------
-// Act 2: Today Focus (3.2s – 9.4s, 372 frames)
-// Camera choreography: 3D Hero Pitch+Yaw Reveal -> Smooth Push-In toward the
-// live tasks & right-hand BAT/Mag-7 job status column!
+// Act 2: Low-Angle 3D Crane Rise + 3D Turntable Orbit + Whip-Pan Exit (3.2s – 9.4s)
+// Dramatic low-angle jib arm rises to level, then smoothly orbits left -> right
+// around the floating macOS window with a synchronized studio glass sheen,
+// before whipping briskly left out of frame into Act 3!
 // -----------------------------------------------------------------------------
 func act2TodayFocus(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 6 {
 		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.36})
 	}
-	fadeIn := f.Interpolate([]float64{0, 26}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	fadeOut := f.Interpolate([]float64{344, 371}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
-	sceneOp := float32(fadeIn * fadeOut)
+	if f.Index == 338 {
+		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.44})
+	}
 
-	// 1) Hero 3D arrival (frames 0..64)
-	enter := f.Interpolate([]float64{0, 64}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	// 2) Purposeful dolly-in + slight pan toward right column (frames 120..310)
-	push := f.Interpolate([]float64{120, 310}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	fadeIn := f.Interpolate([]float64{0, 24}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	// Brisk horizontal whip-pan exit (frames 336..371)
+	whipOut := f.Interpolate([]float64{336, 371}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseIn})
+	sceneOp := float32(fadeIn * (1.0 - whipOut))
 
-	rotX := float32(13.0 * (1.0 - enter))
-	rotY := float32(-7.0*(1.0-enter) + 1.5*push)
-	camScale := float32((0.90 + 0.10*enter) * (1.0 + 0.065*push))
-	camX := float32(-22.0 * push) // subtly brings right-hand Jobs + MCP status closer to center
-	camY := float32(30.0*(1.0-enter) + 16.0*push)
+	// 1) Low-angle 3D Crane Rise (frames 0..76): pitches from +26° up to level 0°
+	crane := f.Interpolate([]float64{0, 76}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	// 2) Smooth 3D Turntable Orbit (frames 76..328): sweeps -13° -> +11° -> 0°
+	orbit := f.Interpolate([]float64{76, 328}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	orbitYaw := -13.0*math.Sin(2*math.Pi*orbit*0.85) * (1.0 - 0.35*orbit)
+
+	rotX := float32(26.0*(1.0-crane) + 2.5*math.Sin(math.Pi*orbit))
+	rotY := float32(-10.0*(1.0-crane) + orbitYaw + 14.0*whipOut)
+	camScale := float32(0.86 + 0.14*crane - 0.04*whipOut)
+	camX := float32(-320.0 * whipOut) // whip pan left out of frame
+	camY := float32(95.0 * (1.0 - crane))
 
 	ui.Box(c).Fill().Background(colWhiteStudio).Opacity(sceneOp).Children(func() {
 		renderAppleHeadline(c, f, "今天。", "待办、求职与状态，一眼掌控。", false)
 
-		ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
-			Perspective(1250).RotateX(rotX).RotateY(rotY).
+		win := ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
+			Perspective(1100).RotateX(rotX).RotateY(rotY).
 			Scale(camScale, camScale).Translate(camX, camY).
-			Opacity(float32(min(enter*1.8, 1))).
-			Children(func() {
-				renderAppleWindow(c, assets.FocusLight, 704, 440, false, true)
-			})
+			Opacity(float32(min(crane*1.8, 1)))
+		if whipOut > 0.12 {
+			win.Blur(float32(8.0 * whipOut))
+		}
+		win.Children(func() {
+			renderAppleWindowWithSheen(c, assets.FocusLight, 704, 440, false, true, orbit)
+		})
 	})
 }
 
 // -----------------------------------------------------------------------------
-// Act 3: Kanban Board -> Task Detail Drawer (9.0s – 20.4s, 684 frames)
-// High info density -> generous 11.4s with two distinct camera moves:
-//   Phase A (Kanban): smooth lateral tracking pan across Planned -> InProgress -> Done
-//   Phase B (Task Detail): intimate push-in zoom toward the left Markdown/Subtask drawer
+// Act 3: Whip-Pan Entry + Macro-to-Wide Dolly-Out + 3D Parallax Rack Focus (9.0s – 20.4s)
+//   - Whips in smoothly from the right (continuing Act 2's whip pan!)
+//   - Phase A (Kanban): Macro-to-Wide DOLLY-OUT! Starts close on the active board
+//     at an angled hero perspective (1.28x, -12° yaw) and smoothly pulls BACK to wide!
+//   - Phase B (Task Detail): True 3D Z-Depth Parallax + Optical Rack Focus!
+//     Kanban recedes into shallow depth-of-field (scales back to 0.91x, tilts -7°,
+//     softly blurs 4.5px) while the Task Detail card glides forward into crisp focus!
 // -----------------------------------------------------------------------------
 func act3KanbanAndDrawer(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
-	if f.Index == 6 {
-		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.36})
-	}
-	if f.Index == 324 {
-		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.40})
-		f.Audio(sfx.ChimeHigh, render.AudioOptions{Volume: 0.25})
+	if f.Index == 318 {
+		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.42})
+		f.Audio(sfx.ChimeHigh, render.AudioOptions{Volume: 0.28})
 	}
 
-	fadeIn := f.Interpolate([]float64{0, 26}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	fadeOut := f.Interpolate([]float64{656, 683}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
-	sceneOp := float32(fadeIn * fadeOut)
+	// Whip-pan arrival from right (frames 0..42)
+	whipIn := f.Interpolate([]float64{0, 42}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	fadeOut := f.Interpolate([]float64{654, 683}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
+	sceneOp := float32(min(whipIn*2.2, 1) * fadeOut)
 
-	enter := f.Interpolate([]float64{0, 56}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	// Lateral tracking pan across the 3 Kanban columns (frames 45..285)
-	pan := f.Interpolate([]float64{45, 285}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
-	// Morph into Task Detail Drawer (frames 318..366)
-	drawerBlend := f.Interpolate([]float64{318, 366}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
-	// Intimate focus push-in onto the Task Detail Drawer (frames 345..580)
-	detailZoom := f.Interpolate([]float64{345, 580}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// Phase A: Macro-to-Wide DOLLY-OUT (frames 36..270): pulls BACK from 1.24x to 1.00x!
+	dollyOut := f.Interpolate([]float64{36, 270}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// Phase B: 3D Parallax Rack Focus peel (frames 314..382)
+	rack := f.Interpolate([]float64{314, 382}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// Gentle float orbit on the foreground Task Detail card (frames 382..650)
+	detailOrbit := f.Interpolate([]float64{382, 650}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
 
-	// Combined seamless camera curve (Y-compensated so zoomed close-ups never overlap the top headline)
-	panZoom := 0.06 * math.Sin(math.Pi*pan) * (1.0 - drawerBlend)
-	camScale := float32((0.95 + 0.05*enter) * (1.0 + panZoom + 0.11*detailZoom))
-	camX := float32(
-		26.0*(1.0-enter) +
-			(24.0-48.0*pan)*(1.0-drawerBlend) +
-			66.0*detailZoom, // centers the left-docked Task Detail drawer as we zoom in!
-	)
-	camY := float32(18.0*(1.0-enter) + 14.0*panZoom/0.06 + 26.0*detailZoom)
-	rotY := float32(5.5*(1.0-enter) - 2.2*math.Sin(math.Pi*pan)*(1.0-drawerBlend) + 2.0*detailZoom)
+	// Background Kanban plane transforms (Dolly-Out -> then Recedes into Background DoF!)
+	bgExtraScale := 0.22 * (1.0 - dollyOut)
+	bgScale := float32((1.0 + bgExtraScale) * (1.0 - 0.08*rack))
+	bgRotY := float32(-11.0*(1.0-dollyOut) - 8.0*rack)
+	bgRotX := float32(4.0*(1.0-dollyOut) + 3.0*rack)
+	bgX := float32(280.0*(1.0-whipIn) - 24.0*(1.0-dollyOut) + 42.0*rack)
+	// Y-compensate macro scale so top edge never clips the headline
+	bgY := float32(float64(220.0)*bgExtraScale + 8.0*rack)
+	bgBlur := float32(6.0*(1.0-whipIn) + 4.5*rack)
 
 	ui.Box(c).Fill().Background(colWhiteStudio).Opacity(sceneOp).Children(func() {
-		if drawerBlend < 0.5 {
-			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32(1 - drawerBlend*2)).Children(func() {
+		if rack < 0.5 {
+			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32(1 - rack*2)).Children(func() {
 				renderAppleHeadline(c, f, "三列看板。", "拖拽排序，多维筛选。", false)
 			})
 		} else {
-			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32((drawerBlend - 0.5) * 2)).Children(func() {
+			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32((rack - 0.5) * 2)).Children(func() {
 				renderAppleHeadlineStatic(c, "任务详情。", "Markdown、子任务与本地附件。", false)
 			})
 		}
 
-		ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
-			Perspective(1400).RotateY(rotY).
-			Scale(camScale, camScale).Translate(camX, camY).
-			Opacity(float32(min(enter*1.8, 1))).
-			Children(func() {
-				renderAppleWindow(c, assets.BoardLight, 704, 440, false, true)
-				if drawerBlend > 0.005 {
-					ui.Box(c).Absolute().Left(0).Top(0).Size(704, 440).
-						Opacity(float32(drawerBlend)).
-						Translate(float32(18*(1-drawerBlend)), 0).
-						Children(func() {
-							renderAppleWindow(c, assets.TaskDetail, 704, 440, false, false)
-						})
-				}
+		// Plane 1 (Midground -> Receding Background): Kanban Board
+		bgPlane := ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
+			Perspective(1200).RotateX(bgRotX).RotateY(bgRotY).
+			Scale(bgScale, bgScale).Translate(bgX, bgY).
+			Opacity(float32(1.0 - 0.35*rack))
+		if bgBlur > 0.15 {
+			bgPlane.Blur(bgBlur)
+		}
+		bgPlane.Children(func() {
+			renderAppleWindow(c, assets.BoardLight, 704, 440, false, true)
+		})
+
+		// Plane 2 (Foreground Rack-Focus Plane): Task Detail glides forward in 3D Z-space!
+		if rack > 0.005 {
+			fgScale := float32(0.90 + 0.11*rack)
+			fgRotY := float32(12.0*(1.0-rack) + 4.0*math.Sin(math.Pi*detailOrbit))
+			fgRotX := float32(-5.0 * (1.0 - rack))
+			fgX := float32(-90.0*(1.0-rack) + 8.0*detailOrbit)
+			fgY := float32(14.0 * (1.0 - rack))
+			fgBlur := float32(5.0 * (1.0 - rack))
+
+			fgPlane := ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
+				Perspective(1150).RotateX(fgRotX).RotateY(fgRotY).
+				Scale(fgScale, fgScale).Translate(fgX, fgY).
+				Opacity(float32(min(rack*1.5, 1)))
+			if fgBlur > 0.15 {
+				fgPlane.Blur(fgBlur)
+			}
+			fgPlane.Children(func() {
+				renderAppleWindow(c, assets.TaskDetail, 704, 440, false, false)
 			})
+		}
 	})
 }
 
 // -----------------------------------------------------------------------------
-// Act 4: Job Tracker (BAT + Mag-7 Logos!) -> Stage Timeline (20.0s – 31.6s, 696 frames)
-// High info density -> generous 11.6s:
-//   Phase A: 3D angled arrival -> smooth close-up sweep highlighting Google, ByteDance,
-//            Apple, Microsoft, Tencent, Alibaba logos & Offer conversion rate!
-//   Phase B: Center spotlight push-in on the full ByteDance Stage Timeline Modal!
+// Act 4: Dutch-Angle Roll-to-Level + Vertical Tilt-Down Scan + 3D Z-Layer Lift (20.0s – 31.6s)
+//   - Enters on a stylish canted Dutch Angle (-4.5° roll, +16° pitch) and levels cleanly
+//     to symbolize clarity & order across BAT + Magnificent Seven job applications.
+//   - Performs a smooth Vertical Tilt-Down Scan across all 6 company logos (Tencent ->
+//     Apple -> ByteDance -> Microsoft -> Google Offer -> Alibaba).
+//   - Transitions via 3D Multi-Plane Depth Lift: table drops back & softly blurs while
+//     ByteDance's Stage Timeline Modal elevates into sharp foreground!
 // -----------------------------------------------------------------------------
 func act4JobsAndTimeline(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 6 {
 		f.Audio(sfx.WhooshSoft, render.AudioOptions{Volume: 0.36})
 	}
-	if f.Index == 342 {
-		f.Audio(sfx.ChimeHigh, render.AudioOptions{Volume: 0.34})
+	if f.Index == 340 {
+		f.Audio(sfx.ChimeHigh, render.AudioOptions{Volume: 0.35})
 	}
 
 	fadeIn := f.Interpolate([]float64{0, 26}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	fadeOut := f.Interpolate([]float64{668, 695}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
+	fadeOut := f.Interpolate([]float64{666, 695}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
 	sceneOp := float32(fadeIn * fadeOut)
 
-	enter := f.Interpolate([]float64{0, 62}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	// Gentle push-in toward company logos & stages (frames 70..295)
-	logoFocus := f.Interpolate([]float64{70, 295}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
-	// Reveal Timeline modal (frames 336..384)
-	modalBlend := f.Interpolate([]float64{336, 384}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
-	// Smooth spotlight push-in on the Timeline modal (frames 370..620)
-	modalZoom := f.Interpolate([]float64{370, 620}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// 1) Dutch-Angle Roll-to-Level arrival (frames 0..70)
+	levelIn := f.Interpolate([]float64{0, 70}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	// 2) Vertical Tilt-Down Scan across the 6 BAT / Mag-7 company rows (frames 72..310)
+	tiltScan := f.Interpolate([]float64{72, 310}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// 3) 3D Multi-Plane Elevation into Stage Timeline (frames 334..396)
+	elevate := f.Interpolate([]float64{334, 396}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// Gentle 3D float on Timeline modal
+	modalFloat := f.Interpolate([]float64{396, 660}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
 
-	rotX := float32(7.0 * (1.0 - enter))
-	rotY := float32(9.0*(1.0-enter) - 1.5*logoFocus*(1.0-modalBlend))
-	camScale := float32(
-		(0.93 + 0.07*enter) *
-			(1.0 + 0.075*logoFocus*(1.0-modalBlend) + 0.09*modalZoom),
-	)
-	camX := float32(-20.0*(1.0-enter) + 22.0*logoFocus*(1.0-modalBlend))
-	camY := float32(20.0*(1.0-enter) + 18.0*logoFocus*(1.0-modalBlend) + 22.0*modalZoom)
+	// Background Jobs Table plane
+	bgRoll := float32(-4.5 * (1.0 - levelIn))
+	bgRotX := float32(16.0*(1.0-levelIn) + (6.0-11.0*tiltScan)*(1.0-elevate) + 7.0*elevate)
+	bgRotY := float32(10.0*(1.0-levelIn) - 4.0*math.Sin(math.Pi*tiltScan)*(1.0-elevate))
+	bgScale := float32((0.92 + 0.08*levelIn) * (1.0 - 0.08*elevate))
+	bgY := float32(28.0*(1.0-levelIn) + (14.0-22.0*tiltScan)*(1.0-elevate) + 18.0*elevate)
+	bgBlur := float32(4.0 * elevate)
 
 	ui.Box(c).Fill().Background(colWhiteStudio).Opacity(sceneOp).Children(func() {
-		if modalBlend < 0.5 {
-			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32(1 - modalBlend*2)).Children(func() {
+		if elevate < 0.5 {
+			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32(1 - elevate*2)).Children(func() {
 				renderAppleHeadline(c, f, "求职追踪。", "自动识别企业图标，进度与 Offer 一目了然。", false)
 			})
 		} else {
-			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32((modalBlend - 0.5) * 2)).Children(func() {
+			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Opacity(float32((elevate - 0.5) * 2)).Children(func() {
 				renderAppleHeadlineStatic(c, "复盘时间线。", "记录每轮细节，支持历史节点补录。", false)
 			})
 		}
 
-		ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
-			Perspective(1350).RotateX(rotX).RotateY(rotY).
-			Scale(camScale, camScale).Translate(camX, camY).
-			Opacity(float32(min(enter*1.8, 1))).
-			Children(func() {
-				renderAppleWindow(c, assets.JobsLight, 704, 440, false, true)
-				if modalBlend > 0.005 {
-					ms := float32(0.96 + 0.04*modalBlend)
-					ui.Box(c).Absolute().Left(0).Top(0).Size(704, 440).
-						Scale(ms, ms).Opacity(float32(modalBlend)).
-						Children(func() {
-							renderAppleWindow(c, assets.JobDetail, 704, 440, false, true)
-						})
-				}
+		// Plane 1: Jobs Table (BAT + Mag-7 logos!)
+		bgPlane := ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
+			Perspective(1150).Rotate(bgRoll).RotateX(bgRotX).RotateY(bgRotY).
+			Scale(bgScale, bgScale).Translate(0, bgY).
+			Opacity(float32(min(levelIn*1.8, 1) * (1.0 - 0.38*elevate)))
+		if bgBlur > 0.15 {
+			bgPlane.Blur(bgBlur)
+		}
+		bgPlane.Children(func() {
+			renderAppleWindow(c, assets.JobsLight, 704, 440, false, true)
+		})
+
+		// Plane 2: Elevated Foreground Stage Timeline Modal
+		if elevate > 0.005 {
+			fgScale := float32(0.88 + 0.13*elevate)
+			fgRotX := float32(-12.0*(1.0-elevate) + 2.0*math.Sin(math.Pi*modalFloat))
+			fgRotY := float32(-4.0*math.Sin(math.Pi*modalFloat))
+			fgY := float32(52.0 * (1.0 - elevate))
+			fgBlur := float32(4.0 * (1.0 - elevate))
+
+			fgPlane := ui.Box(c).Absolute().Left(128).Top(78).Size(704, 440).
+				Perspective(1150).RotateX(fgRotX).RotateY(fgRotY).
+				Scale(fgScale, fgScale).Translate(0, fgY).
+				Opacity(float32(min(elevate*1.5, 1)))
+			if fgBlur > 0.15 {
+				fgPlane.Blur(fgBlur)
+			}
+			fgPlane.Children(func() {
+				renderAppleWindow(c, assets.JobDetail, 704, 440, false, true)
 			})
+		}
 	})
 }
 
 // -----------------------------------------------------------------------------
-// Act 5: Crisp Light -> Dark Wipe & ⌘K Command Palette (31.2s – 39.4s, 492 frames)
-// Brisk visual sweep (0.7s hold -> 1.4s sweep -> 0.8s beat), then snappy ⌘K press
-// + spotlight camera push-in onto the Command Palette (4.5s readable hold!).
+// Act 5: Architectural Curtain Wipe + Overhead Crane Drop onto ⌘K (31.2s – 39.4s)
+//   - Stationary razor-sharp Light -> Dark wipe (fast on Metal GPU!)
+//   - On ⌘ + K press, executes an Overhead Crane Drop & Pitch Settle (RotateX +14° -> 0°,
+//     vertical crane descent) rather than a plain scale zoom!
 // -----------------------------------------------------------------------------
 func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 46 {
@@ -310,15 +368,14 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 	fadeOut := f.Interpolate([]float64{464, 491}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
 	sceneOp := float32(fadeIn * fadeOut)
 
-	// Brisk 1.4s sweep from Light -> Dark (frames 44..128)
 	sweep := f.Interpolate([]float64{44, 128}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
 	bgCol := render.InterpolateColor(sweep, []float64{0, 1}, []ui.Color{colWhiteStudio, colBlack})
 	primaryTxt := render.InterpolateColor(sweep, []float64{0, 1}, []ui.Color{colAppleText, colAppleLightTxt})
 	subTxt := render.InterpolateColor(sweep, []float64{0, 1}, []ui.Color{colAppleSub, colAppleDarkSub})
 
-	// Command Palette pops in at frames 192..226, followed by spotlight push-in camera!
-	palBlend := f.Interpolate([]float64{192, 226}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	palCam := f.Interpolate([]float64{196, 440}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
+	// Overhead Crane Drop onto ⌘K Command Palette (frames 192..246)
+	palIn := f.Interpolate([]float64{192, 246}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	palOrbit := f.Interpolate([]float64{246, 464}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
 
 	ui.Box(c).Fill().Background(bgCol).Opacity(sceneOp).Children(func() {
 		primary := "深浅外观。"
@@ -333,51 +390,61 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 		})
 
 		const winX, winY, winW, winH = 128, 78, 704, 440
-		// Only apply spotlight push-in AFTER sweep completes (keeps ClipInsetPercent 100% stationary for Metal GPU speed!)
-		camScale := float32(1.0 + 0.10*palCam)
-		camY := float32(24.0 * palCam)
 
-		ui.Box(c).Absolute().Left(winX).Top(winY).Size(winW, winH).
-			Scale(camScale, camScale).Translate(0, camY).
-			Children(func() {
-				if sweep < 0.999 {
-					renderAppleWindow(c, assets.BoardLight, winW, winH, false, true)
-					if sweep > 0.002 {
-						rightInset := float32((1.0 - sweep) * 100.0)
-						ui.Box(c).Absolute().Left(0).Top(0).Size(winW, winH).
-							ClipInsetPercent(0, rightInset, 0, 0, 14).
-							Children(func() {
-								renderAppleWindow(c, assets.BoardDark, winW, winH, true, true)
-							})
-					}
-					if sweep > 0.01 && sweep < 0.99 {
-						beamX := float32(sweep * winW)
-						beamAlpha := float32(math.Sin(math.Pi * sweep))
-						ui.Box(c).Absolute().Left(beamX - 12).Top(0).Size(24, winH).Opacity(beamAlpha).
-							LinearGradient(ui.LinearGradient{
-								Angle: 90,
-								Stops: []ui.GradientStop{
-									{Color: ui.Transparent, At: 0},
-									{Color: ui.RGBA(255, 255, 255, 0.60), At: 0.5},
-									{Color: ui.Transparent, At: 1},
-								},
-							})
-					}
-				} else {
-					renderAppleWindow(c, assets.BoardDark, winW, winH, true, true)
-				}
-
-				if palBlend > 0.005 {
-					ps := float32(0.96 + 0.04*palBlend)
+		if sweep < 0.999 {
+			// Stationary architectural wipe (zero 3D clip -> 250+ FPS!)
+			ui.Box(c).Absolute().Left(winX).Top(winY).Size(winW, winH).Children(func() {
+				renderAppleWindow(c, assets.BoardLight, winW, winH, false, true)
+				if sweep > 0.002 {
+					rightInset := float32((1.0 - sweep) * 100.0)
 					ui.Box(c).Absolute().Left(0).Top(0).Size(winW, winH).
-						Scale(ps, ps).Opacity(float32(palBlend)).
+						ClipInsetPercent(0, rightInset, 0, 0, 14).
 						Children(func() {
-							renderAppleWindow(c, assets.PaletteDark, winW, winH, true, true)
+							renderAppleWindow(c, assets.BoardDark, winW, winH, true, true)
+						})
+				}
+				if sweep > 0.01 && sweep < 0.99 {
+					beamX := float32(sweep * winW)
+					beamAlpha := float32(math.Sin(math.Pi * sweep))
+					ui.Box(c).Absolute().Left(beamX - 12).Top(0).Size(24, winH).Opacity(beamAlpha).
+						LinearGradient(ui.LinearGradient{
+							Angle: 90,
+							Stops: []ui.GradientStop{
+								{Color: ui.Transparent, At: 0},
+								{Color: ui.RGBA(255, 255, 255, 0.60), At: 0.5},
+								{Color: ui.Transparent, At: 1},
+							},
 						})
 				}
 			})
+		} else {
+			// Post-wipe: Background Dark Board + Overhead Crane Drop into ⌘K Palette
+			bgScale := float32(1.0 - 0.05*palIn)
+			bgPitch := float32(5.0 * palIn)
+			ui.Box(c).Absolute().Left(winX).Top(winY).Size(winW, winH).
+				Perspective(1200).RotateX(bgPitch).Scale(bgScale, bgScale).
+				Opacity(float32(1.0 - 0.30*palIn)).
+				Children(func() {
+					renderAppleWindow(c, assets.BoardDark, winW, winH, true, true)
+				})
 
-		// Crisp ⌘ + K keycap indicator (frames 152..234)
+			if palIn > 0.005 {
+				// Overhead crane drop: descends from above (-26 -> 0) & pitches down (+14° -> 0°)
+				dropPitch := float32(14.0 * (1.0 - palIn))
+				dropYaw := float32(5.0 * math.Sin(math.Pi*palOrbit))
+				dropY := float32(-22.0 * (1.0 - palIn))
+				dropScale := float32(0.95 + 0.07*palIn)
+				ui.Box(c).Absolute().Left(winX).Top(winY).Size(winW, winH).
+					Perspective(1150).RotateX(dropPitch).RotateY(dropYaw).
+					Scale(dropScale, dropScale).Translate(0, dropY).
+					Opacity(float32(min(palIn*1.6, 1))).
+					Children(func() {
+						renderAppleWindow(c, assets.PaletteDark, winW, winH, true, true)
+					})
+			}
+		}
+
+		// Crisp ⌘ + K keycap indicator (frames 152..238)
 		if f.Index >= 152 && f.Index <= 238 {
 			kIn := f.Interpolate([]float64{152, 170}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 			kOut := f.Interpolate([]float64{212, 238}, []float64{1, 0})
@@ -395,10 +462,13 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 }
 
 // -----------------------------------------------------------------------------
-// Act 6: Flowing Local AI / MCP & CLI Real-Time Sync (39.0s – 47.8s, 528 frames)
-// Brings back the luminous, dynamic v1 flowing-conduit energy with refined dual
-// ambient auras, multi-packet glowing Unix Socket stream, AND facing 3D rack-focus
-// studio camera!
+// Act 6: Motivated 3D Studio Arc Orbit + Flowing aion.sock Data Stream (39.0s – 47.8s)
+// True storytelling cinematography:
+//   - Act starts orbited toward the LEFT Terminal (hero foreground, Settings deeper at -18° yaw)
+//     as CLI & MCP tool calls stream live.
+//   - As the glowing lime packet shoots across `aion.sock`, the virtual camera smoothly ARCS
+//     across the bridge from Left -> Right, bringing the Dark Aion Settings pane forward to hero
+//     prominence (+18° left yaw / -3° right yaw) as the live sync lands!
 // -----------------------------------------------------------------------------
 func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 6 {
@@ -418,54 +488,56 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 	fadeOut := f.Interpolate([]float64{498, 527}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
 	sceneOp := float32(fadeIn * fadeOut)
 
-	leftIn := f.Spring(ui.SpringOptions{Duration: 680_000_000, Bounce: 0.10})
-	tRight, _ := f.Shift(14, 0)
-	rightIn := tRight.Spring(ui.SpringOptions{Duration: 700_000_000, Bounce: 0.10})
-
-	// Subtle studio camera push-in + gentle pan from Terminal -> Bridge -> Settings as sync triggers
-	stageZoom := float32(f.Interpolate([]float64{0, 528}, []float64{0.975, 1.03}, render.Interpolation{Easing: ui.EaseInOut}))
-	stagePanX := float32(f.Interpolate([]float64{160, 420}, []float64{10, -10}, render.Interpolation{Easing: ui.EaseInOut}))
+	enter := f.Interpolate([]float64{0, 54}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+	// Motivated Studio Arc Orbit from Left Terminal (0) -> Centered Bridge (0.5) -> Right Settings (1.0)
+	arc := f.Interpolate([]float64{180, 410}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
 	auraPulse := 0.85 + 0.15*math.Sin(float64(f.Index)*0.07)
 
+	// Parallax depth shift: Left pane starts hero-close (1.04x, +3° yaw) -> arcs back (0.94x, +17° yaw)
+	// Right pane starts deeper (0.94x, -17° yaw) -> arcs forward to hero-close (1.04x, -3° yaw)
+	leftScale := float32(1.04 - 0.10*arc)
+	rightScale := float32(0.94 + 0.10*arc)
+	leftYaw := float32(3.0 + 14.0*arc)
+	rightYaw := float32(-17.0 + 14.0*arc)
+	stagePanX := float32(28.0 - 56.0*arc) // glides camera along the glowing conduit!
+
 	ui.Box(c).Fill().Background(colObsidianDeep).Opacity(sceneOp).Children(func() {
-		// Full-canvas seamless dual ambient aura (botanical lime left, Apple blue right)
+		// Dual ambient auras shift subtly with the arc orbit (parallax background!)
 		ui.Box(c).Absolute().Left(0).Top(0).Size(960, 540).
 			RadialGradient(ui.RadialGradient{
-				Center: ui.Point{X: 0.24, Y: 0.56},
-				Radius: 360,
+				Center: ui.Point{X: float32(0.28 - 0.08*arc), Y: 0.56},
+				Radius: 370,
 				Stops: []ui.GradientStop{
-					{Color: ui.RGBA(180, 228, 81, float32(0.13*auraPulse)), At: 0},
+					{Color: ui.RGBA(180, 228, 81, float32((0.15-0.04*arc)*auraPulse)), At: 0},
 					{Color: ui.Transparent, At: 1},
 				},
 			})
 		ui.Box(c).Absolute().Left(0).Top(0).Size(960, 540).
 			RadialGradient(ui.RadialGradient{
-				Center: ui.Point{X: 0.77, Y: 0.54},
-				Radius: 360,
+				Center: ui.Point{X: float32(0.72 + 0.06*arc), Y: 0.54},
+				Radius: 370,
 				Stops: []ui.GradientStop{
-					{Color: ui.RGBA(0, 113, 227, float32(0.16*auraPulse)), At: 0},
+					{Color: ui.RGBA(0, 113, 227, float32((0.12+0.07*arc)*auraPulse)), At: 0},
 					{Color: ui.Transparent, At: 1},
 				},
 			})
 
-		// Crisp Apple two-tone headline
 		renderAppleHeadline(c, f, "本地 MCP 与 CLI。", "经由 Unix Socket，实时流式协同。", true)
 
-		// Camera rig wrapping the two facing panes + glowing conduit
+		// Studio 3D Arc Rig
 		ui.Box(c).Absolute().Left(0).Top(0).Size(960, 540).
-			Scale(stageZoom, stageZoom).Translate(stagePanX, 0).
+			Translate(stagePanX, float32(22*(1-enter))).
+			Opacity(float32(enter)).
 			Children(func() {
-				// Left Pane: Live Terminal gently angled inward (+5° -> +2.5°)
-				leftYaw := float32(5.5*(1-min(leftIn, 1)) + 2.5)
+				// Left Pane: Live Terminal
 				ui.Box(c).Absolute().Left(30).Top(90).Size(404, 396).
-					Perspective(1400).RotateY(leftYaw).
-					Translate(float32(-26*(1-leftIn)), 0).Opacity(float32(min(leftIn*2, 1))).
+					Perspective(1100).RotateY(leftYaw).Scale(leftScale, leftScale).
 					Children(func() {
 						renderFlowingMCPTerminal(c, f, 404, 396)
 					})
 
-				// Center Flowing IPC Conduit (x = 434..526, 92 DIP clean glowing data stream!)
-				bridgeOp := float32(f.Interpolate([]float64{52, 86}, []float64{0, 1}))
+				// Center Flowing IPC Conduit (x = 434..526)
+				bridgeOp := float32(f.Interpolate([]float64{46, 80}, []float64{0, 1}))
 				ui.Box(c).Absolute().Left(434).Top(246).Size(92, 92).Opacity(bridgeOp).Children(func() {
 					// Primary glowing forward stream wire (Terminal -> Aion)
 					ui.Box(c).Absolute().Left(4).Top(36).Size(84, 2.5).Radius(2).
@@ -477,7 +549,7 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 								{Color: ui.RGBA(56, 189, 248, 0.50), At: 1},
 							},
 						})
-					// Secondary subtle return acknowledgement wire (Aion -> Terminal)
+					// Return ack wire (Aion -> Terminal)
 					ui.Box(c).Absolute().Left(4).Top(50).Size(84, 1.5).Radius(2).
 						LinearGradient(ui.LinearGradient{
 							Angle: 90,
@@ -493,7 +565,6 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 						phase := math.Mod(float64(f.Index)*0.028+float64(pIdx)*0.5, 1.0)
 						dotX := float32(4 + phase*76)
 						dotAlpha := float32(math.Sin(math.Pi * phase))
-						// Soft trail tail
 						ui.Box(c).Absolute().Left(max(4, dotX-14)).Top(34.5).Size(16, 5).Radius(999).
 							Opacity(dotAlpha * 0.45).
 							LinearGradient(ui.LinearGradient{
@@ -516,7 +587,6 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 						Background(colSkyGlow).Opacity(ackAlpha * 0.90).
 						Shadow(0, 0, 10, 0, colSkyGlow)
 
-					// Crisp floating labels above & below stream
 					ui.Column(c).Absolute().Left(4).Top(8).Width(84).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, "aion.sock").FontSize(10).Bold().TextColor(colBrandLime)
 					})
@@ -525,11 +595,9 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 					})
 				})
 
-				// Right Pane: Real Aion Dark Settings gently angled inward (-5° -> -2.5°)
-				rightYaw := float32(-5.5*(1-min(rightIn, 1)) - 2.5)
+				// Right Pane: Real Aion Dark Settings
 				ui.Box(c).Absolute().Left(526).Top(90).Size(404, 396).
-					Perspective(1400).RotateY(rightYaw).
-					Translate(float32(26*(1-rightIn)), 0).Opacity(float32(min(rightIn*2, 1))).
+					Perspective(1100).RotateY(rightYaw).Scale(rightScale, rightScale).
 					Children(func() {
 						renderAppleWindow(c, assets.SettingsDark, 404, 396, true, true)
 					})
@@ -559,7 +627,6 @@ func renderFlowingMCPTerminal(c *ui.Context, f render.Frame, w, h float32) {
 		Border(1, ui.RGBA(255, 255, 255, 0.13)).
 		Shadow(0, 24, 56, 0, ui.RGBA(0, 0, 0, 0.62)).
 		Children(func() {
-			// Window titlebar
 			ui.Row(c).FillWidth().Height(34).Padding(0, 14).AlignItems(ui.Center).Gap(6.5).
 				Background(ui.RGBA(255, 255, 255, 0.03)).
 				Children(func() {
@@ -570,7 +637,6 @@ func renderFlowingMCPTerminal(c *ui.Context, f render.Frame, w, h float32) {
 					ui.Text(c, "aion mcp · stdio JSON-RPC 2.0").FontSize(10).TextColor(colAppleDarkSub)
 				})
 
-			// Terminal body
 			ui.Column(c).FillWidth().Grow(1).Padding(18, 18).Gap(11).Children(func() {
 				ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "$").FontSize(12.5).Bold().TextColor(colBrandLime)
@@ -628,8 +694,9 @@ func renderFlowingMCPTerminal(c *ui.Context, f render.Frame, w, h float32) {
 }
 
 // -----------------------------------------------------------------------------
-// Act 7: Brisk Apple 2×2 Pillars (47.4s – 51.2s, 228 frames)
-// Low-medium info density -> crisp 3.8s with smooth crane glide.
+// Act 7: 3D Floor-Tilt Cascade + Jib Crane Up (47.4s – 51.2s, 228 frames)
+// Each architectural pillar pitches up from a 3D perspective floor plane while
+// the camera glides upward on a jib crane!
 // -----------------------------------------------------------------------------
 func act7ApplePillars(c *ui.Context, f render.Frame, sfx *soundBank) {
 	if f.Index == 6 {
@@ -639,7 +706,7 @@ func act7ApplePillars(c *ui.Context, f render.Frame, sfx *soundBank) {
 	fadeOut := f.Interpolate([]float64{200, 227}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
 	sceneOp := float32(fadeIn * fadeOut)
 
-	craneY := float32(f.Interpolate([]float64{0, 228}, []float64{10, -6}, render.Interpolation{Easing: ui.EaseOut}))
+	craneY := float32(f.Interpolate([]float64{0, 228}, []float64{18, -10}, render.Interpolation{Easing: ui.EaseOut}))
 
 	type pillar struct {
 		hero   string
@@ -669,13 +736,14 @@ func act7ApplePillars(c *ui.Context, f render.Frame, sfx *soundBank) {
 				if f.Index == delay {
 					f.Audio(sfx.PopSoft, render.AudioOptions{Volume: 0.24})
 				}
-				p := f.Interpolate([]float64{float64(delay), float64(delay + 26)}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
+				p := f.Interpolate([]float64{float64(delay), float64(delay + 32)}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 
 				ui.Column(c).Absolute().Left(x).Top(y).Size(cardW, cardH).
+					Perspective(900).RotateX(float32(24.0 * (1.0 - p))).
 					Justify(ui.Center).Padding(26, 30).Gap(10).Radius(20).
 					Background(colDarkSurface).
 					Border(1, ui.RGBA(255, 255, 255, 0.08)).
-					Opacity(float32(p)).Translate(0, float32(14*(1-p))).
+					Opacity(float32(p)).Translate(0, float32(36*(1-p))).
 					Children(func() {
 						ui.Text(c, item.hero).FontSize(24).Bold().TextColor(item.accent)
 						ui.Text(c, item.sub).FontSize(13).LineHeight(1.55).TextColor(colAppleDarkSub)
@@ -686,8 +754,9 @@ func act7ApplePillars(c *ui.Context, f render.Frame, sfx *soundBank) {
 }
 
 // -----------------------------------------------------------------------------
-// Act 8: Decisive Apple Finale (50.8s – 54.0s, 192 frames)
-// Low info density -> clean 3.2s with gentle pull-back settle.
+// Act 8: Optical Pull-Out + Soft Defocus Bookend (50.8s – 54.0s, 192 frames)
+// Mirrors Act 1's opening Rack Focus in reverse: pulls gently away and melts
+// softly out of focus into black.
 // -----------------------------------------------------------------------------
 func act8FinaleOutro(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 10 {
@@ -695,13 +764,14 @@ func act8FinaleOutro(c *ui.Context, f render.Frame, assets *demoAssets, sfx *sou
 	}
 
 	fadeIn := f.Interpolate([]float64{0, 24}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	fadeOut := f.Interpolate([]float64{156, 191}, []float64{1, 0}, render.Interpolation{Easing: ui.EaseInOut})
-	sceneOp := float32(fadeIn * fadeOut)
+	outro := f.Interpolate([]float64{150, 191}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseIn})
+	sceneOp := float32(fadeIn * (1.0 - outro))
 
 	logoIn := f.Interpolate([]float64{4, 42}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 	textIn := f.Interpolate([]float64{18, 56}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 	footIn := f.Interpolate([]float64{42, 78}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
-	pullBack := float32(f.Interpolate([]float64{0, 192}, []float64{1.04, 0.98}, render.Interpolation{Easing: ui.EaseOut}))
+	pullBack := float32(f.Interpolate([]float64{0, 192}, []float64{1.08, 0.94}, render.Interpolation{Easing: ui.EaseOut}))
+	defocus := float32(9.0 * outro)
 
 	ui.Box(c).Fill().Background(colBlack).Opacity(sceneOp).Children(func() {
 		ui.Box(c).Absolute().Left(0).Top(0).Size(960, 540).
@@ -714,28 +784,31 @@ func act8FinaleOutro(c *ui.Context, f render.Frame, assets *demoAssets, sfx *sou
 				},
 			})
 
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(16).
-			Scale(pullBack, pullBack).
-			Children(func() {
-				s := float32(0.88 + 0.12*logoIn)
-				ui.Box(c).Size(94, 94).Center().Radius(24).
-					Border(1, ui.RGBA(255, 255, 255, 0.12)).
-					Scale(s, s).Opacity(float32(logoIn)).
-					Children(func() {
-						ui.Image(c, assets.LogoSVG).Size(92, 92).Radius(23)
-					})
+		stage := ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(16).
+			Scale(pullBack, pullBack)
+		if defocus > 0.15 {
+			stage.Blur(defocus)
+		}
+		stage.Children(func() {
+			s := float32(0.88 + 0.12*logoIn)
+			ui.Box(c).Size(94, 94).Center().Radius(24).
+				Border(1, ui.RGBA(255, 255, 255, 0.12)).
+				Scale(s, s).Opacity(float32(logoIn)).
+				Children(func() {
+					ui.Image(c, assets.LogoSVG).Size(92, 92).Radius(23)
+				})
 
-				ui.Column(c).AlignItems(ui.Center).Gap(8).
-					Opacity(float32(textIn)).Translate(0, float32(14*(1-textIn))).
-					Children(func() {
-						ui.Text(c, "Aion").FontSize(56).Bold().LetterSpacing(-2).TextColor(colAppleLightTxt)
-						ui.Text(c, "项目与求职，本地原生。").FontSize(19).TextColor(colAppleDarkSub)
-					})
+			ui.Column(c).AlignItems(ui.Center).Gap(8).
+				Opacity(float32(textIn)).Translate(0, float32(14*(1-textIn))).
+				Children(func() {
+					ui.Text(c, "Aion").FontSize(56).Bold().LetterSpacing(-2).TextColor(colAppleLightTxt)
+					ui.Text(c, "项目与求职，本地原生。").FontSize(19).TextColor(colAppleDarkSub)
+				})
 
-				ui.Text(c, "macOS · Windows · github.com/Games55k/Aion").
-					FontSize(12).LetterSpacing(0.6).TextColor(colAppleDarkSub).
-					Margin(14, 0, 0, 0).Opacity(float32(footIn * 0.85))
-			})
+			ui.Text(c, "macOS · Windows · github.com/Games55k/Aion").
+				FontSize(12).LetterSpacing(0.6).TextColor(colAppleDarkSub).
+				Margin(14, 0, 0, 0).Opacity(float32(footIn * 0.85))
+		})
 	})
 }
 
@@ -769,6 +842,13 @@ func renderAppleHeadlineText(c *ui.Context, primary, secondary string, dark bool
 }
 
 func renderAppleWindow(c *ui.Context, bmp *ui.Bitmap, w, h float32, dark, showLights bool) {
+	renderAppleWindowWithSheen(c, bmp, w, h, dark, showLights, -1)
+}
+
+// renderAppleWindowWithSheen renders a native macOS window card and, when sheenPos
+// is in [0, 1], sweeps a subtle studio specular reflection across the glass in sync
+// with a 3D turntable orbit.
+func renderAppleWindowWithSheen(c *ui.Context, bmp *ui.Bitmap, w, h float32, dark, showLights bool, sheenPos float64) {
 	borderCol := ui.RGBA(0, 0, 0, 0.08)
 	shadowCol := ui.RGBA(0, 0, 0, 0.14)
 	bg := ui.Hex("#FFFFFF")
@@ -783,6 +863,24 @@ func renderAppleWindow(c *ui.Context, bmp *ui.Bitmap, w, h float32, dark, showLi
 		Shadow(0, 24, 56, 0, shadowCol).
 		Children(func() {
 			ui.Image(c, bmp).Size(w-2, h-2).Radius(13).Fit(ui.Cover)
+
+			if sheenPos >= 0 && sheenPos <= 1 {
+				sx := float32((sheenPos*1.4 - 0.2) * float64(w))
+				sAlpha := float32(0.18 * math.Sin(math.Pi*sheenPos))
+				if sx > -120 && sx < w+20 && sAlpha > 0.005 {
+					ui.Box(c).Absolute().Left(max(0, sx)).Top(0).Size(min(130, w-max(0, sx)), h).Radius(13).
+						Opacity(sAlpha).
+						LinearGradient(ui.LinearGradient{
+							Angle: 108,
+							Stops: []ui.GradientStop{
+								{Color: ui.Transparent, At: 0},
+								{Color: ui.RGBA(255, 255, 255, 0.85), At: 0.5},
+								{Color: ui.Transparent, At: 1},
+							},
+						})
+				}
+			}
+
 			if showLights {
 				ui.Row(c).Absolute().Left(13).Top(12).Gap(6).Children(func() {
 					ui.Box(c).Size(8.5, 8.5).Radius(999).Background(ui.Hex("#FF5F57"))
