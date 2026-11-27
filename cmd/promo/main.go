@@ -30,7 +30,7 @@ const (
 	videoHeight = 1080
 	videoFPS    = 60
 	videoScale  = 2 // 960×540 logical DIPs (Retina 2x)
-	totalFrames = 60 * videoFPS
+	totalFrames = 54 * videoFPS
 )
 
 func main() {
@@ -116,17 +116,17 @@ func exportActStills(comp render.Composition, dir string, opts render.Options) e
 		name  string
 		frame int
 	}{
-		{"01_brand_opening", 160},
-		{"02_today_focus", 520},
-		{"03a_kanban_board", 900},
-		{"03b_task_detail_drawer", 1220},
-		{"04a_jobs_tracker", 1560},
-		{"04b_job_timeline_modal", 1860},
-		{"05a_light_dark_sweep", 2145},
-		{"05b_command_palette", 2440},
-		{"06_mcp_cli_sync", 2900},
-		{"07_apple_pillars", 3220},
-		{"08_finale_outro", 3460},
+		{"01_brand_opening", 110},
+		{"02_today_focus", 400},
+		{"03a_kanban_board", 760},
+		{"03b_task_detail_drawer", 1080},
+		{"04a_jobs_tracker", 1420},
+		{"04b_job_timeline_modal", 1740},
+		{"05a_light_dark_sweep", 1975},
+		{"05b_command_palette", 2220},
+		{"06_mcp_cli_sync", 2680},
+		{"07_apple_pillars", 2950},
+		{"08_finale_outro", 3140},
 	}
 	for _, kf := range keyframes {
 		img, err := render.Still(comp, kf.frame, opts)

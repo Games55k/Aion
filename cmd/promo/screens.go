@@ -171,24 +171,24 @@ func captureDemoAssets() (*demoAssets, error) {
 		Tags:     []string{"CLI"},
 	})
 
-	// Seed rich Job Applications + timeline events.
+	// Seed iconic BAT + Magnificent Seven job applications with real deterministic brand logos.
 	_, _ = app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:    "星澜智能",
-		PositionName:   "资深 Go 系统架构师",
-		AppliedDate:    "2026-11-05",
+		CompanyName:    "Google",
+		PositionName:   "Senior Software Engineer · Infrastructure",
+		AppliedDate:    "2026-11-04",
 		Stage:          model.JobStageOffer,
-		ApplicationURL: "https://careers.nebula-ai.example/go-architect",
+		ApplicationURL: "https://careers.google.com/jobs/results/senior-swe-infra",
 		Channel:        "内部推荐",
-		Notes:          "三轮技术面深入交流了本地优先架构与 SQLite WAL 并发控制，已确认正式 Offer 方案。",
+		Notes:          "四轮 Onsite 涵盖分布式一致性、系统设计与 Go 性能优化，HC 审批通过，已收到正式 Offer。",
 	})
 	heroJob, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:    "云栖基础架构",
-		PositionName:   "原生桌面引擎研发工程师",
+		CompanyName:    "字节跳动",
+		PositionName:   "基础架构研发工程师（Go / 分布式存储）",
 		AppliedDate:    "2026-11-12",
 		Stage:          model.JobStageInterview2,
-		ApplicationURL: "https://jobs.yunqi-infra.example/native-engine",
+		ApplicationURL: "https://jobs.bytedance.com/experienced/position/infra-go",
 		Channel:        "官网直投",
-		Notes:          "一面考察了 Go 并发调度、渲染管线与跨平台打包；二面将重点围绕 GPU 渲染优化与系统集成展开。",
+		Notes:          "一面深入讨论了 Go 并发调度、SQLite WAL 事务与本地优先架构；二面将聚焦高吞吐存储引擎设计。",
 	})
 	if err != nil {
 		return nil, err
@@ -197,47 +197,58 @@ func captureDemoAssets() (*demoAssets, error) {
 		ApplicationID: heroJob.ID,
 		Stage:         model.JobStageInterview1,
 		OccurredDate:  "2026-11-16",
-		Note:          "补录一面复盘：手写无锁缓存与渲染批处理策略，面试官反馈非常积极。",
+		Note:          "补录一面复盘：手写无锁 LRU 缓存与批处理管线，面试官反馈非常积极。",
 	})
 	_, _ = app.JobApplications.AddNoteEvent(ctx, jobapplications.AddNoteInput{
 		ApplicationID: heroJob.ID,
-		Note:          "HR 已确认二面时间：本周五 14:30，提前准备好 Aion 原生性能基准数据。",
+		Note:          "HR 已确认二面时间：本周五 14:30，提前整理 Aion 原生 GPU 渲染基准测试数据。",
 	})
 	_, _ = app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:    "光年实验室",
-		PositionName:   "AI 工具链工程师 (MCP / Agent)",
-		AppliedDate:    "2026-11-10",
+		CompanyName:    "Apple",
+		PositionName:   "macOS Core Graphics & Native UI Engineer",
+		AppliedDate:    "2026-11-15",
+		Stage:          model.JobStageInterview2,
+		ApplicationURL: "https://jobs.apple.com/zh-cn/details/macos-native-ui",
+		Channel:        "官网直投",
+		Notes:          "技术面重点考察 Metal 渲染管线、Retina 字体排版与系统级交互体验打磨。",
+	})
+	_, _ = app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:    "Microsoft",
+		PositionName:   "Principal Systems Engineer · Azure Core",
+		AppliedDate:    "2026-11-09",
 		Stage:          model.JobStageHR,
-		ApplicationURL: "https://lightyear.example/careers/agent-infra",
+		ApplicationURL: "https://careers.microsoft.com/us/en/job/azure-core-systems",
+		Channel:        "内部推荐",
+	})
+	_, _ = app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:    "腾讯",
+		PositionName:   "微信后台高并发系统架构师",
+		AppliedDate:    "2026-11-20",
+		Stage:          model.JobStageInterview1,
+		ApplicationURL: "https://careers.tencent.com/jobdesc.html?postId=wechat-backend",
 		Channel:        "技术社区",
 	})
-	_, _ = app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:    "深蓝数据科技",
-		PositionName:   "分布式存储核心开发",
-		AppliedDate:    "2026-11-21",
-		Stage:          model.JobStageInterview1,
-		ApplicationURL: "https://deepblue.example/storage",
-		Channel:        "猎头推荐",
-	})
 	closedJob, _ := app.JobApplications.Create(ctx, jobapplications.CreateInput{
-		CompanyName:  "极光引擎",
-		PositionName: "客户端性能专家",
-		AppliedDate:  "2026-10-28",
-		Stage:        model.JobStageInterview2,
-		Channel:      "官网直投",
+		CompanyName:    "阿里巴巴",
+		PositionName:   "阿里云云原生基础引擎专家",
+		AppliedDate:    "2026-10-28",
+		Stage:          model.JobStageInterview2,
+		ApplicationURL: "https://talent.alibaba.com/off-campus/position-detail?id=cloud-engine",
+		Channel:        "猎头推荐",
 	})
 	_, _ = app.JobApplications.Close(ctx, jobapplications.CloseInput{
 		ID:      closedJob.ID,
 		Outcome: model.JobOutcomeWithdrawn,
-		Reason:  "综合技术栈与团队方向匹配度后主动结束流程",
+		Reason:  "综合技术方向与已有 Offer 规划后主动结束流程",
 	})
 
 	// Create one automatic backup so Settings displays live backup history.
 	_, _ = app.Backups.RunDue(ctx)
 
 	wb := frontend.New(app, frontend.Host{
-		OpenURL: func(string) error { return nil },
-		Now:     func() time.Time { return now },
+		OpenURL:     func(string) error { return nil },
+		Now:         func() time.Time { return now },
+		LoadFavicon: demoFaviconLoader,
 		UpdateInfo: frontend.UpdateCapability{
 			Version:          "0.2.0",
 			AvailableVersion: "0.2.1",
@@ -312,7 +323,7 @@ func captureDemoAssets() (*demoAssets, error) {
 	}
 	wb.ClearSelectedTask()
 
-	// 4. Job Applications Tracker (Light)
+	// 4. Job Applications Tracker (Light) — with Google, Apple, Microsoft, ByteDance, Tencent, Alibaba logos!
 	wb.SwitchModule("job_applications")
 	if out.JobsLight, err = renderScreen(1280, 800, false, 2); err != nil {
 		return nil, fmt.Errorf("render jobs light: %w", err)
@@ -352,7 +363,6 @@ func writeDemoAttachmentPNG(path string) error {
 		fy := float64(y) / float64(h)
 		for x := range w {
 			fx := float64(x) / float64(w)
-			// Subtle obsidian-to-emerald radial glow
 			dx := fx - 0.72
 			dy := fy - 0.35
 			d2 := dx*dx + dy*dy
@@ -367,7 +377,6 @@ func writeDemoAttachmentPNG(path string) error {
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
-	// Draw clean minimalist architectural bars inside the preview thumbnail.
 	fillRect := func(x0, y0, x1, y1 int, col color.RGBA) {
 		for y := y0; y < y1; y++ {
 			for x := x0; x < x1; x++ {

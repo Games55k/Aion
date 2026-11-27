@@ -21,7 +21,7 @@ type soundBank struct {
 }
 
 func buildSoundBank() *soundBank {
-	score, rmsDB := newAmbientScore(60.2)
+	score, rmsDB := newAmbientScore(54.2)
 	return &soundBank{
 		Score:       score,
 		ScoreRMSDB:  rmsDB,
@@ -117,14 +117,14 @@ func newAmbientScore(durationSec float64) (*render.Sound, float64) {
 		padL *= lfo
 		padR *= lfo
 
-		// 2. Clean warm bass & gentle Apple-style muted kick pulse (enters after opening at 3.5s, lifts at 55s)
+		// 2. Clean warm bass & gentle Apple-style muted kick pulse (enters after opening at 2.6s, lifts at 50s)
 		var bass, kick, shaker float64
-		if t >= 3.2 && t < 55.5 {
+		if t >= 2.6 && t < 50.2 {
 			gate := 1.0
-			if t < 5.0 {
-				gate = smoothstep((t - 3.2) / 1.8)
-			} else if t > 53.2 {
-				gate = smoothstep((55.5 - t) / 2.3)
+			if t < 4.2 {
+				gate = smoothstep((t - 2.6) / 1.6)
+			} else if t > 48.0 {
+				gate = smoothstep((50.2 - t) / 2.2)
 			}
 			rootFreq := chords[idx][0] * 0.5
 			beatT := math.Mod(t, beatDur)
@@ -151,17 +151,17 @@ func newAmbientScore(durationSec float64) (*render.Sound, float64) {
 			shaker = gate * 0.032 * shakerEnv * hp
 		}
 
-		// 3. Felt-piano / crystalline marimba motif (1.2s to 54.8s)
+		// 3. Felt-piano / crystalline marimba motif (1.0s to 49.6s)
 		var melL, melR float64
-		if t >= 1.2 && t < 54.8 {
+		if t >= 1.0 && t < 49.6 {
 			mGate := 1.0
-			if t < 2.4 {
-				mGate = smoothstep((t - 1.2) / 1.2)
-			} else if t > 52.8 {
-				mGate = smoothstep((54.8 - t) / 2.0)
+			if t < 2.0 {
+				mGate = smoothstep((t - 1.0) / 1.0)
+			} else if t > 47.6 {
+				mGate = smoothstep((49.6 - t) / 2.0)
 			}
-			step := int((t - 1.2) / beatDur)
-			localT := math.Mod(t-1.2, beatDur)
+			step := int((t - 1.0) / beatDur)
+			localT := math.Mod(t-1.0, beatDur)
 			note := motif[step%len(motif)]
 			if note > 0 {
 				env := math.Exp(-5.2*localT) * min(localT/0.007, 1.0)

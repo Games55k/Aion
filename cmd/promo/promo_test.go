@@ -1,13 +1,29 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/egoist/mygo/plugins/render"
 )
 
-// Verify that demo seeding, studio-level stereo sound synthesis, and keyframe composition rendering succeed across light and dark acts.
+// Verify that demo seeding, BAT/Mag-7 vector logos, studio-level BGM, and keyframe rendering succeed across all acts.
 func TestPromoCompositionRendersKeyframes(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://careers.google.com/jobs",
+		"https://jobs.apple.com/zh-cn",
+		"https://careers.microsoft.com/us/en",
+		"https://www.nvidia.com/careers",
+		"https://jobs.bytedance.com/experienced",
+		"https://careers.tencent.com/jobdesc.html",
+		"https://talent.alibaba.com/off-campus",
+	} {
+		bmp, err := demoFaviconLoader(context.Background(), rawURL)
+		if err != nil || bmp == nil {
+			t.Fatalf("demoFaviconLoader(%q) = (%v, %v), want non-nil bitmap", rawURL, bmp, err)
+		}
+	}
+
 	assets, err := captureDemoAssets()
 	if err != nil {
 		t.Fatalf("capture demo assets: %v", err)
@@ -22,13 +38,12 @@ func TestPromoCompositionRendersKeyframes(t *testing.T) {
 	if sfx.Score == nil || sfx.ChimeHigh == nil || sfx.WhooshSweep == nil || sfx.FinaleChord == nil {
 		t.Fatalf("expected all synthesized sound assets to be populated")
 	}
-	// Ensure BGM sits at a clear, audible commercial loudness (~ -14 dBFS RMS).
 	if sfx.ScoreRMSDB < -16.5 || sfx.ScoreRMSDB > -11.5 {
 		t.Fatalf("ScoreRMSDB = %.2f dBFS, want within [-16.5, -11.5]", sfx.ScoreRMSDB)
 	}
 
 	comp := buildComposition(assets, sfx)
-	for _, frame := range []int{0, 160, 520, 2145, 2900, 3220, totalFrames - 1} {
+	for _, frame := range []int{0, 110, 400, 1420, 1975, 2680, 2950, totalFrames - 1} {
 		img, err := render.Still(comp, frame, render.Options{})
 		if err != nil {
 			t.Fatalf("render still frame %d: %v", frame, err)
