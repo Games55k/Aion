@@ -275,7 +275,7 @@ func (w *Workbench) renderFocusView(c *ui.Context, tk *uiTokens) {
 								{"done", "已完成", doneTasks},
 							} {
 								active := w.focusFilter == f.key
-								btn := ui.ButtonBase(c.Key("focus-f-" + f.label)).Padding(4, 0).Gap(6).
+								btn := ui.ButtonBase(c.Key("focus-f-"+f.label)).Padding(4, 0).Gap(6).
 									AlignItems(ui.Center).Cursor(ui.CursorPointer).Label("聚焦筛选 " + f.label)
 								if active {
 									btn.TextColor(tk.Text).FontWeight(600)
@@ -292,82 +292,82 @@ func (w *Workbench) renderFocusView(c *ui.Context, tk *uiTokens) {
 							}
 						})
 
-					// Borderless Task Stream
-					if len(displayTasks) == 0 {
-						ui.Column(c).Padding(48, 0).AlignItems(ui.Start).Children(func() {
-							ui.Text(c, "暂无待推进任务").FontSize(16).TextColor(tk.TextSecondary)
-						})
-					} else {
-						limit := min(len(displayTasks), 16)
-						ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-							for i := 0; i < limit; i++ {
-								w.renderFocusTaskRow(c, tk, displayTasks[i], todayStr, soonCutoff)
-							}
-						})
-					}
-				})
-			}
-
-			// Right Open Column: Active Jobs + Local Sync (Zero Boxed Cards)
-			if showJobs || !showProjects {
-				rightCol := ui.Column(c).Gap(48)
-				if showProjects {
-					rightCol.Width(320).Shrink(0)
-				} else {
-					rightCol.Grow(1).Basis(0).MinWidth(0)
-				}
-				rightCol.Children(func() {
-					if showJobs {
-						jobSec := ui.Column(c.Key("focus-jobs-card")).Gap(20).AlignSelf(ui.Stretch)
-						jobSec.Children(func() {
-							ui.Row(c).PaddingX(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-								ui.Text(c, "求职").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
-								allBtn := ui.ButtonBase(c.Key("focus-jobs-all")).Gap(4).AlignItems(ui.Center).
-									Cursor(ui.CursorPointer).TextColor(tk.Primary).Label("查看全部投递")
-								allBtn.Children(func() {
-									ui.Text(c, "全部").FontSize(14).FontWeight(500).SingleLine()
-									uiIconBox(c, iconChevronRight(), tk.Primary)
-								})
-								if allBtn.Clicked() {
-									w.NavigateTo(NavJobActive)
+						// Borderless Task Stream
+						if len(displayTasks) == 0 {
+							ui.Column(c).Padding(48, 0).AlignItems(ui.Start).Children(func() {
+								ui.Text(c, "暂无待推进任务").FontSize(16).TextColor(tk.TextSecondary)
+							})
+						} else {
+							limit := min(len(displayTasks), 16)
+							ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+								for i := 0; i < limit; i++ {
+									w.renderFocusTaskRow(c, tk, displayTasks[i], todayStr, soonCutoff)
 								}
 							})
-
-							if len(activeJobs) == 0 {
-								ui.Text(c, "暂无进行中的投递").FontSize(14).TextColor(tk.TextSecondary)
-							} else {
-								limit := min(len(activeJobs), 6)
-								ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-									for i := 0; i < limit; i++ {
-										w.renderFocusJobRow(c, tk, activeJobs[i])
-									}
-								})
-							}
-						})
-					}
-
-					// Local Sync Status Section
-					ui.Column(c.Key("focus-sync-sec")).PaddingX(16).Gap(16).AlignSelf(ui.Stretch).Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-							ui.Text(c, "同步").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
-							setBtn := ui.ButtonBase(c.Key("focus-sync-settings")).Gap(4).AlignItems(ui.Center).
-								Cursor(ui.CursorPointer).TextColor(tk.Primary)
-							setBtn.Children(func() {
-								ui.Text(c, "设置").FontSize(14).FontWeight(500).SingleLine()
-								uiIconBox(c, iconChevronRight(), tk.Primary)
-							})
-							if setBtn.Clicked() {
-								w.NavigateTo(NavSettings)
-							}
-						})
-						if w.MCPCapability().Ready {
-							ui.Text(c, "本地 MCP 已就绪 · aion.sock").FontSize(14).TextColor(tk.TextSecondary)
-						} else {
-							ui.Text(c, "离线工作模式").FontSize(14).TextColor(tk.TextSecondary)
 						}
 					})
-				})
-			}
+				}
+
+				// Right Open Column: Active Jobs + Local Sync (Zero Boxed Cards)
+				if showJobs || !showProjects {
+					rightCol := ui.Column(c).Gap(48)
+					if showProjects {
+						rightCol.Width(320).Shrink(0)
+					} else {
+						rightCol.Grow(1).Basis(0).MinWidth(0)
+					}
+					rightCol.Children(func() {
+						if showJobs {
+							jobSec := ui.Column(c.Key("focus-jobs-card")).Gap(20).AlignSelf(ui.Stretch)
+							jobSec.Children(func() {
+								ui.Row(c).PaddingX(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+									ui.Text(c, "求职").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+									allBtn := ui.ButtonBase(c.Key("focus-jobs-all")).Gap(4).AlignItems(ui.Center).
+										Cursor(ui.CursorPointer).TextColor(tk.Primary).Label("查看全部投递")
+									allBtn.Children(func() {
+										ui.Text(c, "全部").FontSize(14).FontWeight(500).SingleLine()
+										uiIconBox(c, iconChevronRight(), tk.Primary)
+									})
+									if allBtn.Clicked() {
+										w.NavigateTo(NavJobActive)
+									}
+								})
+
+								if len(activeJobs) == 0 {
+									ui.Text(c, "暂无进行中的投递").FontSize(14).TextColor(tk.TextSecondary)
+								} else {
+									limit := min(len(activeJobs), 6)
+									ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+										for i := 0; i < limit; i++ {
+											w.renderFocusJobRow(c, tk, activeJobs[i])
+										}
+									})
+								}
+							})
+						}
+
+						// Local Sync Status Section
+						ui.Column(c.Key("focus-sync-sec")).PaddingX(16).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+								ui.Text(c, "同步").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+								setBtn := ui.ButtonBase(c.Key("focus-sync-settings")).Gap(4).AlignItems(ui.Center).
+									Cursor(ui.CursorPointer).TextColor(tk.Primary)
+								setBtn.Children(func() {
+									ui.Text(c, "设置").FontSize(14).FontWeight(500).SingleLine()
+									uiIconBox(c, iconChevronRight(), tk.Primary)
+								})
+								if setBtn.Clicked() {
+									w.NavigateTo(NavSettings)
+								}
+							})
+							if w.MCPCapability().Ready {
+								ui.Text(c, "本地 MCP 已就绪 · aion.sock").FontSize(14).TextColor(tk.TextSecondary)
+							} else {
+								ui.Text(c, "离线工作模式").FontSize(14).TextColor(tk.TextSecondary)
+							}
+						})
+					})
+				}
 			})
 		})
 	})
@@ -415,7 +415,7 @@ func (w *Workbench) renderFocusTaskRow(c *ui.Context, tk *uiTokens, task model.T
 		}
 
 		// Task Title + Project Name
-		row := ui.ButtonBase(c.Key("focus-task-"+task.ID)).Grow(1).MinWidth(0).
+		row := ui.ButtonBase(c.Key("focus-task-" + task.ID)).Grow(1).MinWidth(0).
 			AlignItems(ui.Start).Justify(ui.Start).Cursor(ui.CursorPointer).
 			Label("打开聚焦任务 " + task.Title)
 		row.Children(func() {
@@ -465,7 +465,7 @@ func (w *Workbench) renderFocusJobRow(c *ui.Context, tk *uiTokens, app model.Job
 	}
 
 	wrap.Children(func() {
-		row := ui.ButtonBase(c.Key("focus-job-"+app.ID)).Grow(1).MinWidth(0).
+		row := ui.ButtonBase(c.Key("focus-job-" + app.ID)).Grow(1).MinWidth(0).
 			AlignItems(ui.Center).Justify(ui.SpaceBetween).Cursor(ui.CursorPointer).
 			Label("打开聚焦投递 " + title)
 		row.Children(func() {

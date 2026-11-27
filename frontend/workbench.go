@@ -142,12 +142,12 @@ type Workbench struct {
 
 	mu           sync.Mutex
 	lastAsyncErr string
-	busy          bool
-	busyLabel     string
-	busyCancel    context.CancelFunc
-	restoring     bool
-	dataEpoch     uint64
-	taskWG        sync.WaitGroup
+	busy         bool
+	busyLabel    string
+	busyCancel   context.CancelFunc
+	restoring    bool
+	dataEpoch    uint64
+	taskWG       sync.WaitGroup
 
 	// Layout state
 	sideWidth      float32
@@ -357,18 +357,18 @@ type Workbench struct {
 	confirmClearTrashOpen   bool
 
 	// Global Settings & Backup view state
-	themeSetting         string
-	themeSegmentIdx      int
-	backupEnabled        bool
-	backupIntervalSelect string
-	backupKeepSelect     string
-	backupDirInput        string
-	backupStatus          backup.AutoStatus
-	managedBackups        []backup.ManagedBackup
-	backupHistoryExpanded bool
-	lastExportedZipPath  string
-	lastRestoreResult    *backup.RestoreResult
-	lastRestoreError     string
+	themeSetting              string
+	themeSegmentIdx           int
+	backupEnabled             bool
+	backupIntervalSelect      string
+	backupKeepSelect          string
+	backupDirInput            string
+	backupStatus              backup.AutoStatus
+	managedBackups            []backup.ManagedBackup
+	backupHistoryExpanded     bool
+	lastExportedZipPath       string
+	lastRestoreResult         *backup.RestoreResult
+	lastRestoreError          string
 	confirmRestoreOpen        bool
 	pendingRestoreZip         string
 	updateInfo                UpdateCapability
@@ -386,33 +386,33 @@ type Workbench struct {
 // New creates and initializes a Workbench backed by app.
 func New(app *backend.App, host Host) *Workbench {
 	w := &Workbench{
-		app:               app,
-		host:              host,
-		sideWidth:         240,
-		sideExpanded:      true,
-		detailExpanded:    false,
-		activeModule:      "projects",
-		hiddenModules:     make(map[string]bool),
-		navPage:           NavAllProjects,
-		lastProjectPage:   NavAllProjects,
-		lastJobPage:       NavJobAll,
-		projectSummaries:  make(map[string]ProjectSummary),
-		projectNames:      make(map[string]string),
-		taskAttachments:   make(map[string][]model.Attachment),
-		quickTaskTitles:   make(map[model.Status]string),
-		attachmentPaths:   make(map[string]string),
-		attachmentMissing: make(map[string]bool),
-		bitmapCache:       make(map[string]*ui.Bitmap),
-		bitmapFailed:      make(map[string]bool),
-		faviconCache:      make(map[string]*ui.Bitmap),
-		faviconFailed:     make(map[string]bool),
-		faviconLoading:    make(map[string]bool),
-		saveState:         "saved",
-		jobSaveState:      "saved",
-		jobSortBy:         jobapplications.SortAppliedDesc,
-		jobPageSize:       20,
-		jobBackfillStage:  string(model.JobStageInterview1),
-		jobTimelineDesc:   true,
+		app:                       app,
+		host:                      host,
+		sideWidth:                 240,
+		sideExpanded:              true,
+		detailExpanded:            false,
+		activeModule:              "projects",
+		hiddenModules:             make(map[string]bool),
+		navPage:                   NavAllProjects,
+		lastProjectPage:           NavAllProjects,
+		lastJobPage:               NavJobAll,
+		projectSummaries:          make(map[string]ProjectSummary),
+		projectNames:              make(map[string]string),
+		taskAttachments:           make(map[string][]model.Attachment),
+		quickTaskTitles:           make(map[model.Status]string),
+		attachmentPaths:           make(map[string]string),
+		attachmentMissing:         make(map[string]bool),
+		bitmapCache:               make(map[string]*ui.Bitmap),
+		bitmapFailed:              make(map[string]bool),
+		faviconCache:              make(map[string]*ui.Bitmap),
+		faviconFailed:             make(map[string]bool),
+		faviconLoading:            make(map[string]bool),
+		saveState:                 "saved",
+		jobSaveState:              "saved",
+		jobSortBy:                 jobapplications.SortAppliedDesc,
+		jobPageSize:               20,
+		jobBackfillStage:          string(model.JobStageInterview1),
+		jobTimelineDesc:           true,
 		themeSetting:              ThemeSystem,
 		updateInfo:                host.UpdateInfo,
 		mcpInfo:                   host.MCPInfo,

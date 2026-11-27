@@ -76,7 +76,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 						projItem := ap
 						active := projItem.ID == p.ID
 						sum := w.projectSummaries[projItem.ID]
-						pillWrap := ui.Row(c.Key("board-proj-wrap-" + projItem.ID)).Height(36).Padding(0, 10, 0, 14).Gap(6).
+						pillWrap := ui.Row(c.Key("board-proj-wrap-"+projItem.ID)).Height(36).Padding(0, 10, 0, 14).Gap(6).
 							Radius(40).AlignItems(ui.Center)
 						hovered := pillWrap.Hovered()
 						if active || hovered {

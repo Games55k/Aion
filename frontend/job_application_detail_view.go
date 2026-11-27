@@ -270,7 +270,7 @@ func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *uiTokens, app model
 				if isPast {
 					lineColor = tk.Primary.Alpha(0.45)
 				}
-				ui.Box(c.Key("step-conn-"+string(st))).Width(8).Height(2).Shrink(0).Background(lineColor)
+				ui.Box(c.Key("step-conn-" + string(st))).Width(8).Height(2).Shrink(0).Background(lineColor)
 			}
 		}
 	})
@@ -571,7 +571,7 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 				ev := events[index]
 				isLast := i == len(events)-1
 				headline, sub := formatTimelineSummary(ev, app)
-				ui.Row(c.Key("ev-"+ev.ID)).Gap(10).AlignItems(ui.Stretch).AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c.Key("ev-" + ev.ID)).Gap(10).AlignItems(ui.Stretch).AlignSelf(ui.Stretch).Children(func() {
 					// Left Rail: semantic dot + vertical connector line
 					ui.Column(c).Width(16).Shrink(0).AlignItems(ui.Center).Children(func() {
 						timelineEventDot(c, tk, ev)

@@ -156,7 +156,7 @@ func act2TodayFocus(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soun
 	crane := f.Interpolate([]float64{0, 76}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 	// 2) Smooth 3D Turntable Orbit (frames 76..328): sweeps -13° -> +11° -> 0°
 	orbit := f.Interpolate([]float64{76, 328}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseInOut})
-	orbitYaw := -13.0*math.Sin(2*math.Pi*orbit*0.85) * (1.0 - 0.35*orbit)
+	orbitYaw := -13.0 * math.Sin(2*math.Pi*orbit*0.85) * (1.0 - 0.35*orbit)
 
 	rotX := float32(26.0*(1.0-crane) + 2.5*math.Sin(math.Pi*orbit))
 	rotY := float32(-10.0*(1.0-crane) + orbitYaw + 14.0*whipOut)
@@ -188,6 +188,7 @@ func act2TodayFocus(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soun
 //   - Phase B (Task Detail): True 3D Z-Depth Parallax + Optical Rack Focus!
 //     Kanban recedes into shallow depth-of-field (scales back to 0.91x, tilts -7°,
 //     softly blurs 4.5px) while the Task Detail card glides forward into crisp focus!
+//
 // -----------------------------------------------------------------------------
 func act3KanbanAndDrawer(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 318 {
@@ -271,6 +272,7 @@ func act3KanbanAndDrawer(c *ui.Context, f render.Frame, assets *demoAssets, sfx 
 //     Apple -> ByteDance -> Microsoft -> Google Offer -> Alibaba).
 //   - Transitions via 3D Multi-Plane Depth Lift: table drops back & softly blurs while
 //     ByteDance's Stage Timeline Modal elevates into sharp foreground!
+//
 // -----------------------------------------------------------------------------
 func act4JobsAndTimeline(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 6 {
@@ -328,7 +330,7 @@ func act4JobsAndTimeline(c *ui.Context, f render.Frame, assets *demoAssets, sfx 
 		if elevate > 0.005 {
 			fgScale := float32(0.88 + 0.13*elevate)
 			fgRotX := float32(-12.0*(1.0-elevate) + 2.0*math.Sin(math.Pi*modalFloat))
-			fgRotY := float32(-4.0*math.Sin(math.Pi*modalFloat))
+			fgRotY := float32(-4.0 * math.Sin(math.Pi*modalFloat))
 			fgY := float32(52.0 * (1.0 - elevate))
 			fgBlur := float32(4.0 * (1.0 - elevate))
 
@@ -351,6 +353,7 @@ func act4JobsAndTimeline(c *ui.Context, f render.Frame, assets *demoAssets, sfx 
 //   - Stationary razor-sharp Light -> Dark wipe (fast on Metal GPU!)
 //   - On ⌘ + K press, executes an Overhead Crane Drop & Pitch Settle (RotateX +14° -> 0°,
 //     vertical crane descent) rather than a plain scale zoom!
+//
 // -----------------------------------------------------------------------------
 func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 46 {
@@ -406,7 +409,7 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 				if sweep > 0.01 && sweep < 0.99 {
 					beamX := float32(sweep * winW)
 					beamAlpha := float32(math.Sin(math.Pi * sweep))
-					ui.Box(c).Absolute().Left(beamX - 12).Top(0).Size(24, winH).Opacity(beamAlpha).
+					ui.Box(c).Absolute().Left(beamX-12).Top(0).Size(24, winH).Opacity(beamAlpha).
 						LinearGradient(ui.LinearGradient{
 							Angle: 90,
 							Stops: []ui.GradientStop{
@@ -451,7 +454,7 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 			pressCmd := f.Interpolate([]float64{174, 179, 190}, []float64{1, 0.90, 1})
 			pressK := f.Interpolate([]float64{184, 189, 200}, []float64{1, 0.90, 1})
 			ui.Row(c).Absolute().Left(408).Top(452).Gap(10).AlignItems(ui.Center).
-				Opacity(float32(kIn * kOut)).Translate(0, float32(10*(1-kIn))).
+				Opacity(float32(kIn*kOut)).Translate(0, float32(10*(1-kIn))).
 				Children(func() {
 					renderAppleKeyCap(c, "⌘", float32(pressCmd), f.Index >= 175 && f.Index <= 194)
 					ui.Text(c, "+").FontSize(14).TextColor(colAppleDarkSub)
@@ -469,6 +472,7 @@ func act5DarkSweepAndPalette(c *ui.Context, f render.Frame, assets *demoAssets, 
 //   - As the glowing lime packet shoots across `aion.sock`, the virtual camera smoothly ARCS
 //     across the bridge from Left -> Right, bringing the Dark Aion Settings pane forward to hero
 //     prominence (+18° left yaw / -3° right yaw) as the live sync lands!
+//
 // -----------------------------------------------------------------------------
 func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *soundBank) {
 	if f.Index == 6 {
@@ -584,7 +588,7 @@ func act6LocalMCPAndCLI(c *ui.Context, f render.Frame, assets *demoAssets, sfx *
 					ackX := float32(80 - ackPhase*76)
 					ackAlpha := float32(math.Sin(math.Pi * ackPhase))
 					ui.Box(c).Absolute().Left(ackX).Top(47.5).Size(6, 6).Radius(999).
-						Background(colSkyGlow).Opacity(ackAlpha * 0.90).
+						Background(colSkyGlow).Opacity(ackAlpha*0.90).
 						Shadow(0, 0, 10, 0, colSkyGlow)
 
 					ui.Column(c).Absolute().Left(4).Top(8).Width(84).AlignItems(ui.Center).Children(func() {
@@ -739,7 +743,7 @@ func act7ApplePillars(c *ui.Context, f render.Frame, sfx *soundBank) {
 				p := f.Interpolate([]float64{float64(delay), float64(delay + 32)}, []float64{0, 1}, render.Interpolation{Easing: ui.EaseOut})
 
 				ui.Column(c).Absolute().Left(x).Top(y).Size(cardW, cardH).
-					Perspective(900).RotateX(float32(24.0 * (1.0 - p))).
+					Perspective(900).RotateX(float32(24.0*(1.0-p))).
 					Justify(ui.Center).Padding(26, 30).Gap(10).Radius(20).
 					Background(colDarkSurface).
 					Border(1, ui.RGBA(255, 255, 255, 0.08)).

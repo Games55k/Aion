@@ -145,11 +145,11 @@ type rpcResponse struct {
 
 // WorkspaceSummary gives an AI agent a compact snapshot of active projects and job applications.
 type WorkspaceSummary struct {
-	Projects      []ProjectSummaryItem       `json:"projects"`
-	ArchivedCount int                        `json:"archived_projects_count"`
-	JobStats      model.JobApplicationStats  `json:"job_stats"`
-	ActiveJobs    []model.JobApplication     `json:"active_jobs"`
-	TrashCount    int                        `json:"trash_count"`
+	Projects      []ProjectSummaryItem      `json:"projects"`
+	ArchivedCount int                       `json:"archived_projects_count"`
+	JobStats      model.JobApplicationStats `json:"job_stats"`
+	ActiveJobs    []model.JobApplication    `json:"active_jobs"`
+	TrashCount    int                       `json:"trash_count"`
 }
 
 // ProjectSummaryItem pairs a project with its task counts by status.
@@ -254,12 +254,12 @@ type MoveTaskParams struct {
 }
 
 type ListJobsParams struct {
-	View        string             `json:"view,omitempty"`
-	Query       string             `json:"query,omitempty"`
-	Stage       model.JobStage     `json:"stage,omitempty"`
-	Outcome     model.JobOutcome   `json:"outcome,omitempty"`
-	AppliedDate string             `json:"applied_date,omitempty"`
-	Sort        string             `json:"sort,omitempty"`
+	View        string           `json:"view,omitempty"`
+	Query       string           `json:"query,omitempty"`
+	Stage       model.JobStage   `json:"stage,omitempty"`
+	Outcome     model.JobOutcome `json:"outcome,omitempty"`
+	AppliedDate string           `json:"applied_date,omitempty"`
+	Sort        string           `json:"sort,omitempty"`
 }
 
 type ListJobsResult struct {

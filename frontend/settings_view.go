@@ -32,316 +32,316 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 	ui.Scroll(c).Fill().Background(tk.BgLayout).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Padding(28, 48, 56, 48).Gap(32).WidthPercent(100).MaxWidth(960).Children(func() {
-			if w.IsBusy() {
-				ui.Row(c.Key("settings-busy-banner")).Padding(12, 16).Gap(12).Radius(16).
-					Background(tk.PrimaryFillQuaternary).
-					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, w.BusyLabel()).FontSize(14).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
-					if uiButton(c, "取消操作", buttonProps{
-						Variant: buttonDefault,
-						Size:    sizeSmall,
-					}).Clicked() {
-						w.CancelBusyTask()
+				if w.IsBusy() {
+					ui.Row(c.Key("settings-busy-banner")).Padding(12, 16).Gap(12).Radius(16).
+						Background(tk.PrimaryFillQuaternary).
+						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, w.BusyLabel()).FontSize(14).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
+						if uiButton(c, "取消操作", buttonProps{
+							Variant: buttonDefault,
+							Size:    sizeSmall,
+						}).Clicked() {
+							w.CancelBusyTask()
+						}
+					})
+				}
+
+				// 1. Appearance (zero nested card/subtitle)
+				ui.Row(c.Key("settings-card-theme")).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "外观").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+
+					beforeIdx := w.themeSegmentIdx
+					uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []segmentedOption{
+						{Label: "跟随系统", Icon: iconMonitor()},
+						{Label: "浅色", Icon: iconSun()},
+						{Label: "深色", Icon: iconMoon()},
+					}, segmentedProps{
+						Size: sizeMiddle,
+					}).Label("主题模式切换")
+					if w.themeSegmentIdx != beforeIdx {
+						switch w.themeSegmentIdx {
+						case 1:
+							w.ApplyThemeSetting(ThemeLight)
+						case 2:
+							w.ApplyThemeSetting(ThemeDark)
+						default:
+							w.ApplyThemeSetting(ThemeSystem)
+						}
 					}
 				})
-			}
 
-			// 1. Appearance (zero nested card/subtitle)
-			ui.Row(c.Key("settings-card-theme")).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-				ui.Text(c, "外观").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+				// 2. Local Data Directory
+				ui.Column(c.Key("settings-card-datadir")).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "数据目录").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 
-				beforeIdx := w.themeSegmentIdx
-				uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []segmentedOption{
-					{Label: "跟随系统", Icon: iconMonitor()},
-					{Label: "浅色", Icon: iconSun()},
-					{Label: "深色", Icon: iconMoon()},
-				}, segmentedProps{
-					Size: sizeMiddle,
-				}).Label("主题模式切换")
-				if w.themeSegmentIdx != beforeIdx {
-					switch w.themeSegmentIdx {
-					case 1:
-						w.ApplyThemeSetting(ThemeLight)
-					case 2:
-						w.ApplyThemeSetting(ThemeDark)
-					default:
-						w.ApplyThemeSetting(ThemeSystem)
-					}
-				}
-			})
+					dataDir := w.app.DataDir()
+					ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
+						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, dataDir).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).Grow(1).SingleLine()
 
-			// 2. Local Data Directory
-			ui.Column(c.Key("settings-card-datadir")).Gap(12).AlignSelf(ui.Stretch).Children(func() {
-				ui.Text(c, "数据目录").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
-
-				dataDir := w.app.DataDir()
-				ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
-					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, dataDir).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).Grow(1).SingleLine()
-
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-						if uiButton(c, "复制路径", buttonProps{
-							Variant: buttonText,
-							Size:    sizeSmall,
-						}).Clicked() {
-							c.Services().WriteClipboard(dataDir)
-						}
-						if uiButton(c, "在 Finder 中打开", buttonProps{
-							Variant: buttonText,
-							Size:    sizeSmall,
-						}).Clicked() {
-							if w.host.OpenPath != nil {
-								_ = w.host.OpenPath(dataDir)
-							} else if w.host.RevealPath != nil {
-								_ = w.host.RevealPath(dataDir)
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+							if uiButton(c, "复制路径", buttonProps{
+								Variant: buttonText,
+								Size:    sizeSmall,
+							}).Clicked() {
+								c.Services().WriteClipboard(dataDir)
 							}
-						}
-					})
-				})
-			})
-
-			// 3. Automatic Local Backup
-			ui.Column(c.Key("settings-card-backup-auto")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
-				ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "自动备份").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
-
-					ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
-						beforeEn := w.backupEnabled
-						uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled).
-							Label("启用自动备份开关")
-						if w.backupEnabled != beforeEn {
-							w.SaveBackupPolicy()
-						}
+							if uiButton(c, "在 Finder 中打开", buttonProps{
+								Variant: buttonText,
+								Size:    sizeSmall,
+							}).Clicked() {
+								if w.host.OpenPath != nil {
+									_ = w.host.OpenPath(dataDir)
+								} else if w.host.RevealPath != nil {
+									_ = w.host.RevealPath(dataDir)
+								}
+							}
+						})
 					})
 				})
 
-				lastSuccessStr := "尚无记录"
-				if !w.backupStatus.LastSuccess.IsZero() {
-					lastSuccessStr = w.backupStatus.LastSuccess.Local().Format("2006-01-02 15:04:05")
-				}
-				ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
-					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "最近备份 · "+lastSuccessStr).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
+				// 3. Automatic Local Backup
+				ui.Column(c.Key("settings-card-backup-auto")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+					ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "自动备份").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 
-					if uiButton(c, "立即检查到期备份", buttonProps{
-						Variant: buttonText,
-						Size:    sizeSmall,
-					}).Disabled(w.IsBusy()).Clicked() {
-						w.RunDueBackupNow()
+						ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
+							beforeEn := w.backupEnabled
+							uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled).
+								Label("启用自动备份开关")
+							if w.backupEnabled != beforeEn {
+								w.SaveBackupPolicy()
+							}
+						})
+					})
+
+					lastSuccessStr := "尚无记录"
+					if !w.backupStatus.LastSuccess.IsZero() {
+						lastSuccessStr = w.backupStatus.LastSuccess.Local().Format("2006-01-02 15:04:05")
 					}
-				})
+					ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
+						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "最近备份 · "+lastSuccessStr).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 
-				errMsg := w.backupStatus.LastError
-				if errMsg == "" {
-					errMsg = w.LastAsyncError()
-				}
-				if errMsg != "" {
-					uiAlert(c.Key("settings-backup-err"), "最近一次自动备份失败", alertProps{
-						Type:        alertError,
-						Description: errMsg,
-					})
-				}
-
-				ui.Row(c.Key("settings-backup-freq-keep")).Gap(20).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
-					ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
-						ui.Text(c, "备份频率").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
-						beforeInt := w.backupIntervalSelect
-						uiSelect(c.Key("backup-interval-select"), &w.backupIntervalSelect, selectProps{
-							Options: withCurrentOption(backupIntervalOptions, w.backupIntervalSelect, intervalLabel(parseIntervalOption(w.backupIntervalSelect))),
-						}).Label("自动备份频率选择")
-						if w.backupIntervalSelect != beforeInt {
-							w.SaveBackupPolicy()
+						if uiButton(c, "立即检查到期备份", buttonProps{
+							Variant: buttonText,
+							Size:    sizeSmall,
+						}).Disabled(w.IsBusy()).Clicked() {
+							w.RunDueBackupNow()
 						}
 					})
 
-					ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
-						ui.Text(c, "保留份数").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
-						beforeKeep := w.backupKeepSelect
-						uiSelect(c.Key("backup-keep-select"), &w.backupKeepSelect, selectProps{
-							Options: withCurrentOption(backupKeepOptions, w.backupKeepSelect, "保留最近 "+w.backupKeepSelect+" 份"),
-						}).Label("自动备份保留份数选择")
-						if w.backupKeepSelect != beforeKeep {
-							w.SaveBackupPolicy()
-						}
-					})
-				})
+					errMsg := w.backupStatus.LastError
+					if errMsg == "" {
+						errMsg = w.LastAsyncError()
+					}
+					if errMsg != "" {
+						uiAlert(c.Key("settings-backup-err"), "最近一次自动备份失败", alertProps{
+							Type:        alertError,
+							Description: errMsg,
+						})
+					}
 
-				ui.Column(c.Key("settings-backup-dir")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "备份目录").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
-					ui.Row(c).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-						ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-							inp := uiInput(c.Key("backup-dir-input"), &w.backupDirInput, inputProps{
-								Placeholder: filepath.Join(w.app.DataDir(), "backups"),
-							}).Label("自动备份目录输入框")
-							if inp.Submitted() {
+					ui.Row(c.Key("settings-backup-freq-keep")).Gap(20).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+						ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
+							ui.Text(c, "备份频率").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+							beforeInt := w.backupIntervalSelect
+							uiSelect(c.Key("backup-interval-select"), &w.backupIntervalSelect, selectProps{
+								Options: withCurrentOption(backupIntervalOptions, w.backupIntervalSelect, intervalLabel(parseIntervalOption(w.backupIntervalSelect))),
+							}).Label("自动备份频率选择")
+							if w.backupIntervalSelect != beforeInt {
 								w.SaveBackupPolicy()
 							}
 						})
 
-						if uiButton(c, "选择目录...", buttonProps{
-							Variant: buttonDefault,
-						}).Disabled(w.IsBusy()).Clicked() {
-							if pick := w.host.PickDirectory; pick != nil {
-								curDir := w.backupDirInput
-								w.runDialog(func() func() {
-									dir, err := pick("选择自动备份存储目录", curDir)
-									if err != nil || dir == "" {
-										return nil
-									}
-									return func() {
-										w.backupDirInput = dir
-										w.SaveBackupPolicy()
-									}
-								})
+						ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
+							ui.Text(c, "保留份数").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+							beforeKeep := w.backupKeepSelect
+							uiSelect(c.Key("backup-keep-select"), &w.backupKeepSelect, selectProps{
+								Options: withCurrentOption(backupKeepOptions, w.backupKeepSelect, "保留最近 "+w.backupKeepSelect+" 份"),
+							}).Label("自动备份保留份数选择")
+							if w.backupKeepSelect != beforeKeep {
+								w.SaveBackupPolicy()
 							}
-						}
-
-						if uiButton(c, "保存策略", buttonProps{
-							Variant: buttonDefault,
-						}).Clicked() {
-							w.SaveBackupPolicy()
-						}
-					})
-				})
-
-				// Collapsible Managed Backup History (Auto & Pre-Restore Safety Backups)
-				if len(w.managedBackups) > 0 {
-					ui.Column(c.Key("settings-backup-history")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-						toggleLabel := fmt.Sprintf("历史备份记录 (%d)", len(w.managedBackups))
-						toggleBtn := ui.ButtonBase(c.Key("toggle-backup-history")).Padding(4, 0).Gap(6).
-							AlignItems(ui.Center).Cursor(ui.CursorPointer).TextColor(tk.TextSecondary).
-							Label("切换历史备份记录")
-						if toggleBtn.Hovered() {
-							toggleBtn.TextColor(tk.Text)
-						}
-						toggleBtn.Children(func() {
-							chev := iconChevronRight()
-							if w.backupHistoryExpanded {
-								chev = iconChevronDown()
-							}
-							ui.Icon(c, chev).FontSize(14)
-							ui.Text(c, toggleLabel).FontSize(14).FontWeight(500).SingleLine()
 						})
-						if toggleBtn.Clicked() {
-							w.backupHistoryExpanded = !w.backupHistoryExpanded
-						}
+					})
 
-						if w.backupHistoryExpanded {
-							ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-								for i, item := range w.managedBackups {
-									b := item
-									kindLabel := "自动备份"
-									kindColor := tk.TextSecondary
-									if b.Kind == "safety" {
-										kindLabel = "安全备份"
-										kindColor = tk.Primary
-									}
-									ts := b.CreatedAt.Local().Format("2006-01-02 15:04:05")
-									baseName := filepath.Base(b.Path)
-									ui.Row(c.Key(fmt.Sprintf("backup-hist-%d", i))).Padding(10, 14).Gap(12).Radius(12).
-										Background(tk.FillTertiary).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-										AlignSelf(ui.Stretch).Children(func() {
-										ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-											ui.Text(c, kindLabel).FontSize(13).FontWeight(600).TextColor(kindColor).SingleLine().Shrink(0)
-											ui.Text(c, ts).Font("monospace").FontSize(13).TextColor(tk.TextSecondary).SingleLine().Shrink(0)
-											ui.Text(c, baseName).Font("monospace").FontSize(13).TextColor(tk.Text).Grow(1).SingleLine()
-										})
-										ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-											if uiButton(c.Key(fmt.Sprintf("reveal-bk-%d", i)), "Finder", buttonProps{
-												Variant: buttonText,
-												Size:    sizeSmall,
-											}).Label("在 Finder 中显示备份 " + baseName).Clicked() {
-												if w.host.RevealPath != nil {
-													_ = w.host.RevealPath(b.Path)
-												} else if w.host.OpenPath != nil {
-													_ = w.host.OpenPath(filepath.Dir(b.Path))
-												}
-											}
-											if uiButton(c.Key(fmt.Sprintf("restore-bk-%d", i)), "恢复", buttonProps{
-												Variant: buttonText,
-												Size:    sizeSmall,
-											}).Disabled(w.IsBusy()).Label("恢复备份 " + baseName).Clicked() {
-												if w.IsBusy() {
-													return
-												}
-												if err := w.flushPendingOrRevealDraft(); err != nil {
-													return
-												}
-												w.RequestRestoreBackup(b.Path)
-											}
-										})
-									})
+					ui.Column(c.Key("settings-backup-dir")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "备份目录").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+						ui.Row(c).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+							ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+								inp := uiInput(c.Key("backup-dir-input"), &w.backupDirInput, inputProps{
+									Placeholder: filepath.Join(w.app.DataDir(), "backups"),
+								}).Label("自动备份目录输入框")
+								if inp.Submitted() {
+									w.SaveBackupPolicy()
 								}
 							})
-						}
+
+							if uiButton(c, "选择目录...", buttonProps{
+								Variant: buttonDefault,
+							}).Disabled(w.IsBusy()).Clicked() {
+								if pick := w.host.PickDirectory; pick != nil {
+									curDir := w.backupDirInput
+									w.runDialog(func() func() {
+										dir, err := pick("选择自动备份存储目录", curDir)
+										if err != nil || dir == "" {
+											return nil
+										}
+										return func() {
+											w.backupDirInput = dir
+											w.SaveBackupPolicy()
+										}
+									})
+								}
+							}
+
+							if uiButton(c, "保存策略", buttonProps{
+								Variant: buttonDefault,
+							}).Clicked() {
+								w.SaveBackupPolicy()
+							}
+						})
 					})
-				}
-			})
 
-			// 4. Manual Backup Export & Full Restore
-			ui.Column(c.Key("settings-card-backup-manual")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
-				ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Text(c, "手动备份与恢复").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+					// Collapsible Managed Backup History (Auto & Pre-Restore Safety Backups)
+					if len(w.managedBackups) > 0 {
+						ui.Column(c.Key("settings-backup-history")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+							toggleLabel := fmt.Sprintf("历史备份记录 (%d)", len(w.managedBackups))
+							toggleBtn := ui.ButtonBase(c.Key("toggle-backup-history")).Padding(4, 0).Gap(6).
+								AlignItems(ui.Center).Cursor(ui.CursorPointer).TextColor(tk.TextSecondary).
+								Label("切换历史备份记录")
+							if toggleBtn.Hovered() {
+								toggleBtn.TextColor(tk.Text)
+							}
+							toggleBtn.Children(func() {
+								chev := iconChevronRight()
+								if w.backupHistoryExpanded {
+									chev = iconChevronDown()
+								}
+								ui.Icon(c, chev).FontSize(14)
+								ui.Text(c, toggleLabel).FontSize(14).FontWeight(500).SingleLine()
+							})
+							if toggleBtn.Clicked() {
+								w.backupHistoryExpanded = !w.backupHistoryExpanded
+							}
 
-					ui.Row(c.Key("settings-manual-actions")).Gap(12).AlignItems(ui.Center).Children(func() {
-						if uiButton(c, "从备份包恢复 (.zip)...", buttonProps{
-							Variant: buttonDefault,
-						}).Disabled(w.IsBusy()).Clicked() {
-							if w.IsBusy() {
-								return
-							}
-							if err := w.flushPendingOrRevealDraft(); err != nil {
-								return
-							}
-							if pick := w.host.PickOpenFiles; pick != nil {
-								w.runDialog(func() func() {
-									paths, err := pick("选择要恢复的 Aion 备份包 (.zip)", false, "zip")
-									if err != nil || len(paths) == 0 {
-										return nil
-									}
-									return func() {
-										w.RequestRestoreBackup(paths[0])
+							if w.backupHistoryExpanded {
+								ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+									for i, item := range w.managedBackups {
+										b := item
+										kindLabel := "自动备份"
+										kindColor := tk.TextSecondary
+										if b.Kind == "safety" {
+											kindLabel = "安全备份"
+											kindColor = tk.Primary
+										}
+										ts := b.CreatedAt.Local().Format("2006-01-02 15:04:05")
+										baseName := filepath.Base(b.Path)
+										ui.Row(c.Key(fmt.Sprintf("backup-hist-%d", i))).Padding(10, 14).Gap(12).Radius(12).
+											Background(tk.FillTertiary).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+											AlignSelf(ui.Stretch).Children(func() {
+											ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+												ui.Text(c, kindLabel).FontSize(13).FontWeight(600).TextColor(kindColor).SingleLine().Shrink(0)
+												ui.Text(c, ts).Font("monospace").FontSize(13).TextColor(tk.TextSecondary).SingleLine().Shrink(0)
+												ui.Text(c, baseName).Font("monospace").FontSize(13).TextColor(tk.Text).Grow(1).SingleLine()
+											})
+											ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+												if uiButton(c.Key(fmt.Sprintf("reveal-bk-%d", i)), "Finder", buttonProps{
+													Variant: buttonText,
+													Size:    sizeSmall,
+												}).Label("在 Finder 中显示备份 " + baseName).Clicked() {
+													if w.host.RevealPath != nil {
+														_ = w.host.RevealPath(b.Path)
+													} else if w.host.OpenPath != nil {
+														_ = w.host.OpenPath(filepath.Dir(b.Path))
+													}
+												}
+												if uiButton(c.Key(fmt.Sprintf("restore-bk-%d", i)), "恢复", buttonProps{
+													Variant: buttonText,
+													Size:    sizeSmall,
+												}).Disabled(w.IsBusy()).Label("恢复备份 " + baseName).Clicked() {
+													if w.IsBusy() {
+														return
+													}
+													if err := w.flushPendingOrRevealDraft(); err != nil {
+														return
+													}
+													w.RequestRestoreBackup(b.Path)
+												}
+											})
+										})
 									}
 								})
 							}
-						}
-
-						if uiButton(c, "导出完整备份 (.zip)", buttonProps{
-							Variant: buttonPrimary,
-						}).Disabled(w.IsBusy()).Clicked() {
-							w.PickAndExportManualBackup()
-						}
-					})
+						})
+					}
 				})
 
-				if w.lastExportedZipPath != "" {
-					uiAlert(c.Key("settings-export-alert"), "已导出备份", alertProps{
-						Type:        alertSuccess,
-						Description: w.lastExportedZipPath,
+				// 4. Manual Backup Export & Full Restore
+				ui.Column(c.Key("settings-card-backup-manual")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+					ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "手动备份与恢复").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+
+						ui.Row(c.Key("settings-manual-actions")).Gap(12).AlignItems(ui.Center).Children(func() {
+							if uiButton(c, "从备份包恢复 (.zip)...", buttonProps{
+								Variant: buttonDefault,
+							}).Disabled(w.IsBusy()).Clicked() {
+								if w.IsBusy() {
+									return
+								}
+								if err := w.flushPendingOrRevealDraft(); err != nil {
+									return
+								}
+								if pick := w.host.PickOpenFiles; pick != nil {
+									w.runDialog(func() func() {
+										paths, err := pick("选择要恢复的 Aion 备份包 (.zip)", false, "zip")
+										if err != nil || len(paths) == 0 {
+											return nil
+										}
+										return func() {
+											w.RequestRestoreBackup(paths[0])
+										}
+									})
+								}
+							}
+
+							if uiButton(c, "导出完整备份 (.zip)", buttonProps{
+								Variant: buttonPrimary,
+							}).Disabled(w.IsBusy()).Clicked() {
+								w.PickAndExportManualBackup()
+							}
+						})
 					})
-				}
 
-				if w.lastRestoreError != "" {
-					uiAlert(c.Key("settings-restore-error"), "备份恢复失败", alertProps{
-						Type:        alertError,
-						Description: w.lastRestoreError,
-					})
-				} else if w.lastRestoreResult != nil {
-					uiAlert(c.Key("settings-restore-alert"), "数据已完整恢复", alertProps{
-						Type:        alertSuccess,
-						Description: fmt.Sprintf("安全备份：%s", w.lastRestoreResult.SafetyBackupPath),
-					})
-				}
-			})
+					if w.lastExportedZipPath != "" {
+						uiAlert(c.Key("settings-export-alert"), "已导出备份", alertProps{
+							Type:        alertSuccess,
+							Description: w.lastExportedZipPath,
+						})
+					}
 
-			// 5. Workspace Modules Visibility
-			w.renderSettingsModulesCard(c, tk)
+					if w.lastRestoreError != "" {
+						uiAlert(c.Key("settings-restore-error"), "备份恢复失败", alertProps{
+							Type:        alertError,
+							Description: w.lastRestoreError,
+						})
+					} else if w.lastRestoreResult != nil {
+						uiAlert(c.Key("settings-restore-alert"), "数据已完整恢复", alertProps{
+							Type:        alertSuccess,
+							Description: fmt.Sprintf("安全备份：%s", w.lastRestoreResult.SafetyBackupPath),
+						})
+					}
+				})
 
-			// 6. Local AI / MCP Integration
-			w.renderSettingsMCPCard(c, tk)
+				// 5. Workspace Modules Visibility
+				w.renderSettingsModulesCard(c, tk)
 
-			// 7. App Version & Updates
-			w.renderSettingsUpdatesCard(c, tk)
+				// 6. Local AI / MCP Integration
+				w.renderSettingsMCPCard(c, tk)
+
+				// 7. App Version & Updates
+				w.renderSettingsUpdatesCard(c, tk)
 			})
 		})
 	})
