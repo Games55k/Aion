@@ -20,7 +20,6 @@ import (
 
 	"aion/backend/model"
 	"aion/backend/store"
-	"golang.org/x/sys/unix"
 )
 
 type Service struct{ store *store.Store }
@@ -128,13 +127,12 @@ func (s *Service) publishImport(ctx context.Context, db *sql.DB, stagedPath stri
 	defer dir.Close()
 	// A hard link publishes the already-synced file without replacing a name
 	// that exists. Use the open directory to keep publication and rollback rooted.
-	fd := int(dir.Fd())
-	if err := unix.Linkat(unix.AT_FDCWD, stagedPath, fd, a.StorageName, 0); err != nil {
-		return &os.LinkError{Op: "link", Old: stagedPath, New: filepath.Join(dir.Name(), a.StorageName), Err: err}
+	if err := linkStagedInManagedDir(stagedPath, dir, a.StorageName); err != nil {
+		return err
 	}
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, unix.Unlinkat(fd, a.StorageName, 0))
+			err = errors.Join(err, unlinkInManagedDir(dir, a.StorageName))
 		}
 	}()
 	a.CreatedAt = time.Now().UTC()
@@ -428,45 +426,12 @@ func openRegular(path string) (*os.File, error) {
 	if !info.Mode().IsRegular() {
 		return nil, model.ErrInvalid
 	}
-	file, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	file, err := openReadOnlyNoFollow(path)
 	if err != nil {
 		return nil, err
 	}
 	opened, err := file.Stat()
 	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
-		_ = file.Close()
-		return nil, errors.Join(model.ErrInvalid, err)
-	}
-	return file, nil
-}
-
-func (s *Service) openManagedDir() (*os.File, error) {
-	dir, err := os.OpenFile(s.store.AttachmentsDir(), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
-	if errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
-		return nil, errors.Join(model.ErrInvalid, err)
-	}
-	return dir, err
-}
-
-func (s *Service) openManaged(name string) (*os.File, error) {
-	if !safeName(name) {
-		return nil, model.ErrInvalid
-	}
-	dir, err := s.openManagedDir()
-	if err != nil {
-		return nil, err
-	}
-	defer dir.Close()
-	// os.Root.OpenFile resolves in-root symlinks. Open the single validated
-	// filename against the pinned directory so the kernel rejects symlinks.
-	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	path := filepath.Join(dir.Name(), name)
-	if err != nil {
-		return nil, &os.PathError{Op: "openat", Path: path, Err: err}
-	}
-	file := os.NewFile(uintptr(fd), path)
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
 		return nil, errors.Join(model.ErrInvalid, err)
 	}

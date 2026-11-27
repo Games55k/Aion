@@ -23,7 +23,6 @@ import (
 
 	"aion/backend/model"
 	"aion/backend/store"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -128,7 +127,7 @@ func openRegular(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	f, err := openRegularNoFollow(path)
 	if err != nil {
 		return nil, err
 	}

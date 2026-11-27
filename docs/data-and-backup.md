@@ -1,21 +1,21 @@
 # 数据存储、备份与回收站
 
-Aion 所有数据 100% 存储在本地 Mac，不依赖云服务。本文档说明本地目录布局、受管附件、备份与恢复、Schema 升级及回收站清理机制。
+Aion 所有数据 100% 存储在本地设备，不依赖云服务。本文档说明本地目录布局、受管附件、备份与恢复、Schema 升级及回收站清理机制。
 
 ## 数据目录结构
 
-默认数据目录位于 macOS 标准应用支持路径（也可通过 `-data-dir <路径>` 启动独立实例）：
+默认数据目录位于系统标准应用配置路径（macOS：`~/Library/Application Support/Aion/`；Windows：`%AppData%\Aion\`；也可通过 `-data-dir <路径>` 启动独立实例）：
 
 ```text
-~/Library/Application Support/Aion/
+<数据目录>/
 ├── aion.sqlite          # SQLite 主数据库（Schema v3：项目、任务、子任务、求职投递与时间线、回收站、设置）
 ├── attachments/         # 受管本地附件存储
 ├── backups/             # 自动快照（auto-*.zip）与恢复前安全备份（safety-*.zip）
-├── aion.sock            # 桌面端运行期间的本地 IPC Unix Socket（0600，退出自动清理，不纳入备份）
+├── aion.sock            # 桌面端运行期间的本地 IPC Socket（退出自动清理，不纳入备份）
 └── .updater-state.json  # 本机更新检查运行态（最近检查时间与已跳过版本，不随备份恢复覆盖）
 ```
 
-> 注：若自定义 `-data-dir` 路径过长导致超过 macOS Unix Socket 路径长度限制，本地 IPC Socket 会自动回退到当前用户独占（`0700`）的 `/tmp/aion-ipc-<uid>/` 目录，并沿用非符号链接校验。求职网站图标的本地磁盘缓存独立存放在系统用户缓存目录（`~/Library/Caches/Aion/favicons/`），不占用数据目录且不纳入备份包。
+> 注：若自定义 `-data-dir` 路径过长导致超过本地 Socket 路径长度限制，本地 IPC Socket 会自动回退到系统临时目录下的专属目录（macOS 为 `0700` 权限的 `/tmp/aion-ipc-<uid>/`，Windows 为 `%TEMP%\aion-ipc\`），并沿用非符号链接校验。求职网站图标的本地磁盘缓存独立存放在系统用户缓存目录（macOS 为 `~/Library/Caches/Aion/favicons/`，Windows 为 `%LocalAppData%\Aion\favicons\`），不占用数据目录且不纳入备份包。
 
 ## 本地受管附件
 

@@ -8,13 +8,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
-	"syscall"
 	"time"
 
 	"aion/backend"
-
-	"golang.org/x/sys/unix"
 )
 
 // Router executes local RPC calls transparently against a running Aion GUI
@@ -176,23 +172,4 @@ func callViaSocket(ctx context.Context, sockPath, method string, rawParams json.
 		return nil, false, resp.Error
 	}
 	return resp.Result, false, nil
-}
-
-func isSocketUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, os.ErrNotExist) ||
-		errors.Is(err, syscall.ENOENT) ||
-		errors.Is(err, syscall.ECONNREFUSED) ||
-		errors.Is(err, syscall.ENOTSOCK)
-}
-
-func isLockBusyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, unix.EWOULDBLOCK) ||
-		errors.Is(err, unix.EAGAIN) ||
-		strings.Contains(err.Error(), "data directory is already open")
 }

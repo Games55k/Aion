@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 const (
@@ -44,8 +43,8 @@ func SocketPath(dataDir string) (string, error) {
 		return direct, nil
 	}
 
-	// Fallback directory owned exclusively by the current UID for deep paths.
-	fallbackDir := filepath.Join("/tmp", fmt.Sprintf("aion-ipc-%d", os.Getuid()))
+	// Fallback directory owned exclusively by the current user for deep paths.
+	fallbackDir := fallbackSocketDir()
 	if err := ensurePrivateDir(fallbackDir); err != nil {
 		return "", err
 	}
@@ -64,15 +63,7 @@ func ensurePrivateDir(dir string) error {
 	if st.Mode()&os.ModeSymlink != 0 || !st.IsDir() {
 		return fmt.Errorf("unsafe socket directory: %s", dir)
 	}
-	if stat, ok := st.Sys().(*syscall.Stat_t); ok && int(stat.Uid) != os.Getuid() {
-		return fmt.Errorf("socket directory owned by unexpected user: %s", dir)
-	}
-	if st.Mode().Perm() != 0o700 {
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkPrivateDirOwner(dir, st)
 }
 
 func validateSocketPath(path string) error {

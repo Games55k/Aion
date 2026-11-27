@@ -246,3 +246,91 @@ jobs:
             security delete-keychain "$SIGNING_KEYCHAIN" || true
           fi
           security list-keychains -d user -s login.keychain || true
+
+  release-windows:
+    name: Build & Upload Windows Installer (amd64 .exe)
+    needs: release-macos
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v7
+
+      - name: Setup Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Verify release secrets
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MYGO_UPDATER_PRIVATE_KEY" ]; then
+            echo "::error::Missing MYGO_UPDATER_PRIVATE_KEY secret."
+            exit 1
+          fi
+
+      - name: Check existing GitHub Release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | {tag_name, draft}')"
+          drafts="$(jq -sc --arg tag "$GITHUB_REF_NAME" '[.[] | select(.tag_name == $tag) | .draft]' <<<"$releases")"
+          case "$drafts" in
+            '[]') echo "Release $GITHUB_REF_NAME does not exist yet; mygo build -upload will create a draft." ;;
+            '[true]') echo "Draft release $GITHUB_REF_NAME exists; uploading Windows artifacts." ;;
+            *) echo "::error::Release $GITHUB_REF_NAME is published or its draft status could not be verified."; exit 1 ;;
+          esac
+
+      - name: Run Windows build, static checks, and core tests
+        run: |
+          go build ./...
+          go vet ./...
+          go tool mygo vet .
+          go test ./backend/model ./backend/projects ./backend/jobapplications ./cli ./mcp
+
+      - name: Build and upload Windows exe installer and update artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: go tool mygo build -platform windows/amd64 -upload
+
+      - name: Verify Windows artifacts, merged checksums, and draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(jq -r .version mygo.json)"
+          manifest="build/windows-amd64/update-windows-amd64.json"
+          test -f "build/windows-amd64/Aion.exe"
+          test -f "build/windows-amd64/aion-setup-${version}-amd64.exe"
+          test -f "$manifest"
+          test "$(jq -r .version "$manifest")" = "$version"
+
+          (cd build/windows-amd64 && sha256sum -c --ignore-missing ../SHA256SUMS)
+          for expected_sum in "aion-${version}.dmg" "aion-setup-${version}-amd64.exe" "aion-${version}-windows-amd64.tar.gz" "install.ps1"; do
+            if ! grep -Fq "  ${expected_sum}" build/SHA256SUMS; then
+              echo "::error::Merged SHA256SUMS is missing expected entry: $expected_sum"
+              exit 1
+            fi
+          done
+
+          release_info="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)"
+          printf '%s\n' "$release_info" | jq '{isDraft, assets: [.assets[].name]}'
+          test "$(printf '%s' "$release_info" | jq -r '.isDraft')" = "true"
+          for required in \
+            "aion-${version}.dmg" \
+            "aion-${version}-darwin-universal.tar.gz" \
+            "update-darwin-universal.json" \
+            "install.sh" \
+            "aion-setup-${version}-amd64.exe" \
+            "aion-${version}-windows-amd64.tar.gz" \
+            "update-windows-amd64.json" \
+            "install.ps1" \
+            "SHA256SUMS"; do
+            if ! printf '%s' "$release_info" | jq -e --arg n "$required" '.assets[] | select(.name == $n)' >/dev/null; then
+              echo "::error::Draft release is missing expected asset: $required"
+              exit 1
+            fi
+          done

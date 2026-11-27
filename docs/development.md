@@ -1,6 +1,6 @@
 # 开发、测试与发布指南
 
-Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS 原生窗口应用，不打包 Chromium / WebView，也不启动本地 HTTP 服务。
+Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS / Windows 原生窗口应用，不打包 Chromium / WebView，也不启动本地 HTTP 服务。
 
 ## 环境与常用命令
 
@@ -10,10 +10,11 @@ Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS 原生窗�
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
 | `go run . -data-dir /tmp/aion-dev` | 使用独立测试数据目录启动（不影响正式数据） |
-| `go run . mcp [-data-dir <路径>]` | 启动本地 stdio MCP Server（桌面端在线时经 Unix Socket 实时联动，离线时按次直连） |
+| `go run . mcp [-data-dir <路径>]` | 启动本地 stdio MCP Server（桌面端在线时经本地 Socket 实时联动，离线时按次直连） |
 | `go run . summary [-json]` | 通过本地 CLI 查看工作区总览（还支持 `project` / `task` / `job` / `trash` 子命令，可用 `go run . help` 查看） |
 | `go tool mygo dev` | 开发模式运行 |
-| `go tool mygo build` | 构建 macOS 原生 `.app` 与 `.dmg`（默认输出到 `build/darwin-arm64/`；Universal 构建可加 `-platform darwin/universal`） |
+| `go tool mygo build` | 构建当前平台原生安装包（macOS 输出 `.app` 与 `.dmg`，Universal 可加 `-platform darwin/universal`；Windows 输出 `Aion.exe` 与 NSIS 安装包 `aion-setup-<版本>-amd64.exe`） |
+| `go tool mygo build -platform windows/amd64 -skip-installer` | 在 macOS/Linux 上无 CGO 快速交叉编译 Windows `Aion.exe` 验证 |
 | `go test ./...` | 运行入口、后端与无头 UI 交互测试 |
 | `go test -race ./...` | 运行竞态检测测试 |
 | `go vet ./...` | Go 静态分析检查 |
@@ -92,7 +93,7 @@ Aion/
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
 ├── docs/                                   # 详细文档（交互行为、数据与备份、开发发布）
 ├── .github/
-│   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
+│   ├── workflows/release.yml               # 标签触发的 macOS Universal（.dmg）与 Windows amd64（.exe 安装包）构建及草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
 ├── frontend/                               # 原生界面层：工作台状态、顶部悬浮胶囊导航、项目看板、求职投递、回收站、设置与附件预览
 │   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的 Apple 极简设计令牌、控件、弹窗、Markdown 与 1.5px 描边 SVG 图标
@@ -132,7 +133,8 @@ Aion/
 
 ## 发布工作流
 
-GitHub Actions 工作流 `.github/workflows/release.yml` 在推送 `v*` 标签时构建 macOS Universal 包并上传至草稿 Release：
+GitHub Actions 工作流 `.github/workflows/release.yml` 在推送 `v*` 标签时先后构建 macOS Universal（`.dmg`）与 Windows amd64（`aion-setup-<版本>-amd64.exe`）安装包并上传至同一个草稿 Release：
 
-- 标签构建会先查询 GitHub Release；只有查询成功且该版本尚未创建或仍为草稿时，工作流才会继续。
+- 两个平台作业在上传前都会先查询 GitHub Release；只有查询成功且该版本尚未创建或仍为草稿时，工作流才会继续。
+- `release-macos` 完成版本与 `CHANGELOG.md` 校验、完整测试集、签名/公证及草稿上传后，`release-windows` 在 `windows-latest` 上执行构建、静态检查、核心测试，并通过 `go tool mygo build -platform windows/amd64 -upload` 自动打包 NSIS `.exe` 安装包、签名更新归档与合并后的 `SHA256SUMS`。
 - Apple 公证优先使用完整的 API Key 三项凭据，否则使用已通过校验的 Apple ID 凭据；临时签名钥匙串从创建前即登记清理路径，后续导入或公证失败时也会清理。

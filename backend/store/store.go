@@ -16,7 +16,6 @@ import (
 
 	"aion/backend/model"
 
-	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 )
 
@@ -57,13 +56,9 @@ func Open(root string) (*Store, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
+	lock, err := openLockFile(lockPath)
 	if err != nil {
 		return nil, err
-	}
-	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		lock.Close()
-		return nil, fmt.Errorf("data directory is already open: %w", err)
 	}
 	s := &Store{root: root, lock: lock}
 	s.db, err = openDB(s.DBPath(), "rwc")
@@ -81,7 +76,11 @@ func openDB(path, mode string) (*sql.DB, error) {
 	if st, e := os.Lstat(path); e == nil && !st.Mode().IsRegular() {
 		return nil, errors.New("unsafe database path")
 	}
-	u := url.URL{Scheme: "file", Path: path}
+	uriPath := filepath.ToSlash(path)
+	if len(uriPath) >= 2 && uriPath[1] == ':' {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	q := url.Values{}
 	q.Set("mode", mode)
 	q.Add("_pragma", "foreign_keys(1)")
@@ -232,7 +231,7 @@ func (s *Store) Close() error {
 		err = s.db.Close()
 	}
 	if s.lock != nil {
-		err = errors.Join(err, unix.Flock(int(s.lock.Fd()), unix.LOCK_UN), s.lock.Close())
+		err = errors.Join(err, unlockLockFile(s.lock), s.lock.Close())
 	}
 	return err
 }

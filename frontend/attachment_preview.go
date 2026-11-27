@@ -7,7 +7,6 @@ import (
 	"image"
 	"image/color"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
-	"golang.org/x/sys/unix"
 )
 
 var errPreviewTooLarge = errors.New("image exceeds preview resource limit")
@@ -137,7 +135,7 @@ func (w *Workbench) cacheBitmap(id string, bmp *ui.Bitmap) bool {
 }
 
 func loadAttachmentPreview(path string) (*ui.Bitmap, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	f, err := openPreviewFile(path)
 	if err != nil {
 		return nil, err
 	}

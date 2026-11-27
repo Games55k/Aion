@@ -15,7 +15,6 @@ import (
 	"aion/backend/attachments"
 	"aion/backend/model"
 	"aion/backend/store"
-	"golang.org/x/sys/unix"
 )
 
 var ctx = context.Background()
@@ -135,11 +134,11 @@ func TestFailedImportsLeaveNoFilesOrRows(t *testing.T) {
 	if err := os.Symlink(regular, link); err != nil {
 		t.Fatal(err)
 	}
-	fifo := filepath.Join(dir, "fifo")
-	if err := unix.Mkfifo(fifo, 0600); err != nil {
-		t.Fatal(err)
+	badPaths := []string{filepath.Join(dir, "missing"), oversize, link, dir, source(t, "unsafe\\name", "data")}
+	if fifo, ok := createTestFIFO(t, dir); ok {
+		badPaths = append(badPaths, fifo)
 	}
-	for _, path := range []string{filepath.Join(dir, "missing"), oversize, link, fifo, dir, source(t, "unsafe\\name", "data")} {
+	for _, path := range badPaths {
 		if _, err := service.Import(ctx, "t", path); err == nil {
 			t.Errorf("accepted unsafe/missing source %q", path)
 		}
