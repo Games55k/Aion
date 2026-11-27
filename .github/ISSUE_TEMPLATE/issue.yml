@@ -16,13 +16,13 @@ body:
     id: app_version
     attributes:
       label: Aion 版本
-      placeholder: 例如：v0.1.5（可在「设置 → 应用版本与更新」查看）
+      placeholder: 例如：v0.2.0（可在「设置 → 更新」查看）
 
   - type: input
     id: os_version
     attributes:
-      label: macOS 版本
-      placeholder: 例如：macOS 15.3 (Apple Silicon / Intel)
+      label: 操作系统
+      placeholder: 例如：macOS 15.3 (Apple Silicon / Intel) 或 Windows 11 x64
 
   - type: textarea
     id: description

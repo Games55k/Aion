@@ -91,61 +91,34 @@ mygo-automation close
 
 ```text
 Aion/
-├── main.go                                 # 原生窗口宿主入口、`mcp` 子命令分发、应用菜单与系统能力桥接
+├── main.go                                 # 原生窗口宿主入口、CLI/MCP 子命令分发、应用菜单与系统能力桥接
 ├── updater_controller.go                   # 宿主层静默定期检查更新、下载安装进度与重启调度控制器
-├── updater_controller_test.go              # 静默检查、跳过版本、单飞合并、进度取消与旧状态迁移测试
-├── automation_e2e.go                       # e2e 构建标签专用的 MyGo Automation 插件入口
-├── main_test.go                            # 快照输出数据保护、原子替换与 `mcp` 子命令往返回归测试
-├── ipc/                                    # 本地 Unix Socket IPC 服务端、按次降级路由、局部更新处理与安全路径校验
-├── mcp/                                    # 标准 stdio JSON-RPC 2.0 MCP Server 与仅含安全读写/软删的工具集定义
-├── cli/                                    # 复用本地 IPC 路由的轻量 CLI（summary / project / task / job / trash）
-├── cmd/promo/                              # 基于 MyGo Render 插件的 1080p 60fps 项目介绍视频生成器（含实时截屏、8 幕动效与立体声合成配乐）
-├── skills/aion-workbench/SKILL.md          # 面向 Antigravity / Codex 的 Aion 工作流 Skill（可链接到对应 skills 目录）
+├── automation_e2e.go                       # `-tags e2e` 构建专用的 MyGo Automation 插件入口
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
+├── AGENTS.md                               # AI 开发、测试、文档同步与提交规范
+├── REVIEW.md                               # 面向 AI/人工的代码审查契约（风险分级、故障红线、反噪音与收敛规则）
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
-├── REVIEW.md                               # 面向 AI/人工的审查契约（风险分级、Aion 故障红线、反噪音与收敛规则）
 ├── .githooks/                              # 可选本地 Git Hooks（pre-commit 格式化与静态检查、pre-push 测试门禁）
-├── docs/                                   # 详细文档（交互行为、数据与备份、开发发布）
 ├── .github/
 │   ├── CODEOWNERS                          # 高风险目录与策略文件责任人配置
 │   ├── PULL_REQUEST_TEMPLATE.md            # PR 模板（变更摘要、风险分级、测试清单与回滚说明）
-│   ├── workflows/ci.yml                    # push main 与 PR 触发的 macOS/Windows 持续集成工作流
-│   ├── workflows/release.yml               # 标签触发的 macOS Universal（.dmg）与 Windows amd64（.exe 安装包）构建及草稿 Release 工作流
-│   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
-├── frontend/                               # 原生界面层：工作台状态、顶部悬浮胶囊导航、项目看板、求职投递、回收站、设置与附件预览
-│   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的 Apple 极简设计令牌、控件、弹窗、Markdown 与 1.5px 描边 SVG 图标
-│   ├── sidebar.go                          # 顶部悬浮导航胶囊（今天/项目/求职/设置）、右侧工具区（更新/⌘K/回收站/反馈/外观/+新建）
-│   ├── update_modal.go                     # 顶栏更新图标按钮与应用内软件更新弹窗
-│   ├── task_save.go                        # 任务草稿串行保存、合并输入与保存后的导航
-│   ├── job_save.go                         # 求职投递详情草稿校验、串行保存与撤销恢复
-│   ├── job_controller.go                   # 求职投递筛选、分页、流转、重启备注、补录与回收站动作控制
-│   ├── job_favicon.go                      # 求职网站图标异步抓取（PNG/JPEG/GIF/WebP/ICO、HTML/SPA JSON 发现）、有界 LRU/磁盘缓存与首字降级头像
-│   ├── job_applications_view.go            # 求职投递主视图、Offer 转化指标、无边框响应式表格与新增弹窗
-│   ├── job_application_detail_view.go      # 求职投递详情弹窗、流程时间线、备注/补录表单及结束/重启流程弹窗
-│   ├── workbench_load.go                   # 后台加载与过期结果保护
-│   ├── focus_view.go / modules_visibility.go # 跨模块聚焦总览视图（含多维筛选、行内快捷流转与实时同步状态）与工作区模块显隐控制
-│   ├── command_palette.go                  # 全局 ⌘K 命令面板（跨活跃与已归档项目/任务、投递检索与快捷命令）
-│   ├── external_sync.go / mcp_config.go    # 外部 IPC/MCP 变更实时刷新（草稿保护）与 Antigravity/Codex/CLI 配置格式化
-│   ├── record_write.go / settings_write.go # 后台记录操作与设置写入
-│   ├── async_persistence_test.go           # 长持锁输入/导航、保存失败与并发回调回归测试
-│   ├── async_record_write_test.go          # Store 持锁时的看板、表单、回收站和设置写入回归测试
-│   ├── command_palette_test.go             # 全局 ⌘K 命令面板（含已归档检索）、看板截止日筛选、完成时间与备份历史测试
-│   ├── external_sync_test.go               # 外部变更实时刷新、未保存草稿保护与设置页 MCP 配置复制测试
-│   ├── focus_modules_test.go               # 工作区模块显隐持久化、聚焦页筛选/MCP 状态与已结束投递路由测试
-│   ├── job_favicon_test.go                 # 网站图标解码（PNG/ICO）、HTML/SPA 发现、异步加载降级与有界 LRU 缓存测试
-│   ├── workbench_test.go                   # 基于 ui.Tester 的端到端无头 UI 交互测试
-│   └── attachment_preview_test.go          # 图片缩略图解码、方向校正与有界缓存测试
-├── backend/                                # 后端总入口、模块注册、全局回收站分发、设置与自动备份调度生命周期
-│   ├── integration_test.go                 # 跨目录备份迁移、跨模块回收站分发与彻底删除 GC 集成测试
+│   ├── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
+│   └── workflows/                          # `ci.yml`（push main / PR 双平台 CI）与 `release.yml`（标签发版）
+├── docs/                                   # 详细文档（交互行为、数据与备份、开发与发布）
+├── skills/aion-workbench/SKILL.md          # 面向 Antigravity / Codex 的 Aion 工作流 Skill
+├── ipc/                                    # 本地 IPC Socket 服务端、按次降级路由、局部更新处理与跨平台路径校验
+├── mcp/                                    # 标准 stdio JSON-RPC 2.0 MCP Server（仅含安全读写与软删除工具集）
+├── cli/                                    # 复用本地 IPC 路由的轻量 CLI（summary / project / task / job / trash）
+├── cmd/promo/                              # 基于 MyGo Render 插件的 1080p 60fps 项目介绍视频生成器
+├── frontend/                               # 原生界面层：工作台、顶栏导航、今天总览、命令面板、看板、求职、回收站、设置、异步保存与无头 UI 测试
+├── backend/                                # 后端总入口、模块注册、全局回收站分发、设置与自动备份调度
 │   ├── model/                              # 领域模型（项目/任务、求职投递与事件）、状态枚举与哨兵错误定义
-│   ├── store/                              # SQLite 事务、本地 Schema 迁移、跨模块回收站快照查询与读写一致性锁
-│   ├── projects/                           # 项目、任务、三列移动/排序、搜索筛选与回收站服务
+│   ├── store/                              # SQLite 事务、Schema v3 迁移、跨模块回收站快照与读写一致性锁
+│   ├── projects/                           # 项目、任务、三列移动/排序、跨项目搜索筛选与回收站服务
 │   ├── jobapplications/                    # 求职投递记录、事件去重、筛选排序统计、补录与回收站服务
-│   ├── attachments/                        # 本地受管文件导入、导出、路径解析与孤儿文件 GC
-│   └── backup/                             # 全量 ZIP 导出、v1/v2 完整性校验、安全备份与自动轮转
-└── assets/
-    ├── icon/                               # Aion 品牌图标源文件（SVG）、打包用 PNG 与 Go 嵌入封装（icon.go）
-    └── screenshot.png                      # 无头渲染的界面预览截图（1440×900）
+│   ├── attachments/                        # 本地受管文件暂存导入、导出、路径解析与孤儿文件 GC
+│   └── backup/                             # 全量 ZIP 导出、Schema v3 完整性校验、安全备份与自动轮转
+└── assets/                                 # 品牌图标源文件与无头渲染预览截图（screenshot.png）
 ```
 
 ## 发布工作流

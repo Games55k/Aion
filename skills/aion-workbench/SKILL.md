@@ -1,6 +1,6 @@
 ---
 name: aion-workbench
-description: Work with the user's local Aion macOS workbench via Aion MCP tools (projects, Kanban tasks, attachments, job applications, timelines, and trash). Use when the user asks to plan tasks, inspect today's focus, log or update job applications from a JD or interview notes, attach local files to tasks, or review progress in Aion.
+description: Work with the user's local Aion desktop workbench (macOS / Windows) via Aion MCP tools (projects, Kanban tasks, attachments, job applications, timelines, and trash). Use when the user asks to plan tasks, inspect today's focus, log or update job applications from a JD or interview notes, attach local files to tasks, or review progress in Aion.
 ---
 
 # Aion Local Workbench Skill
