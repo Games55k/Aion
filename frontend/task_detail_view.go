@@ -37,9 +37,9 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 
 	var panelDismissed bool
 	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
-		backdrop.Padding(32, 24).Background(tk.BgContainer.Alpha(0.6))
-		panel.Width(720).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
-			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
+		backdrop.Padding(20).Background(ui.RGBA(24, 24, 24, 0.24)).Justify(ui.End).AlignItems(ui.Stretch)
+		panel.Width(580).MaxWidthPercent(100).MaxHeightPercent(100).Radius(24).Clip().
+			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("任务详情弹窗")
 		tk.Elevate(panel, boxShadow)
 
@@ -53,9 +53,9 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 		}
 
 		panel.Children(func() {
-			// 1. Top Header Bar: Save status + Delete + Close
-			ui.Row(c).Padding(14, 18).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-				AlignSelf(ui.Stretch).Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			// 1. Top Header Bar: Save status + Delete + Close (zero bottom divider clutter)
+			ui.Row(c).Padding(20, 24, 12, 24).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+				AlignSelf(ui.Stretch).Shrink(0).Children(func() {
 				// Save status indicator
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
 					if deleting {
@@ -125,8 +125,8 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 				ui.Column(c).Padding(16, 18, 20, 18).Gap(18).AlignSelf(ui.Stretch).Children(func() {
 					// Background Operation Banner
 					if w.IsBusy() {
-						ui.Row(c.Key("detail-busy-banner")).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
-							Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
+						ui.Row(c.Key("detail-busy-banner")).Padding(12, 16).Gap(12).Radius(12).
+							Background(tk.PrimaryFillQuaternary).
 							AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 							ui.Text(c, w.BusyLabel()).FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
 							if uiButton(c, "取消操作", buttonProps{
@@ -266,13 +266,19 @@ func (w *Workbench) renderTaskDetailModal(c *ui.Context, tk *uiTokens) {
 					// Section F: Local Attachments
 					w.renderAttachmentsSection(c, tk)
 
-					// Section G: Metadata Timestamps
-					ui.Row(c.Key("detail-sec-timestamps")).Padding(12, 0, 0, 0).Justify(ui.SpaceBetween).AlignItems(ui.Center).
-						AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
-						ui.Text(c, "创建于 "+t.CreatedAt.Local().Format("2006-01-02 15:04:05")).
-							FontSize(11).TextColor(tk.TextTertiary).SingleLine()
-						ui.Text(c, "更新于 "+t.UpdatedAt.Local().Format("2006-01-02 15:04:05")).
-							FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+					// Section G: Metadata Timestamps (Created / Updated / Completed)
+					ui.Row(c.Key("detail-sec-timestamps")).Padding(8, 0, 0, 0).Gap(12).Wrap().AlignItems(ui.Center).
+						AlignSelf(ui.Stretch).Children(func() {
+						ui.Text(c, "创建于 "+t.CreatedAt.Local().Format("2006-01-02 15:04")).
+							Font("monospace").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+						ui.Text(c, "·").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+						ui.Text(c, "更新于 "+t.UpdatedAt.Local().Format("2006-01-02 15:04")).
+							Font("monospace").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+						if t.CompletedAt != nil {
+							ui.Text(c, "·").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+							ui.Text(c, "完成于 "+t.CompletedAt.Local().Format("2006-01-02 15:04")).
+								Font("monospace").FontSize(12).FontWeight(500).TextColor(tk.Primary).SingleLine()
+						}
 					})
 				})
 			})
@@ -668,8 +674,8 @@ func (w *Workbench) renderAttachmentsSection(c *ui.Context, tk *uiTokens) {
 		// Attachment List Rows with Open / Finder / Export / Remove actions
 		ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 			for _, att := range atts {
-				ui.Row(c.Key("att-row-"+att.ID)).Padding(8, 10).Gap(10).Radius(tk.BorderRadiusSM).
-					Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+				ui.Row(c.Key("att-row-"+att.ID)).Padding(12, 12).Gap(12).Radius(12).
+					Background(tk.FillTertiary).
 					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
 						iconSVG := iconFile()

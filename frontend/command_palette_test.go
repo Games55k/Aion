@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -205,5 +206,144 @@ func TestFocusInlineQuickActions(t *testing.T) {
 	gotJob, err := app.JobApplications.Get(ctx, job.ID)
 	if err != nil || gotJob.Stage != model.JobStageInterview2 {
 		t.Fatalf("expected job advanced to interview_2, got %+v err=%v", gotJob, err)
+	}
+}
+
+// Command palette finds archived projects and their tasks, board due-date filter slices tasks accurately, task detail shows CompletedAt, and Settings collapsible backup history exposes auto/safety archives.
+func TestArchivedPaletteBoardDueFilterTaskCompletedAtAndBackupHistory(t *testing.T) {
+	ctx := context.Background()
+	fixedNow := func() time.Time { return time.Date(2026, 11, 26, 10, 0, 0, 0, time.Local) }
+	var revealedPath string
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{
+		Now: fixedNow,
+		RevealPath: func(path string) error {
+			revealedPath = path
+			return nil
+		},
+	})
+
+	// 1. Archived project + task search in ⌘K.
+	archProj, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Legacy Archive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archTask, err := app.Projects.CreateTask(ctx, archProj.ID, projects.TaskInput{
+		Title: "Archived Migration Note",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Projects.ArchiveProject(ctx, archProj.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Active project with overdue, due-soon, undated, and completed tasks.
+	actProj, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Active Board"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	overdueT, err := app.Projects.CreateTask(ctx, actProj.ID, projects.TaskInput{
+		Title:   "Overdue Task",
+		Status:  model.Planned,
+		DueDate: "2026-11-20",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Projects.CreateTask(ctx, actProj.ID, projects.TaskInput{
+		Title:   "Soon Task",
+		Status:  model.InProgress,
+		DueDate: "2026-11-30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Projects.CreateTask(ctx, actProj.ID, projects.TaskInput{
+		Title:  "Undated Task",
+		Status: model.Planned,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doneT, err := app.Projects.CreateTask(ctx, actProj.ID, projects.TaskInput{
+		Title:  "Finished Task",
+		Status: model.Done,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wb.ReloadAll()
+	wb.SelectProject(actProj.ID)
+	tt.Frame()
+
+	// Board due-date quick filters.
+	wb.dueDateFilter = "overdue"
+	wb.applyBoardFilters()
+	if len(wb.filteredTasks) != 1 || wb.filteredTasks[0].ID != overdueT.ID {
+		t.Fatalf("expected only overdue task, got %+v", wb.filteredTasks)
+	}
+	wb.dueDateFilter = "due_soon"
+	wb.applyBoardFilters()
+	if len(wb.filteredTasks) != 1 || wb.filteredTasks[0].Title != "Soon Task" {
+		t.Fatalf("expected only due_soon task, got %+v", wb.filteredTasks)
+	}
+	wb.dueDateFilter = "none"
+	wb.applyBoardFilters()
+	if len(wb.filteredTasks) != 2 {
+		t.Fatalf("expected 2 undated tasks, got %+v", wb.filteredTasks)
+	}
+	wb.ClearBoardFilters()
+	if wb.HasBoardFilters() || len(wb.filteredTasks) != 4 {
+		t.Fatalf("expected cleared board filters restoring all 4 tasks, got %d", len(wb.filteredTasks))
+	}
+
+	// Task detail drawer displays CompletedAt for Done tasks.
+	wb.SelectTask(doneT.ID)
+	tt.Frame()
+	if !tt.HasText("完成于 ") {
+		t.Fatalf("expected CompletedAt timestamp in detail drawer for Done task, got %v", tt.Texts())
+	}
+	wb.ClearSelectedTask()
+	tt.Frame()
+
+	// ⌘K finds archived task and jumps straight to it.
+	wb.OpenCommandPalette()
+	wb.cmdPaletteQuery = "Archived Migration"
+	tt.Frame()
+	if err := tt.Click("命令面板项 Archived Migration Note"); err != nil {
+		t.Fatalf("click archived task in palette: %v", err)
+	}
+	tt.Frame()
+	if wb.activeProjectID != archProj.ID || wb.selectedTaskID != archTask.ID {
+		t.Fatalf("expected palette jump to archived project/task, got proj=%q task=%q", wb.activeProjectID, wb.selectedTaskID)
+	}
+	wb.ClearSelectedTask()
+
+	// Settings collapsible backup history exposes generated auto backup and triggers Finder/restore confirmation.
+	backupPath, err := app.Backups.RunDue(ctx)
+	if err != nil || backupPath == "" {
+		t.Fatalf("RunDue backup failed: path=%q err=%v", backupPath, err)
+	}
+	wb.NavigateTo(NavSettings)
+	wb.ReloadSettings()
+	tt.Frame()
+	if len(wb.managedBackups) == 0 {
+		t.Fatal("expected managedBackups populated in Settings")
+	}
+	if err := tt.Click("切换历史备份记录"); err != nil {
+		t.Fatalf("expand backup history: %v", err)
+	}
+	tt.Frame()
+	baseName := filepath.Base(backupPath)
+	if err := tt.Click("在 Finder 中显示备份 " + baseName); err != nil {
+		t.Fatalf("click reveal backup: %v", err)
+	}
+	if revealedPath != backupPath {
+		t.Fatalf("expected revealedPath %q, got %q", backupPath, revealedPath)
+	}
+	if err := tt.Click("恢复备份 " + baseName); err != nil {
+		t.Fatalf("click restore backup from history: %v", err)
+	}
+	if !wb.confirmRestoreOpen || wb.pendingRestoreZip != backupPath {
+		t.Fatalf("expected restore confirmation modal for %q, got open=%v zip=%q", backupPath, wb.confirmRestoreOpen, wb.pendingRestoreZip)
 	}
 }

@@ -89,18 +89,18 @@ func uiTag(c *ui.Context, label string, p tagProps) ui.Element {
 
 func tagSize(s uiSize, round bool) (height, padding, radius float32) {
 	if s == sizeSmall {
-		height, padding, radius = 20, 4, 3
+		height, padding, radius = 24, 8, 8
 		if round {
-			padding = 8
+			padding = 12
 		}
 	} else {
-		height, padding, radius = 22, 8, 3
+		height, padding, radius = 28, 12, 8
 		if round {
-			padding = 10
+			padding = 12
 		}
 	}
 	if round {
-		radius = 999
+		radius = 40
 	}
 	return height, padding, radius
 }

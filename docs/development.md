@@ -90,29 +90,31 @@ Aion/
 ├── skills/aion-workbench/SKILL.md          # 面向 Antigravity / Codex 的 Aion 工作流 Skill（可链接到对应 skills 目录）
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
-├── docs/                                   # 详细文档与实现计划（交互行为、数据与备份、开发发布、plans/）
+├── docs/                                   # 详细文档（交互行为、数据与备份、开发发布）
 ├── .github/
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal 构建与草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
-├── frontend/                               # 原生界面层：工作台状态、模块切换侧栏、项目看板、求职投递、回收站、设置与附件预览
-│   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的设计令牌、控件、弹窗、Markdown 与 Lucide SVG 图标
-│   ├── sidebar.go                          # 展开/折叠双形态模块切换器、更新图标入口与各模块导航侧栏
-│   ├── update_modal.go                     # 侧边栏更新图标按钮与应用内软件更新弹窗
+├── frontend/                               # 原生界面层：工作台状态、顶部悬浮胶囊导航、项目看板、求职投递、回收站、设置与附件预览
+│   ├── ui_*.go / icons.go                  # 基于 MyGo 原生 UI 封装的 Apple 极简设计令牌、控件、弹窗、Markdown 与 1.5px 描边 SVG 图标
+│   ├── sidebar.go                          # 顶部悬浮导航胶囊（今天/项目/求职/设置）、右侧工具区（更新/⌘K/回收站/反馈/外观/+新建）
+│   ├── update_modal.go                     # 顶栏更新图标按钮与应用内软件更新弹窗
 │   ├── task_save.go                        # 任务草稿串行保存、合并输入与保存后的导航
 │   ├── job_save.go                         # 求职投递详情草稿校验、串行保存与撤销恢复
-│   ├── job_controller.go                   # 求职投递筛选、分页、流转、备注、补录与回收站动作控制
-│   ├── job_applications_view.go            # 求职投递主视图、统计摘要、响应式表格与新增弹窗
-│   ├── job_application_detail_view.go      # 求职投递详情弹窗、流程时间线、备注/补录表单与结束流程弹窗
+│   ├── job_controller.go                   # 求职投递筛选、分页、流转、重启备注、补录与回收站动作控制
+│   ├── job_favicon.go                      # 求职网站图标异步抓取（PNG/JPEG/GIF/WebP/ICO、HTML/SPA JSON 发现）、有界 LRU/磁盘缓存与首字降级头像
+│   ├── job_applications_view.go            # 求职投递主视图、Offer 转化指标、无边框响应式表格与新增弹窗
+│   ├── job_application_detail_view.go      # 求职投递详情弹窗、流程时间线、备注/补录表单及结束/重启流程弹窗
 │   ├── workbench_load.go                   # 后台加载与过期结果保护
-│   ├── focus_view.go / modules_visibility.go # 跨模块聚焦总览视图（含行内快捷流转）与工作区模块显隐偏好控制
-│   ├── command_palette.go                  # 全局 ⌘K 命令面板（跨模块搜索项目/任务/投递与快捷命令）
+│   ├── focus_view.go / modules_visibility.go # 跨模块聚焦总览视图（含多维筛选、行内快捷流转与实时同步状态）与工作区模块显隐控制
+│   ├── command_palette.go                  # 全局 ⌘K 命令面板（跨活跃与已归档项目/任务、投递检索与快捷命令）
 │   ├── external_sync.go / mcp_config.go    # 外部 IPC/MCP 变更实时刷新（草稿保护）与 Antigravity/Codex/CLI 配置格式化
 │   ├── record_write.go / settings_write.go # 后台记录操作与设置写入
 │   ├── async_persistence_test.go           # 长持锁输入/导航、保存失败与并发回调回归测试
 │   ├── async_record_write_test.go          # Store 持锁时的看板、表单、回收站和设置写入回归测试
-│   ├── command_palette_test.go             # 全局 ⌘K 命令面板、⌘1/⌘2/⌘3 快捷键与聚焦页行内快捷操作测试
+│   ├── command_palette_test.go             # 全局 ⌘K 命令面板（含已归档检索）、看板截止日筛选、完成时间与备份历史测试
 │   ├── external_sync_test.go               # 外部变更实时刷新、未保存草稿保护与设置页 MCP 配置复制测试
-│   ├── focus_modules_test.go               # 工作区模块显隐持久化与跨模块聚焦总览跳转测试
+│   ├── focus_modules_test.go               # 工作区模块显隐持久化、聚焦页筛选/MCP 状态与已结束投递路由测试
+│   ├── job_favicon_test.go                 # 网站图标解码（PNG/ICO）、HTML/SPA 发现、异步加载降级与有界 LRU 缓存测试
 │   ├── workbench_test.go                   # 基于 ui.Tester 的端到端无头 UI 交互测试
 │   └── attachment_preview_test.go          # 图片缩略图解码、方向校正与有界缓存测试
 ├── backend/                                # 后端总入口、模块注册、全局回收站分发、设置与自动备份调度生命周期

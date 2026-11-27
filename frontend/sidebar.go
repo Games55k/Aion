@@ -2,388 +2,273 @@ package frontend
 
 import (
 	"fmt"
+	"time"
+
+	"aion/backend/model"
 
 	"github.com/egoist/mygo/ui"
 )
 
-func (w *Workbench) renderSidebar(c *ui.Context, tk *uiTokens) {
+type topNavSlideMatch struct{}
+
+var topNavSlideTransition = ui.ElementTransition{
+	Duration: 260 * time.Millisecond,
+	Ease:     ui.CubicBezier(0.32, 0.72, 0, 1),
+	Match:    topNavSlideMatch{},
+}
+
+func (w *Workbench) renderTopbar(c *ui.Context, tk *uiTokens) {
 	bar := c.TitleBar()
-	topPad := float32(14)
-	if bar.Height > 0 {
-		topPad = max(bar.Height+8, 42)
+	leftPad := float32(16)
+	if bar.Left > 0 {
+		leftPad = max(bar.Left+16, 84)
+	}
+	rightPad := float32(16)
+	if bar.Right > 0 {
+		rightPad = max(bar.Right+16, 16)
+	}
+	topHeight := float32(64)
+	if bar.Height > topHeight {
+		topHeight = bar.Height + 16
 	}
 
-	uiDraggableSideNav(c, &w.sideWidth, &w.sideExpanded, draggableSideNavProps{
-		MinWidth:                78,
-		MaxWidth:                340,
-		ShowHandleWhenCollapsed: true,
-		HighlightHandle:         true,
-		Background:              tk.BgContainer,
-		Header: func(nav sideNavState) {
+	ui.Row(c.Key("aion-topbar")).Height(topHeight).Padding(0, rightPad, 0, leftPad).Gap(8).
+		AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
+		Background(tk.BgLayout).DragWindow().Children(func() {
+		// Left: Clean macOS traffic-light breathing space (shrinks gracefully on narrow windows)
+		ui.Box(c).Grow(1).Basis(0).MinWidth(0)
+
+		// Center: Spring-Gliding Floating Navigation Capsule
+		w.renderTopNavCapsule(c, tk)
+
+		// Right: Update (when available) + Search + Trash + Feedback + Theme + Universal Create Menu
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Justify(ui.End).Grow(1).Basis(0).MinWidth(256).Children(func() {
 			updateInfo := w.UpdateCapability()
-			showUpdate := hasSidebarUpdateIndicator(updateInfo)
-			ui.Column(c).Padding(topPad, 12, 10, 12).Gap(12).AlignSelf(ui.Stretch).DragWindow().Children(func() {
-				// Brand Row
-				brandRow := ui.Row(c).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch)
-				if nav.Expanded {
-					brandRow.Justify(ui.SpaceBetween)
-				} else {
-					brandRow.Justify(ui.Center)
-				}
-				brandRow.Children(func() {
-					ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-						ui.Image(c, AionSymbolSVG()).Size(26, 26).Shrink(0)
-						if nav.Expanded {
-							ui.Text(c, "Aion").FontSize(17).FontWeight(700).TextColor(tk.Text).SingleLine()
-						}
-					})
-					if nav.Expanded && showUpdate {
-						w.renderSidebarUpdateButton(c, tk, updateInfo)
-					}
-				})
-				if !nav.Expanded && showUpdate {
-					ui.Row(c).Justify(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-						w.renderSidebarUpdateButton(c, tk, updateInfo)
-					})
-				}
+			if hasSidebarUpdateIndicator(updateInfo) {
+				w.renderSidebarUpdateButton(c, tk, updateInfo)
+			}
 
-				// Registered Module Switcher (shown only when >1 module is visible)
-				visibleMods := w.VisibleModules()
-				if len(visibleMods) > 1 {
-					if nav.Expanded {
-						ui.Row(c).Gap(6).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
-							for _, mod := range visibleMods {
-								active := w.activeModule == mod.ID && !w.IsGlobalPage()
-								btn := ui.ButtonBase(c.Key(mod.ID)).Grow(1).Height(28).PaddingX(10).Gap(6).
-									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).
-									Label("切换模块 " + mod.Name)
-								if active {
-									btn.Background(tk.BgElevated).TextColor(tk.Text).FontWeight(600)
-								} else {
-									btn.TextColor(tk.TextSecondary)
-								}
-								btn.Children(func() {
-									ui.Icon(c, ModuleIconSVG(mod)).FontSize(14)
-									ui.Text(c, mod.Name).FontSize(12).SingleLine()
-								})
-								if btn.Clicked() {
-									w.SwitchModule(mod.ID)
-								}
-							}
-						})
-					} else {
-						ui.Column(c).Gap(4).Padding(4).Radius(tk.BorderRadius).Background(tk.FillQuaternary).AlignSelf(ui.Stretch).Children(func() {
-							for _, mod := range visibleMods {
-								active := w.activeModule == mod.ID && !w.IsGlobalPage()
-								btn := ui.ButtonBase(c.Key("collapsed-"+mod.ID)).Height(28).PaddingX(6).
-									Radius(tk.BorderRadiusSM).AlignItems(ui.Center).Justify(ui.Center).AlignSelf(ui.Stretch).
-									Cursor(ui.CursorPointer).Label("切换模块 " + mod.Name)
-								if active {
-									btn.Background(tk.BgElevated).TextColor(tk.Text)
-								} else {
-									btn.TextColor(tk.TextSecondary)
-								}
-								btn.Children(func() {
-									ui.Icon(c, ModuleIconSVG(mod)).FontSize(15)
-								})
-								if btn.Clicked() {
-									w.SwitchModule(mod.ID)
-								}
-							}
-						})
-					}
-				}
-			})
-		},
-		Footer: func(nav sideNavState) {
-			ui.Column(c).Padding(8).Gap(4).AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
-				trashExtra := ""
+			searchBtn := ui.ButtonBase(c.Key("topbar-cmd-palette")).Size(32, 32).Radius(12).
+				Center().Cursor(ui.CursorPointer).Label("打开全局命令面板")
+			if searchBtn.Hovered() {
+				searchBtn.Background(tk.FillTertiary).TextColor(tk.Text)
+			} else {
+				searchBtn.TextColor(tk.TextSecondary)
+			}
+			searchBtn.Children(func() { uiIconBox(c, iconSearch(), ui.Color{}) })
+			uiTooltip(c, searchBtn, "搜索 ⌘K")
+			if searchBtn.Clicked() {
+				w.OpenCommandPalette()
+			}
+
+			trashActive := w.navPage == NavTrash
+			trashBtn := ui.ButtonBase(c.Key("topbar-trash")).Height(32).PaddingX(6).Gap(4).Radius(12).
+				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Label("回收站")
+			switch {
+			case trashActive:
+				trashBtn.Background(tk.FillTertiary).TextColor(tk.Primary)
+			case trashBtn.Hovered():
+				trashBtn.Background(tk.FillTertiary).TextColor(tk.Text)
+			default:
+				trashBtn.TextColor(tk.TextSecondary)
+			}
+			trashBtn.Children(func() {
+				uiIconBox(c, iconTrash2(), ui.Color{})
 				if len(w.trashItems) > 0 {
-					trashExtra = fmt.Sprint(len(w.trashItems))
-				}
-				footerActive := ""
-				switch w.navPage {
-				case NavTrash:
-					footerActive = "nav:trash"
-				case NavSettings:
-					footerActive = "nav:settings"
-				}
-				chosen := uiList(c, listProps{
-					Active:    footerActive,
-					Collapse:  nav.Collapse,
-					RailWidth: nav.RailWidth,
-					Items: []listItem{
-						{
-							Key:   "nav:trash",
-							Label: "回收站",
-							Icon:  iconTrash2(),
-							Extra: trashExtra,
-						},
-						{
-							Key:   "nav:settings",
-							Label: "设置",
-							Icon:  iconSettings(),
-							Extra: "⌘,",
-						},
-					},
-				})
-				switch chosen {
-				case "nav:trash":
-					w.NavigateTo(NavTrash)
-				case "nav:settings":
-					w.NavigateTo(NavSettings)
+					ui.Text(c, fmt.Sprint(len(w.trashItems))).Font("monospace").FontSize(14).SingleLine()
 				}
 			})
-		},
-	}, func(nav sideNavState) {
-		ui.Column(c).Padding(4, 8, 12, 8).Gap(8).AlignSelf(ui.Stretch).Children(func() {
-			// Global Command Palette Trigger + Focus Overview
-			if nav.Expanded {
-				cmdBtn := ui.ButtonBase(c.Key("sidebar-cmd-palette")).Height(30).Padding(0, 10).Gap(8).
-					Radius(tk.BorderRadius).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
-					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
-					Cursor(ui.CursorPointer).Label("打开全局命令面板")
-				cmdBtn.Children(func() {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, iconSearch()).FontSize(13).TextColor(tk.TextTertiary)
-						ui.Text(c, "快速搜索或跳转…").FontSize(12).TextColor(tk.TextTertiary).SingleLine()
-					})
-					ui.Text(c, "⌘K").Font("monospace").FontSize(11).TextColor(tk.TextTertiary).SingleLine()
-				})
-				if cmdBtn.Clicked() {
-					w.OpenCommandPalette()
+			uiTooltip(c, trashBtn, "回收站")
+			if trashBtn.Clicked() {
+				w.NavigateTo(NavTrash)
+			}
+
+			feedbackBtn := ui.ButtonBase(c.Key("topbar-feedback")).Size(32, 32).Radius(12).
+				Center().Cursor(ui.CursorPointer).Label("问题反馈")
+			if feedbackBtn.Hovered() {
+				feedbackBtn.Background(tk.FillTertiary).TextColor(tk.Text)
+			} else {
+				feedbackBtn.TextColor(tk.TextSecondary)
+			}
+			feedbackBtn.Children(func() { uiIconBox(c, iconMessageSquare(), ui.Color{}) })
+			uiTooltip(c, feedbackBtn, "问题反馈 (GitHub Issues)")
+			if feedbackBtn.Clicked() {
+				w.OpenFeedbackPage()
+			}
+
+			themeIcon := iconMoon()
+			if tk.Dark {
+				themeIcon = iconSun()
+			}
+			themeBtn := ui.ButtonBase(c.Key("topbar-theme")).Size(32, 32).Radius(12).
+				Center().Cursor(ui.CursorPointer).Label("切换深浅外观")
+			if themeBtn.Hovered() {
+				themeBtn.Background(tk.FillTertiary).TextColor(tk.Text)
+			} else {
+				themeBtn.TextColor(tk.TextSecondary)
+			}
+			themeBtn.Children(func() { uiIconBox(c, themeIcon, ui.Color{}) })
+			uiTooltip(c, themeBtn, "切换外观")
+			if themeBtn.Clicked() {
+				if tk.Dark {
+					w.ApplyThemeSetting(ThemeLight)
+				} else {
+					w.ApplyThemeSetting(ThemeDark)
 				}
 			}
 
-			// Global Focus Overview entry shared across all enabled modules
-			focusActive := ""
-			if w.navPage == NavFocus {
-				focusActive = "nav:focus"
-			}
-			focusExtra := ""
-			if n := w.focusBadgeCount(); n > 0 {
-				focusExtra = fmt.Sprint(n)
-			}
-			if chosen := uiList(c.Key("global-focus-nav"), listProps{
-				Active:    focusActive,
-				Collapse:  nav.Collapse,
-				RailWidth: nav.RailWidth,
-				Items: []listItem{
-					{
-						Key:   "nav:focus",
-						Label: "聚焦",
-						Icon:  iconTarget(),
-						Extra: focusExtra,
-					},
-				},
-			}); chosen == "nav:focus" {
-				w.NavigateTo(NavFocus)
-			}
-
-			if nav.Expanded {
-				ui.Box(c).Height(1).Margin(2, 6).Background(tk.BorderSecondary)
-			}
-
-			if w.activeModule == "job_applications" && w.IsModuleVisible("job_applications") {
-				w.renderJobSidebar(c, tk, nav)
-				return
-			}
-			if w.IsModuleVisible("projects") {
-				w.renderProjectSidebar(c, tk, nav)
-				return
-			}
-			w.renderJobSidebar(c, tk, nav)
+			createItems := w.buildCreateMenuItems()
+			chosen := uiDropdownMenu(c.Key("topbar-create-menu"), &w.topMenuOpen, dropdownMenuProps{
+				Items: createItems,
+			}, func(t ui.Element) {
+				t.Height(32).Padding(0, 12, 0, 8).Gap(4).Radius(40).
+					AlignItems(ui.Center).Justify(ui.Center).Shrink(0).
+					Cursor(ui.CursorPointer).Label("快速新建")
+				bg := tk.Primary
+				if t.Pressed() || w.topMenuOpen {
+					bg = tk.PrimaryActive
+				} else if t.Hovered() {
+					bg = tk.PrimaryHover
+				}
+				t.Background(bg).TextColor(ui.RGB(255, 255, 255))
+				t.Children(func() {
+					uiIconBox(c, iconPlus(), ui.RGB(255, 255, 255))
+					ui.Text(c, "新建").FontSize(14).FontWeight(500).SingleLine()
+				})
+			})
+			w.handleCreateMenuChoice(chosen)
 		})
 	})
 }
 
-func (w *Workbench) renderJobSidebar(c *ui.Context, tk *uiTokens, nav sideNavState) {
-	if nav.Expanded {
-		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Text(c, "投递记录").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
-			if uiActionIcon(c, iconPlus(), actionIconProps{
-				Title: "快速新增投递",
-			}).Clicked() {
-				w.OpenJobCreateModal()
-			}
+func (w *Workbench) renderTopNavCapsule(c *ui.Context, tk *uiTokens) {
+	type navTabSpec struct {
+		Key    string
+		Text   string
+		Label  string
+		Icon   *ui.SVG
+		Count  string
+		Active bool
+		OnTap  func()
+	}
+
+	focusCount := ""
+	if n := w.focusBadgeCount(); n > 0 {
+		focusCount = fmt.Sprint(n)
+	}
+	tabs := []navTabSpec{
+		{
+			Key:    "focus",
+			Text:   "今天",
+			Label:  "聚焦",
+			Icon:   iconTarget(),
+			Count:  focusCount,
+			Active: w.navPage == NavFocus,
+			OnTap:  func() { w.NavigateTo(NavFocus) },
+		},
+	}
+
+	if w.IsModuleVisible("projects") {
+		tabs = append(tabs, navTabSpec{
+			Key:    "projects",
+			Text:   "项目",
+			Label:  "切换模块 项目",
+			Icon:   iconFolderKanban(),
+			Active: isProjectNavPage(w.navPage),
+			OnTap:  func() { w.SwitchModule("projects") },
 		})
 	}
-	countStr := func(n int) string {
-		if n <= 0 {
-			return ""
+
+	if w.IsModuleVisible("job_applications") {
+		jobCount := ""
+		if w.jobStats.Active > 0 {
+			jobCount = fmt.Sprint(w.jobStats.Active)
 		}
-		return fmt.Sprint(n)
-	}
-	activeKey := ""
-	switch w.navPage {
-	case NavJobAll:
-		activeKey = "nav:job_all"
-	case NavJobActive:
-		activeKey = "nav:job_active"
-	case NavJobOffer:
-		activeKey = "nav:job_offer"
-	case NavJobClosed:
-		activeKey = "nav:job_closed"
-	}
-	chosen := uiList(c.Key("job-nav"), listProps{
-		Active:    activeKey,
-		Collapse:  nav.Collapse,
-		RailWidth: nav.RailWidth,
-		Items: []listItem{
-			{
-				Key:   "nav:job_all",
-				Label: "全部投递",
-				Icon:  iconBriefcase(),
-				Extra: countStr(w.jobStats.Total),
-			},
-			{
-				Key:   "nav:job_active",
-				Label: "进行中",
-				Icon:  iconClock(),
-				Extra: countStr(w.jobStats.Active),
-			},
-			{
-				Key:   "nav:job_offer",
-				Label: "已获 Offer",
-				Icon:  iconAward(),
-				Extra: countStr(w.jobStats.Offered),
-			},
-			{
-				Key:   "nav:job_closed",
-				Label: "已结束",
-				Icon:  iconFolderCheck(),
-				Extra: countStr(w.jobStats.Closed),
-			},
-		},
-	})
-	switch chosen {
-	case "nav:job_all":
-		w.NavigateTo(NavJobAll)
-	case "nav:job_active":
-		w.NavigateTo(NavJobActive)
-	case "nav:job_offer":
-		w.NavigateTo(NavJobOffer)
-	case "nav:job_closed":
-		w.NavigateTo(NavJobClosed)
-	}
-}
-
-func (w *Workbench) renderProjectSidebar(c *ui.Context, tk *uiTokens, nav sideNavState) {
-	// Top Overview & Archived Navigation
-	topActive := ""
-	switch w.navPage {
-	case NavAllProjects:
-		topActive = "nav:all_projects"
-	case NavArchivedProjects:
-		topActive = "nav:archived_projects"
-	}
-	activeExtra := ""
-	if len(w.activeProjects) > 0 {
-		activeExtra = fmt.Sprint(len(w.activeProjects))
-	}
-	archivedExtra := ""
-	if len(w.archivedProjects) > 0 {
-		archivedExtra = fmt.Sprint(len(w.archivedProjects))
-	}
-	topChosen := uiList(c.Key("top-nav"), listProps{
-		Active:    topActive,
-		Collapse:  nav.Collapse,
-		RailWidth: nav.RailWidth,
-		Items: []listItem{
-			{
-				Key:   "nav:all_projects",
-				Label: "所有项目",
-				Icon:  iconLayoutGrid(),
-				Extra: activeExtra,
-			},
-			{
-				Key:   "nav:archived_projects",
-				Label: "已归档项目",
-				Icon:  iconArchive(),
-				Extra: archivedExtra,
-			},
-		},
-	})
-	switch topChosen {
-	case "nav:all_projects":
-		w.NavigateTo(NavAllProjects)
-	case "nav:archived_projects":
-		w.NavigateTo(NavArchivedProjects)
-	}
-
-	// Subtle Divider between Global Nav and Project List
-	if nav.Expanded {
-		ui.Box(c).Height(1).Margin(6, 6).Background(tk.BorderSecondary)
-	}
-
-	// Active Projects Section Header
-	if nav.Expanded {
-		ui.Row(c).Padding(8, 8, 2, 8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Text(c, "项目列表").FontSize(12).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
-			if uiActionIcon(c, iconFolderPlus(), actionIconProps{
-				Title: "创建项目",
-			}).Clicked() {
-				w.OpenCreateProjectModal()
-			}
+		tabs = append(tabs, navTabSpec{
+			Key:    "jobs",
+			Text:   "求职",
+			Label:  "切换模块 求职",
+			Icon:   iconBriefcase(),
+			Count:  jobCount,
+			Active: isJobNavPage(w.navPage),
+			OnTap:  func() { w.SwitchModule("job_applications") },
 		})
 	}
 
-	// Active Projects List
-	if len(w.activeProjects) == 0 && nav.Expanded {
-		ui.Column(c).Padding(12, 8).Gap(4).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-			ui.Text(c, "暂无进行中的项目").FontSize(12).TextColor(tk.TextTertiary)
-		})
-	} else {
-		projItems := make([]listItem, 0, len(w.activeProjects))
-		for _, proj := range w.activeProjects {
-			p := proj
-			sum := w.projectSummaries[p.ID]
-			extra := ""
-			if sum.Total > 0 {
-				extra = fmt.Sprintf("%d/%d", sum.Done, sum.Total)
+	tabs = append(tabs, navTabSpec{
+		Key:    "settings",
+		Text:   "设置",
+		Label:  "设置",
+		Icon:   iconSettings(),
+		Active: w.navPage == NavSettings,
+		OnTap:  func() { w.NavigateTo(NavSettings) },
+	})
+
+	ui.Row(c.Key("top-nav-capsule")).Padding(4).Gap(2).Radius(40).
+		Background(tk.FillTertiary).AlignItems(ui.Center).Shrink(0).Children(func() {
+		for _, tab := range tabs {
+			btn := ui.ButtonBase(c.Key("top-tab-" + tab.Key)).Height(32).PaddingX(10).Gap(4).
+				Radius(40).AlignItems(ui.Center).Justify(ui.Center).Shrink(0).
+				Cursor(ui.CursorPointer).Label(tab.Label)
+			fg := tk.TextSecondary
+			if tab.Active || btn.Hovered() {
+				fg = tk.Text
 			}
-			var actions func()
-			if nav.Expanded {
-				isProjActive := w.navPage == NavProjectBoard && w.activeProjectID == p.ID
-				actions = func() {
-					bg := tk.FillTertiary.Over(tk.BgContainer)
-					if isProjActive {
-						bg = tk.FillSecondary.Over(tk.BgContainer)
+			btn.TextColor(fg)
+			btn.Children(func() {
+				if tab.Active {
+					ind := ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).
+						Radius(40).Background(tk.BgElevated).ZIndex(-1).
+						Transition(topNavSlideTransition)
+					if !tk.Dark {
+						ind.Shadow(0, 2, 8, 0, ui.RGBA(24, 24, 24, 0.08))
 					}
-					ui.Row(c).Height(28).Background(bg).PaddingX(2).Radius(tk.BorderRadiusSM).Gap(2).AlignItems(ui.Center).Children(func() {
-						if uiActionIcon(c.Key("edit-"+p.ID), iconPencil(), actionIconProps{
-							Title: "编辑项目: " + p.Name,
-						}).Clicked() {
-							w.OpenEditProjectModal(p)
-						}
-						if uiActionIcon(c.Key("archive-"+p.ID), iconArchive(), actionIconProps{
-							Title: "归档项目: " + p.Name,
-						}).Clicked() {
-							w.ArchiveProject(p.ID)
-						}
-					})
 				}
-			}
-			projItems = append(projItems, listItem{
-				Key:     "proj:" + p.ID,
-				Label:   p.Name,
-				Icon:    ProjectIconSVG(p.Icon),
-				Extra:   extra,
-				Actions: actions,
+				uiIconBox(c, tab.Icon, fg)
+				ui.Text(c, tab.Text).FontSize(14).FontWeight(500).SingleLine()
+				if tab.Count != "" {
+					cntColor := tk.TextSecondary
+					if tab.Active {
+						cntColor = tk.Primary
+					}
+					ui.Text(c, tab.Count).Font("monospace").FontSize(14).TextColor(cntColor).SingleLine()
+				}
 			})
+			if btn.Clicked() {
+				tab.OnTap()
+			}
 		}
-		activeProjKey := ""
-		if w.navPage == NavProjectBoard && w.activeProjectID != "" {
-			activeProjKey = "proj:" + w.activeProjectID
+	})
+}
+
+func (w *Workbench) buildCreateMenuItems() []menuItem {
+	items := make([]menuItem, 0, 3)
+	if w.IsModuleVisible("projects") {
+		if w.ActiveProject() != nil || len(w.activeProjects) > 0 {
+			items = append(items, menuItem{Key: "new-task", Label: "新建任务", Icon: iconSquareCheckBig()})
 		}
-		chosenProj := uiList(c.Key("active-projects-list"), listProps{
-			Active:    activeProjKey,
-			Collapse:  nav.Collapse,
-			RailWidth: nav.RailWidth,
-			Items:     projItems,
-		})
-		if len(chosenProj) > 5 && chosenProj[:5] == "proj:" {
-			w.SelectProject(chosenProj[5:])
+		items = append(items, menuItem{Key: "new-project", Label: "新建项目", Icon: iconFolderPlus()})
+	}
+	if w.IsModuleVisible("job_applications") {
+		items = append(items, menuItem{Key: "new-job", Label: "新增投递", Icon: iconBriefcase()})
+	}
+	return items
+}
+
+func (w *Workbench) handleCreateMenuChoice(chosen string) {
+	if chosen == "" {
+		return
+	}
+	w.topMenuOpen = false
+	switch chosen {
+	case "new-task":
+		if w.ActiveProject() == nil && len(w.activeProjects) > 0 {
+			w.activeProjectID = w.activeProjects[0].ID
 		}
+		w.OpenCreateTaskModal(model.Planned)
+	case "new-project":
+		w.OpenCreateProjectModal()
+	case "new-job":
+		w.OpenJobCreateModal()
 	}
 }

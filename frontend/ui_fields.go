@@ -12,6 +12,7 @@ type inputVariant int
 const (
 	inputOutlined inputVariant = iota
 	inputFilled
+	inputElevated
 )
 
 type inputProps struct {
@@ -79,38 +80,25 @@ func uiTextArea(c *ui.Context, value *string, p textAreaProps) ui.Element {
 
 func styleField(root ui.Element, tk *uiTokens, v inputVariant, invalid, focused bool) {
 	hovered := root.Hovered() && !focused && !root.IsDisabled()
-	switch v {
-	case inputFilled:
-		bg := tk.FillTertiary
-		if hovered {
-			bg = tk.FillSecondary
-		}
-		root.Background(bg)
-	default:
+	switch {
+	case focused:
 		root.Background(tk.BgContainer)
+	case v == inputElevated:
+		root.Background(tk.BgElevated)
+	case hovered:
+		root.Background(tk.FillSecondary)
+	default:
+		root.Background(tk.FillTertiary)
 	}
 
 	border := ui.Transparent
-	if v == inputOutlined {
-		border = tk.BorderSecondary
-		if hovered {
-			border = tk.Border
-		}
-		if focused && !invalid {
-			border = tk.Primary
-		}
+	if focused && !invalid {
+		border = tk.Primary
 	}
 	if invalid && !hovered {
 		border = tk.Error
 	}
 	root.Border(1, border)
-
-	switch {
-	case focused && invalid:
-		root.Shadow(0, 0, 0, 2, tk.ErrorBg)
-	case focused && v == inputOutlined:
-		root.Shadow(0, 0, 0, 2, tk.PrimaryBg)
-	}
 }
 
 func fieldRow(c *ui.Context, tk *uiTokens, size uiSize) ui.Element {
@@ -118,12 +106,12 @@ func fieldRow(c *ui.Context, tk *uiTokens, size uiSize) ui.Element {
 }
 
 func styleFieldRow(e ui.Element, tk *uiTokens, size uiSize) ui.Element {
-	minHeight, fontSize, radius, padding := float32(32), float32(14), tk.BorderRadius, float32(12)
+	minHeight, fontSize, radius, padding := float32(36), float32(14), tk.BorderRadius, float32(12)
 	switch size {
 	case sizeSmall:
-		minHeight, fontSize, radius, padding = 24, 12, tk.BorderRadiusSM, 8
+		minHeight, fontSize, radius, padding = 32, 14, tk.BorderRadiusSM, 8
 	case sizeLarge:
-		minHeight, fontSize, radius = 40, 16, tk.BorderRadiusLG
+		minHeight, fontSize, radius = 44, 16, tk.BorderRadius
 	}
 	return e.MinHeight(minHeight).PaddingX(padding).Radius(radius).AlignItems(ui.Center).
 		FontSize(fontSize).TextColor(tk.Text).Cursor(ui.CursorText).Transition(fieldTransition)

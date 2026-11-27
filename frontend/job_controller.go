@@ -520,12 +520,41 @@ func (w *Workbench) SubmitJobCloseModal() {
 	})
 }
 
-// ReopenJobApplication explicitly reopens a closed application back to active while preserving historical closure events.
-func (w *Workbench) ReopenJobApplication(appID string) {
+// OpenJobReopenModal opens a lightweight confirmation dialog allowing an optional reopen note.
+func (w *Workbench) OpenJobReopenModal(appID string) {
 	if w.IsRestoring() || appID == "" {
 		return
 	}
-	if !w.afterPendingSave(func() { w.ReopenJobApplication(appID) }) {
+	w.jobReopenAppID = appID
+	w.jobReopenNote = ""
+	w.jobReopenErr = ""
+	w.jobReopenOpen = true
+}
+
+// SubmitJobReopenModal confirms reopening the closed application with the optional note.
+func (w *Workbench) SubmitJobReopenModal() {
+	if w.IsRestoring() || w.jobReopenAppID == "" {
+		return
+	}
+	appID := w.jobReopenAppID
+	note := strings.TrimSpace(w.jobReopenNote)
+	w.jobReopenOpen = false
+	w.jobReopenAppID = ""
+	w.jobReopenNote = ""
+	w.jobReopenErr = ""
+	w.reopenJobWithNote(appID, note)
+}
+
+// ReopenJobApplication explicitly reopens a closed application back to active while preserving historical closure events.
+func (w *Workbench) ReopenJobApplication(appID string) {
+	w.reopenJobWithNote(appID, "")
+}
+
+func (w *Workbench) reopenJobWithNote(appID, note string) {
+	if w.IsRestoring() || appID == "" {
+		return
+	}
+	if !w.afterPendingSave(func() { w.reopenJobWithNote(appID, note) }) {
 		return
 	}
 	service := w.app.JobApplications
@@ -533,7 +562,10 @@ func (w *Workbench) ReopenJobApplication(appID string) {
 	var events []model.JobApplicationEvent
 	w.runJobWorker(func() error {
 		var err error
-		updated, err = service.Reopen(context.Background(), jobapplications.ReopenInput{ID: appID})
+		updated, err = service.Reopen(context.Background(), jobapplications.ReopenInput{
+			ID:   appID,
+			Note: note,
+		})
 		if err != nil {
 			return err
 		}

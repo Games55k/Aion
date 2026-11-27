@@ -19,9 +19,9 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 	open := true
 
 	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
-		backdrop.Padding(24, 24).Background(tk.BgContainer.Alpha(0.6))
-		panel.Width(960).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
-			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
+		backdrop.Padding(16).Background(ui.RGBA(24, 24, 24, 0.24))
+		panel.Width(960).MaxWidthPercent(100).MaxHeightPercent(100).Radius(24).Clip().
+			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("投递详情弹窗")
 		tk.Elevate(panel, boxShadow)
 
@@ -30,13 +30,13 @@ func (w *Workbench) renderJobDetailModal(c *ui.Context, tk *uiTokens) {
 		}
 
 		ui.Column(c).FillWidth().MaxHeightPercent(100).Children(func() {
-			// Modal Header Bar
-			ui.Row(c).Padding(16, 22).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-				BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-				ui.Row(c).Grow(1).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
+			// Modal Header Bar (18px bold, zero border noise)
+			ui.Row(c).Padding(16, 24, 12, 24).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+				AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c).Grow(1).MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
 					ui.Box(c).MinWidth(0).Shrink(1).Children(func() {
-						ui.Text(c, fmt.Sprintf("%s / %s", app.CompanyName, app.PositionName)).
-							FontSize(16).FontWeight(700).TextColor(tk.Text).SingleLine()
+						ui.Text(c, fmt.Sprintf("%s · %s", app.CompanyName, app.PositionName)).
+							FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 					})
 					ui.Box(c).Shrink(0).Children(func() {
 						w.renderJobSaveStatusBadge(c)
@@ -130,7 +130,7 @@ func (w *Workbench) renderJobSaveStatusBadge(c *ui.Context) {
 }
 
 func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
-	ui.Column(c).Padding(14).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
+	ui.Column(c).Padding(16).Gap(12).Radius(16).Background(tk.FillTertiary).AlignSelf(ui.Stretch).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).Wrap().AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
 				ui.Text(c, "当前阶段").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
@@ -173,7 +173,7 @@ func (w *Workbench) renderJobWorkflowSection(c *ui.Context, tk *uiTokens, app mo
 				} else {
 					reopenBtn := uiButton(c, "重新开启", buttonProps{Variant: buttonPrimary, Size: sizeSmall})
 					if reopenBtn.Clicked() {
-						w.ReopenJobApplication(app.ID)
+						w.OpenJobReopenModal(app.ID)
 					}
 				}
 			})
@@ -277,8 +277,8 @@ func (w *Workbench) renderJobStageStepper(c *ui.Context, tk *uiTokens, app model
 }
 
 func (w *Workbench) renderJobMetadataSection(c *ui.Context, tk *uiTokens) {
-	ui.Column(c).Padding(16).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
-		ui.Text(c, "基本信息与备注").FontSize(13).FontWeight(600).TextColor(tk.Text)
+	ui.Column(c).Padding(4, 0).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+		ui.Text(c, "基本信息与备注").FontSize(15).FontWeight(600).TextColor(tk.Text)
 
 		ui.Column(c).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 			ui.Text(c, "公司名称 *").FontSize(12).TextColor(tk.TextSecondary)
@@ -450,7 +450,7 @@ func canDeleteTimelineEvent(ev model.JobApplicationEvent) bool {
 
 func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app model.JobApplication) {
 	showBackfill := w.jobBackfillExpanded || w.jobBackfillErr != ""
-	ui.Column(c).Padding(16).Gap(12).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).AlignSelf(ui.Stretch).Children(func() {
+	ui.Column(c).Padding(12).Gap(8).Radius(16).Background(tk.FillTertiary).AlignSelf(ui.Stretch).Children(func() {
 		// Timeline Header & Toolbar (Sort Order + Collapsible Backfill)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).Wrap().AlignSelf(ui.Stretch).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -501,6 +501,7 @@ func (w *Workbench) renderJobTimelineSection(c *ui.Context, tk *uiTokens, app mo
 					uiInput(c.Key("timeline-note-input"), &w.jobNoteInput, inputProps{
 						Placeholder: "记录沟通结果或面试反馈...",
 						Size:        sizeSmall,
+						Variant:     inputElevated,
 					}).Label("时间线备注输入")
 				})
 				ui.Box(c).Width(128).Shrink(0).Children(func() {
@@ -651,9 +652,9 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 	var dismissed bool
 	open := true
 	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
-		backdrop.Padding(32, 24).Background(tk.BgContainer.Alpha(0.6))
-		panel.Width(480).MaxWidthPercent(100).Radius(12).Clip().
-			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
+		backdrop.Padding(32, 24).Background(ui.RGBA(24, 24, 24, 0.24))
+		panel.Width(480).MaxWidthPercent(100).Radius(24).Clip().
+			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Label("结束流程弹窗")
 		tk.Elevate(panel, boxShadow)
 
@@ -661,9 +662,9 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 			dismissed = true
 		}
 
-		ui.Column(c).FillWidth().Padding(20, 24).Gap(14).Children(func() {
+		ui.Column(c).FillWidth().Padding(24).Gap(16).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-				ui.Text(c, "结束求职流程").FontSize(17).FontWeight(700).TextColor(tk.Text)
+				ui.Text(c, "结束求职流程").FontSize(18).FontWeight(700).TextColor(tk.Text)
 				if uiActionIcon(c, iconX(), actionIconProps{Title: "关闭结束流程弹窗"}).Clicked() {
 					w.jobCloseOpen = false
 				}
@@ -719,5 +720,55 @@ func (w *Workbench) renderJobCloseModal(c *ui.Context, tk *uiTokens) {
 
 	if dismissed {
 		w.jobCloseOpen = false
+	}
+}
+
+func (w *Workbench) renderJobReopenModal(c *ui.Context, tk *uiTokens) {
+	if !w.jobReopenOpen {
+		return
+	}
+	var dismissed bool
+	open := true
+	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
+		backdrop.Padding(32, 24).Background(ui.RGBA(24, 24, 24, 0.24))
+		panel.Width(440).MaxWidthPercent(100).Radius(24).Clip().
+			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
+			Label("重新开启流程弹窗")
+		tk.Elevate(panel, boxShadow)
+
+		if panel.Dismissed() {
+			dismissed = true
+		}
+
+		ui.Column(c).FillWidth().Padding(24).Gap(16).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "重新开启流程").FontSize(18).FontWeight(700).TextColor(tk.Text)
+				if uiActionIcon(c, iconX(), actionIconProps{Title: "关闭重新开启弹窗"}).Clicked() {
+					w.jobReopenOpen = false
+				}
+			})
+
+			ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "重启备注（可选）").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+				uiTextArea(c.Key("reopen-note"), &w.jobReopenNote, textAreaProps{
+					Placeholder: "例如：HR 捞起、转岗继续推进...",
+					MinRows:     3,
+					MaxRows:     5,
+				}).Label("输入重新开启备注")
+			})
+
+			ui.Row(c).Gap(12).Justify(ui.End).AlignSelf(ui.Stretch).Children(func() {
+				if uiButton(c, "取消", buttonProps{Variant: buttonDefault}).Clicked() {
+					w.jobReopenOpen = false
+				}
+				if uiButton(c, "确认重新开启", buttonProps{Variant: buttonPrimary}).Clicked() {
+					w.SubmitJobReopenModal()
+				}
+			})
+		})
+	})
+
+	if dismissed {
+		w.jobReopenOpen = false
 	}
 }

@@ -154,3 +154,70 @@ func TestFocusOverviewAggregatesAndNavigates(t *testing.T) {
 		t.Fatal("expected hidden job_applications module section removed from Focus overview")
 	}
 }
+
+// Regression: Focus view previously read stale host.MCPInfo, hid low-priority tasks across all filter tabs, and routed closed jobs opened via OpenFocusJob to NavJobActive.
+func TestFocusSyncStatusFilterConsistencyAndClosedJobRouting(t *testing.T) {
+	ctx := context.Background()
+	fixedNow := func() time.Time { return time.Date(2026, 11, 26, 9, 0, 0, 0, time.Local) }
+	app, wb, tt := openTestWorkbench(t, t.TempDir(), Host{Now: fixedNow})
+
+	proj, err := app.Projects.CreateProject(ctx, projects.ProjectInput{Name: "Backlog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Projects.CreateTask(ctx, proj.ID, projects.TaskInput{
+		Title:    "Ordinary planned task",
+		Status:   model.Planned,
+		Priority: model.NoPriority,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	closedJob, err := app.JobApplications.Create(ctx, jobapplications.CreateInput{
+		CompanyName:  "ClosedCo",
+		PositionName: "Staff Engineer",
+		AppliedDate:  "2026-11-20",
+		Stage:        model.JobStageInterview1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.JobApplications.Close(ctx, jobapplications.CloseInput{
+		ID:      closedJob.ID,
+		Outcome: model.JobOutcomeRejected,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	wb.ReloadAll()
+	wb.NavigateTo(NavFocus)
+	tt.Frame()
+
+	// 1. Live SetMCPCapability updates Focus sync text without recreating Workbench.
+	if !tt.HasText("离线工作模式") {
+		t.Fatalf("expected offline sync text initially, got %v", tt.Texts())
+	}
+	wb.SetMCPCapability(MCPCapability{Ready: true})
+	tt.Frame()
+	if !tt.HasText("本地 MCP 已就绪 · aion.sock") {
+		t.Fatalf("expected live MCP ready text in Focus after SetMCPCapability, got %v", tt.Texts())
+	}
+
+	// 2. Ordinary planned task is hidden in default 待推进 filter, then visible under 全部未完成.
+	if tt.HasText("Ordinary planned task") {
+		t.Fatal("ordinary planned task should not appear in default 待推进 focus filter")
+	}
+	if err := tt.Click("聚焦筛选 全部未完成"); err != nil {
+		t.Fatalf("click 聚焦筛选 全部未完成: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Ordinary planned task") {
+		t.Fatal("ordinary planned task must appear when switching to 全部未完成")
+	}
+
+	// 3. Opening a closed job via OpenFocusJob navigates to NavJobClosed instead of NavJobActive.
+	wb.OpenFocusJob(closedJob.ID)
+	tt.Frame()
+	if wb.navPage != NavJobClosed || wb.selectedJobID != closedJob.ID || !wb.jobDetailOpen {
+		t.Fatalf("expected closed job to route to NavJobClosed with detail open, got page=%q id=%q open=%v", wb.navPage, wb.selectedJobID, wb.jobDetailOpen)
+	}
+}

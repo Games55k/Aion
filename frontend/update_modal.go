@@ -65,7 +65,7 @@ func sidebarUpdateTooltip(info UpdateCapability) string {
 
 func (w *Workbench) renderSidebarUpdateButton(c *ui.Context, tk *uiTokens, info UpdateCapability) {
 	tip := sidebarUpdateTooltip(info)
-	b := ui.ButtonBase(c.Key("sidebar-update-btn")).Size(26, 26).Radius(13).
+	b := ui.ButtonBase(c.Key("sidebar-update-btn")).Size(32, 32).Radius(40).
 		Center().Shrink(0).Cursor(ui.CursorPointer).Transition(buttonTransition).
 		Label(tip)
 
@@ -91,7 +91,7 @@ func (w *Workbench) renderSidebarUpdateButton(c *ui.Context, tk *uiTokens, info 
 	}
 	b.Background(bg).TextColor(fg)
 	b.Children(func() {
-		ui.Icon(c, iconCircleArrowUp()).FontSize(16)
+		uiIconBox(c, iconCircleArrowUp(), fg)
 	})
 	uiTooltip(c, b, tip)
 	if b.Clicked() {
@@ -108,23 +108,22 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 		availVer := displayVersionNumber(info.AvailableVersion)
 		installedVer := displayVersionNumber(info.InstalledVersion)
 
-		backdrop.Padding(32, 16).Background(tk.BgContainer.Alpha(0.6 * dim))
+		backdrop.Padding(32, 16).Background(tk.BgContainer.Alpha(0.55 * dim))
 		from := m.Enter.Scale
 		if closing {
 			from = m.Exit.Scale
 		}
 		scale := from + (1-from)*shown
-		panel.Width(520).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
+		panel.Width(540).MaxWidthPercent(100).MaxHeightPercent(100).Radius(24).Clip().
 			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Scale(scale, scale).Opacity(shown)
 		tk.Elevate(panel, boxShadow)
 
 		panel.Children(func() {
 			// Header
-			ui.Row(c).MinHeight(50).Padding(10, 56, 10, 16).Gap(8).AlignItems(ui.Center).
-				BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
-				ui.Icon(c, iconCircleArrowUp()).FontSize(18).TextColor(tk.Primary)
-				ui.Text(c, "软件更新").FontSize(15).FontWeight(600).TextColor(tk.Text).SingleLine()
+			ui.Row(c).MinHeight(64).Padding(20, 56, 12, 24).Gap(12).AlignItems(ui.Center).Children(func() {
+				uiIconBox(c, iconCircleArrowUp(), tk.Primary)
+				ui.Text(c, "软件更新").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 				if installedVer != "" {
 					uiTag(c, "v"+installedVer+" 待重启", tagProps{
 						Size:    sizeSmall,
@@ -142,7 +141,7 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 
 			// Body
 			ui.Scroll(c).Shrink(1).Children(func() {
-				ui.Column(c).Padding(16).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Padding(8, 24, 20, 24).Gap(16).AlignSelf(ui.Stretch).Children(func() {
 					switch {
 					case info.IsDev || curVer == "":
 						uiAlert(c.Key("update-modal-dev"), "当前为开发构建，不支持应用内更新", alertProps{
@@ -178,7 +177,7 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 							ui.Text(c, fmt.Sprintf("%s / %s", formatMegabytes(info.DownloadedBytes), formatMegabytes(info.TotalBytes))).
 								FontSize(12).TextColor(tk.TextSecondary)
 						}
-						ui.Text(c, "关闭此窗口不会中断下载，完成后可从侧边栏或此处重启应用。").
+						ui.Text(c, "关闭此窗口不会中断下载，完成后可从顶部栏或此处重启应用。").
 							FontSize(12).TextColor(tk.TextTertiary)
 					case info.Status == UpdateInstalling:
 						title := "正在安装更新…"
@@ -214,9 +213,8 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 							ui.Column(c).Gap(6).AlignSelf(ui.Stretch).Children(func() {
 								ui.Text(c, "更新说明").FontSize(12).FontWeight(600).TextColor(tk.TextSecondary)
 								ui.Scroll(c.Key("update-notes-scroll")).MaxHeight(240).AlignSelf(ui.Stretch).
-									Radius(tk.BorderRadius).Background(tk.FillQuaternary).
-									Border(1, tk.BorderSecondary).Children(func() {
-									ui.Column(c).Padding(12).AlignSelf(ui.Stretch).Children(func() {
+									Radius(16).Background(tk.FillTertiary).Children(func() {
+									ui.Column(c).Padding(16).AlignSelf(ui.Stretch).Children(func() {
 										uiMarkdown(c, notes)
 									})
 								})
@@ -237,8 +235,7 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 			})
 
 			// Footer
-			ui.Row(c).Gap(8).Padding(12, 16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-				BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			ui.Row(c).Gap(12).Padding(16, 24, 24, 24).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 				// Left auxiliary action
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if !info.IsDev && info.CanSelfUpdate && availVer != "" &&
@@ -365,7 +362,7 @@ func (w *Workbench) renderUpdateModal(c *ui.Context, tk *uiTokens) {
 				})
 			})
 
-			if dialogCloseButton(c, tk, 18).Absolute().Top(9).Right(12).Radius(12).Clicked() {
+			if dialogCloseButton(c, tk, 18).Absolute().Top(16).Right(16).Radius(12).Clicked() {
 				w.CloseUpdateModal()
 			}
 		})

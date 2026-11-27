@@ -1231,20 +1231,34 @@ func TestThirdReviewDeletedProjectImagesMustLeaveCache(t *testing.T) {
 	}
 }
 
-// Regression: hovering over a sidebar project item with progress badges previously caused 0/1 text to bleed through action icons.
+// Regression: hovering a project switcher pill previously expanded its width with an edit icon, causing sibling pills to wrap and shifting the Kanban board vertically.
 func TestSidebarProjectHoverActions(t *testing.T) {
 	dataDir := t.TempDir()
 	_, wb, tt := openTestWorkbench(t, dataDir, Host{})
 	wb.OpenCreateProjectModal()
 	wb.projectModalName = "测试项目"
 	wb.SubmitProjectModal()
+	firstID := wb.activeProjectID
+	wb.OpenCreateProjectModal()
+	wb.projectModalName = "第二个项目"
+	wb.SubmitProjectModal()
+	wb.SelectProject(firstID)
 	_, err := wb.QuickCreateTask(model.Planned, "任务 1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
-	// Find the project row in the sidebar and move pointer over it
+	siblingBefore, ok := tt.Find("第二个项目")
+	if !ok {
+		t.Fatal("could not find 第二个项目 before hover")
+	}
+	colBefore, ok := tt.Find("看板列 计划")
+	if !ok {
+		t.Fatal("could not find 看板列 计划 before hover")
+	}
+
+	// Move pointer over the first project pill and verify zero horizontal/vertical layout shift.
 	rect, found := tt.Find("测试项目")
 	if !found {
 		t.Fatal("could not find 测试项目 in accessibility tree")
@@ -1252,7 +1266,13 @@ func TestSidebarProjectHoverActions(t *testing.T) {
 	tt.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
 	tt.Frame()
 
-	// Verify clicking the hover action works
+	siblingAfter, _ := tt.Find("第二个项目")
+	colAfter, _ := tt.Find("看板列 计划")
+	if siblingAfter != siblingBefore || colAfter != colBefore {
+		t.Fatalf("hovering project pill caused layout shift: sibling %v->%v col %v->%v", siblingBefore, siblingAfter, colBefore, colAfter)
+	}
+
+	// Verify clicking the hover edit action works.
 	if err := tt.Click("编辑项目: 测试项目"); err != nil {
 		t.Fatalf("click edit project icon: %v", err)
 	}
@@ -1815,8 +1835,8 @@ func TestCrossViewConsistencyFixes(t *testing.T) {
 	}
 
 	// Soft-deleting task and project uses consistent 移入回收站 buttons, and Trash filter bar clears cleanly.
-	if err := tt.Click("一致性测试项目"); err != nil {
-		t.Fatalf("click project in sidebar: %v", err)
+	if err := tt.Click("切换模块 项目"); err != nil {
+		t.Fatalf("switch to projects module: %v", err)
 	}
 	wb.SelectTask(t1.ID)
 	tt.Frame()
@@ -1938,6 +1958,16 @@ func TestUpdaterSettingsAndHostIntegration(t *testing.T) {
 	openErr = errors.New("browser unavailable")
 	if err := tt.Click("前往 Releases 下载"); err != nil {
 		t.Fatalf("click 前往 Releases 下载 on error: %v", err)
+	}
+
+	// Feedback button opens the GitHub Issues page via Host.OpenURL.
+	openErr = nil
+	openedURLs = nil
+	if err := tt.Click("问题反馈"); err != nil {
+		t.Fatalf("click topbar 问题反馈: %v", err)
+	}
+	if !slices.Equal(openedURLs, []string{"https://github.com/Games55k/Aion/issues"}) {
+		t.Fatalf("unexpected feedback URLs: %v", openedURLs)
 	}
 }
 
@@ -2642,7 +2672,7 @@ func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
 
 	// 1. Open Settings via Cmd+, from the initial All Projects view.
 	tt.Key(ui.Cmd, ui.KeyComma)
-	if wb.navPage != NavSettings || !tt.HasText("全局设置与数据管理") {
+	if wb.navPage != NavSettings || !tt.HasText("自动备份") {
 		t.Fatalf("expected Cmd+, to open Settings, navPage=%s", wb.navPage)
 	}
 
@@ -2698,7 +2728,7 @@ func TestSettingsShortcutOpensSettingsWithModalAndDraftGuards(t *testing.T) {
 		t.Fatalf("click 搜索任务: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyComma)
-	if wb.navPage != NavSettings || !tt.HasText("全局设置与数据管理") {
+	if wb.navPage != NavSettings || !tt.HasText("自动备份") {
 		t.Fatalf("expected Cmd+, from focused search input to open Settings, got %s", wb.navPage)
 	}
 }
@@ -3555,30 +3585,27 @@ func TestJobModuleSwitchingExpandedCollapsedAndPreservedState(t *testing.T) {
 		t.Fatalf("expected preserved job state across module switch, got page=%v search=%q stage=%q sort=%q", wb.navPage, wb.jobSearchQuery, wb.jobStageFilter, wb.jobSortBy)
 	}
 
-	// Collapse sidebar and verify compact switcher still toggles cleanly between 项目 and 求职.
-	tt.Move(100, 200)
-	tt.Advance(time.Second)
-	handle, ok := tt.AccessByRole(ui.RoleButton, "Collapse side nav")
-	if !ok {
-		t.Fatal("Collapse side nav handle not found")
+	// Switching via Focus and Settings still preserves each module's active view and filters.
+	if err := tt.Click("聚焦"); err != nil {
+		t.Fatalf("switch to focus: %v", err)
 	}
-	tt.ClickAt(handle.Bounds.X+handle.Bounds.W/2, handle.Bounds.Y+handle.Bounds.H/2)
-	tt.Advance(time.Second)
 	tt.Frame()
-
+	if wb.navPage != NavFocus {
+		t.Fatalf("expected NavFocus, got %v", wb.navPage)
+	}
 	if err := tt.Click("切换模块 项目"); err != nil {
-		t.Fatalf("collapsed switch to projects: %v", err)
+		t.Fatalf("switch from focus to projects: %v", err)
 	}
 	tt.Frame()
-	if wb.activeModule != "projects" {
-		t.Fatalf("expected projects module when collapsed, got %q", wb.activeModule)
+	if wb.activeModule != "projects" || wb.navPage != NavProjectBoard {
+		t.Fatalf("expected projects module + preserved NavProjectBoard, got module=%q page=%v", wb.activeModule, wb.navPage)
 	}
 	if err := tt.Click("切换模块 求职"); err != nil {
-		t.Fatalf("collapsed switch to jobs: %v", err)
+		t.Fatalf("switch from projects to jobs: %v", err)
 	}
 	tt.Frame()
 	if wb.activeModule != "job_applications" || wb.navPage != NavJobActive {
-		t.Fatalf("expected jobs module + preserved NavJobActive when collapsed, got module=%q page=%v", wb.activeModule, wb.navPage)
+		t.Fatalf("expected jobs module + preserved NavJobActive, got module=%q page=%v", wb.activeModule, wb.navPage)
 	}
 }
 
@@ -4036,13 +4063,27 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 		t.Fatalf("expected updated closure reason on closed row, got %+v err=%v", persisted, err)
 	}
 
-	// Reopening clears current outcome/closure reason while keeping historical closed + reopened events.
+	// Reopening opens optional note dialog, records note on timeline event, and clears current closure fields.
 	if err := tt.Click("重新开启"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	typeIntoJobField(t, tt, "输入重新开启备注", "HR 主动捞起继续推进")
+	if err := tt.Click("确认重新开启"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if wb.detailJob.Lifecycle != model.JobLifecycleActive || wb.detailJob.Outcome != "" || wb.detailJob.ClosureReason != "" {
 		t.Fatalf("expected reopened active state with cleared current closure fields, got %+v", wb.detailJob)
+	}
+	foundReopenNote := false
+	for _, ev := range wb.detailJobEvents {
+		if ev.EventType == model.JobEventReopened && ev.Note == "HR 主动捞起继续推进" {
+			foundReopenNote = true
+		}
+	}
+	if !foundReopenNote {
+		t.Fatalf("expected reopened timeline event with note, got %+v", wb.detailJobEvents)
 	}
 
 	// Interactive stage stepper advances stage directly from detail modal header.
@@ -4187,6 +4228,10 @@ func TestJobCloseReopenTimelineNotesBackfillAndEmptyState(t *testing.T) {
 	}
 	tt.Frame()
 	if err := tt.Click("重新开启流程"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("确认重新开启"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

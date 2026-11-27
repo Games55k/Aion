@@ -221,7 +221,7 @@ func TestAsyncNavigationRejectsStaleResults(t *testing.T) {
 	if w.navPage != NavSettings || w.activeProjectID != ps[2].ID || len(w.boardTasks) != 0 || w.backupDirInput != "/tmp/new-draft-directory" {
 		t.Fatal("late load overwrote current page or draft")
 	}
-	if err := tt.Click("Last project"); err != nil {
+	if err := tt.Click("切换模块 项目"); err != nil {
 		t.Fatal(err)
 	}
 	drainTestUI(w, queue)

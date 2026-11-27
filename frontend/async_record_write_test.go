@@ -350,6 +350,7 @@ func TestTrashRestoreRemainsResponsiveUnderStoreLock(t *testing.T) {
 			tt.Frame()
 			unlock := hold(next.ID)
 			clickWriteControl(t, tt, "恢复 Original")
+			clickWriteControl(t, tt, "切换模块 项目")
 			clickWriteControl(t, tt, "Last project")
 			unlock()
 			drainTestUI(w, queue)

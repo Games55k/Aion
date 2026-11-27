@@ -305,6 +305,7 @@ func run(dataDir, snapshotPath string) error {
 			SkipUpdateVersion:    updCtrl.SkipVersion,
 			RelaunchToUpdate:     updCtrl.Relaunch,
 			SetUpdateCheckPolicy: updCtrl.SetPolicy,
+			LoadFavicon:          frontend.DefaultFaviconLoader,
 		})
 
 		offResume := mygo.Power.OnResume(updCtrl.OnResume)

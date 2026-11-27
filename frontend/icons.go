@@ -11,9 +11,23 @@ import (
 )
 
 const (
-	svgOpen  = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`
+	svgOpen  = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">`
 	svgClose = `</svg>`
 )
+
+// uiIconBox renders an 18px icon glyph (1.5px stroke) centered inside a 24x24 transparent box.
+func uiIconBox(c *ui.Context, svg *ui.SVG, color ui.Color) ui.Element {
+	return ui.Box(c).Size(24, 24).Center().Shrink(0).Children(func() {
+		icon := ui.Icon(c, svg).FontSize(18)
+		if color.A > 0 {
+			icon.TextColor(color)
+		}
+	})
+}
+
+func iconMessageSquare() *ui.SVG {
+	return loadIcon("message-square", `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>`)
+}
 
 var (
 	aionSymbolOnce   sync.Once

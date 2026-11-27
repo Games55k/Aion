@@ -140,24 +140,24 @@ func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
 			from = m.Exit.Scale
 		}
 		scale := from + (1-from)*shown
-		panel.Width(width).MaxWidthPercent(100).MaxHeightPercent(100).Radius(12).Clip().
+		panel.Width(width).MaxWidthPercent(100).MaxHeightPercent(100).Radius(24).Clip().
 			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Scale(scale, scale).Opacity(shown)
 		tk.Elevate(panel, boxShadow)
 		panel.Children(func() {
 			if p.Title != "" {
-				ui.Row(c).MinHeight(48).Padding(8, 56, 8, 16).Children(func() {
-					ui.Text(c, p.Title).FontSize(14).FontWeight(600)
+				ui.Row(c).MinHeight(56).Padding(20, 64, 12, 24).Children(func() {
+					ui.Text(c, p.Title).FontSize(18).FontWeight(700)
 				})
 			}
 			ui.Scroll(c).Shrink(1).Children(func() {
-				col := ui.Column(c).Padding(0, 16, 16, 16)
+				col := ui.Column(c).Padding(0, 24, 20, 24)
 				if p.Title == "" {
-					col.Padding(16)
+					col.Padding(24)
 				}
 				col.Children(content)
 			})
-			ui.Row(c).Gap(8).Padding(12, 16).Justify(ui.End).Children(func() {
+			ui.Row(c).Gap(12).Padding(16, 24, 24, 24).Justify(ui.End).Children(func() {
 				if uiButton(c, textOr(p.CancelText, "Cancel"), buttonProps{}).Clicked() {
 					*open = false
 				}
@@ -165,7 +165,7 @@ func uiModal(c *ui.Context, open *bool, p modalProps, content func()) bool {
 					ok = true
 				}
 			})
-			if dialogCloseButton(c, tk, 18).Absolute().Top(8).Right(12).Radius(12).Clicked() {
+			if dialogCloseButton(c, tk, 18).Absolute().Top(16).Right(16).Radius(12).Clicked() {
 				*open = false
 			}
 		})

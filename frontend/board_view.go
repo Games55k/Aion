@@ -31,6 +31,12 @@ var (
 		{Value: string(model.NoPriority), Label: "无优先级"},
 	}
 	priorityFilterOptions = append([]selectOption{{Value: "", Label: "全部优先级"}}, taskPriorityOptions...)
+	dueDateFilterOptions  = []selectOption{
+		{Value: "", Label: "全部日期"},
+		{Value: "overdue", Label: "已逾期"},
+		{Value: "due_soon", Label: "7 天内截止"},
+		{Value: "none", Label: "无截止日期"},
+	}
 )
 
 func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
@@ -40,7 +46,7 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 			uiEmpty(c, emptyProps{
 				Icon:        iconFolderKanban(),
 				Title:       "未选择项目",
-				Description: "请从左侧导航选择一个项目，或创建一个新项目开始管理看板任务。",
+				Description: "请从顶部导航或菜单选择一个项目，或创建一个新项目。",
 				Action: func() {
 					if uiButton(c, "新建项目", buttonProps{Variant: buttonPrimary}).Clicked() {
 						w.OpenCreateProjectModal()
@@ -52,96 +58,130 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 	}
 	p := *proj
 
-	ui.Column(c).Fill().Children(func() {
-		// 1. Project Header Bar
-		ui.Row(c).Padding(16, 20, 12, 20).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-				ui.Box(c).Size(38, 38).Radius(tk.BorderRadius).Background(tk.FillTertiary).Center().Shrink(0).Children(func() {
-					ui.Icon(c, ProjectIconSVG(p.Icon)).FontSize(20).TextColor(tk.Primary)
-				})
-				ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, p.Name).FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
-						if p.Archived {
-							uiTag(c, "已归档项目", tagProps{
-								Size:    sizeSmall,
-								Variant: tagFilled,
-								Color:   tagOrange,
+	ui.Column(c).Fill().Background(tk.BgLayout).Children(func() {
+		// 1. Clean Two-Row Board Header:
+		//    Row 1: Project switcher pills (zero-shift hover edit slot) + subtle project actions
+		//    Row 2: Task search / priority / due-date / tag filters + "+ 新建任务"
+		ui.Column(c).Padding(16, 48, 16, 48).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+			// Row 1: Project Switcher & Project Actions
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+				// Active Project Pills + All Projects & New Project Shortcuts
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Grow(1).MinWidth(0).Children(func() {
+					if uiActionIcon(c.Key("board-all-projects"), iconLayoutGrid(), actionIconProps{
+						Title: "所有项目",
+					}).Clicked() {
+						w.NavigateTo(NavAllProjects)
+					}
+					for _, ap := range w.activeProjects {
+						projItem := ap
+						active := projItem.ID == p.ID
+						sum := w.projectSummaries[projItem.ID]
+						pillWrap := ui.Row(c.Key("board-proj-wrap-" + projItem.ID)).Height(36).Padding(0, 10, 0, 14).Gap(6).
+							Radius(40).AlignItems(ui.Center)
+						hovered := pillWrap.Hovered()
+						if active || hovered {
+							pillWrap.Background(tk.FillTertiary)
+						}
+						pillWrap.Children(func() {
+							btn := ui.ButtonBase(c.Key("board-proj-" + projItem.ID)).
+								AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(projItem.Name)
+							if active {
+								btn.TextColor(tk.Text).FontWeight(600)
+							} else if hovered {
+								btn.TextColor(tk.Text).FontWeight(500)
+							} else {
+								btn.TextColor(tk.TextSecondary).FontWeight(500)
+							}
+							btn.Children(func() {
+								ui.Text(c, projItem.Name).FontSize(14).SingleLine()
 							})
+							if btn.Clicked() && !active {
+								w.SelectProject(projItem.ID)
+							}
+
+							// Fixed-footprint trailing slot: swaps count with edit icon on hover with 0px width shift.
+							ui.Box(c).MinWidth(28).Height(28).Center().Shrink(0).Children(func() {
+								cnt := ui.Text(c, fmt.Sprintf("%d/%d", sum.Done, sum.Total)).
+									Font("monospace").FontSize(13).TextColor(tk.TextSecondary).SingleLine()
+								if hovered {
+									cnt.Opacity(0)
+									editBtn := uiActionIcon(c.Key("edit-proj-"+projItem.ID), iconPencil(), actionIconProps{
+										Title: "编辑项目: " + projItem.Name,
+									}).Absolute()
+									if editBtn.Clicked() {
+										w.OpenEditProjectModal(projItem)
+									}
+								}
+							})
+						})
+					}
+					if p.Archived {
+						ui.Row(c).Height(36).PaddingX(14).Gap(8).Radius(40).Background(tk.FillTertiary).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, p.Name).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
+							ui.Text(c, "已归档").FontSize(14).TextColor(tk.Primary).SingleLine()
+						})
+					}
+					if len(w.archivedProjects) > 0 {
+						archBtn := ui.ButtonBase(c.Key("board-archived-link")).Height(36).PaddingX(12).Gap(8).
+							Radius(40).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+							TextColor(tk.TextSecondary).Label("已归档项目")
+						if archBtn.Hovered() {
+							archBtn.Background(tk.FillTertiary).TextColor(tk.Text)
+						}
+						archBtn.Children(func() {
+							ui.Text(c, fmt.Sprintf("已归档 (%d)", len(w.archivedProjects))).FontSize(14).SingleLine()
+						})
+						if archBtn.Clicked() {
+							w.NavigateTo(NavArchivedProjects)
+						}
+					}
+					if uiActionIcon(c.Key("board-new-project"), iconPlus(), actionIconProps{
+						Title: "新建项目",
+					}).Clicked() {
+						w.OpenCreateProjectModal()
+					}
+				})
+
+				// Right: Subtle Project Management Actions
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+					if uiButton(c, "编辑项目", buttonProps{Variant: buttonText, Size: sizeSmall}).Clicked() {
+						w.OpenEditProjectModal(p)
+					}
+					if p.Archived {
+						if uiButton(c, "恢复归档", buttonProps{Variant: buttonText, Size: sizeSmall}).Clicked() {
+							w.UnarchiveProject(p.ID)
+						}
+					} else {
+						if uiButton(c, "归档项目", buttonProps{Variant: buttonText, Size: sizeSmall}).Clicked() {
+							w.ArchiveProject(p.ID)
+						}
+					}
+					if uiButton(c, "移入回收站", buttonProps{Variant: buttonText, Size: sizeSmall, Danger: true}).
+						Label("将项目移入回收站").Clicked() {
+						w.SoftDeleteProject(p.ID)
+					}
+				})
+			})
+
+			// Row 2: Task Filter Controls + Inline Tag Pills + Create Task CTA
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+					ui.Box(c).Width(180).Children(func() {
+						beforeQ := w.searchQuery
+						uiSearchBar(c, &w.searchQuery, searchBarProps{
+							Placeholder: "筛选",
+							ShortKey:    "mod+f",
+							Size:        sizeSmall,
+						}).Label("搜索任务")
+						if w.searchQuery != beforeQ {
+							w.applyBoardFilters()
 						}
 					})
-					desc := strings.TrimSpace(p.Description)
-					if desc == "" {
-						desc = "暂无项目简介"
-					}
-					ui.Text(c, desc).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-				})
-			})
 
-			// Header Action Buttons
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if uiButton(c, "编辑项目", buttonProps{
-					Variant: buttonDefault,
-					Size:    sizeSmall,
-				}).Clicked() {
-					w.OpenEditProjectModal(p)
-				}
-				if p.Archived {
-					if uiButton(c, "恢复归档", buttonProps{
-						Variant: buttonDefault,
-						Size:    sizeSmall,
-					}).Clicked() {
-						w.UnarchiveProject(p.ID)
-					}
-				} else {
-					if uiButton(c, "归档项目", buttonProps{
-						Variant: buttonDefault,
-						Size:    sizeSmall,
-					}).Clicked() {
-						w.ArchiveProject(p.ID)
-					}
-				}
-				if uiButton(c, "移入回收站", buttonProps{
-					Variant: buttonDefault,
-					Size:    sizeSmall,
-					Danger:  true,
-				}).Label("将项目移入回收站").Clicked() {
-					w.SoftDeleteProject(p.ID)
-				}
-				if uiButton(c, "+ 新建任务", buttonProps{
-					Variant: buttonPrimary,
-					Size:    sizeMiddle,
-				}).Clicked() {
-					w.OpenCreateTaskModal(model.Planned)
-				}
-			})
-		})
-
-		// 2. Search & Filter Bar
-		ui.Column(c).Padding(10, 20).Gap(8).AlignSelf(ui.Stretch).Background(tk.BgContainer).
-			BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-				// Search Input
-				ui.Box(c).Width(240).Children(func() {
-					beforeQ := w.searchQuery
-					uiSearchBar(c, &w.searchQuery, searchBarProps{
-						Placeholder: "搜索任务标题、描述或标签...",
-						ShortKey:    "mod+f",
-						Size:        sizeSmall,
-					}).Label("搜索任务")
-					if w.searchQuery != beforeQ {
-						w.applyBoardFilters()
-					}
-				})
-
-				// Priority Filter Select
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "优先级:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-					ui.Box(c).Width(120).Children(func() {
+					ui.Box(c).Width(116).Children(func() {
 						beforeP := w.priorityFilter
 						uiSelect(c.Key("priority-filter"), &w.priorityFilter, selectProps{
-							Placeholder: "全部优先级",
+							Placeholder: "优先级",
 							Size:        sizeSmall,
 							Options:     priorityFilterOptions,
 						}).Label("按优先级筛选")
@@ -149,61 +189,59 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 							w.applyBoardFilters()
 						}
 					})
-				})
 
-				// Tag Filter Pills
-				if len(w.allBoardTags) > 0 {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Wrap().Grow(1).MinWidth(0).Children(func() {
-						ui.Text(c, "标签:").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-						for _, tag := range w.allBoardTags {
-							active := slices.Contains(w.tagFilters, tag)
-							pill := ui.ButtonBase(c.Key("filter-tag-" + tag)).Height(22).PaddingX(8).Radius(11).
-								FontSize(12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
-							if active {
-								pill.Background(tk.Primary).TextColor(tk.BgLayout).FontWeight(600)
-							} else {
-								pill.Background(tk.FillTertiary).TextColor(tk.TextSecondary)
-							}
-							pill.Label("筛选标签 " + tag)
-							pill.Children(func() {
-								ui.Text(c, "#"+tag).SingleLine()
-							})
-							if pill.Clicked() {
-								w.ToggleTagFilter(tag)
-							}
+					ui.Box(c).Width(116).Children(func() {
+						beforeD := w.dueDateFilter
+						uiSelect(c.Key("due-filter"), &w.dueDateFilter, selectProps{
+							Placeholder: "截止日期",
+							Size:        sizeSmall,
+							Options:     dueDateFilterOptions,
+						}).Label("按截止日期筛选")
+						if w.dueDateFilter != beforeD {
+							w.applyBoardFilters()
 						}
 					})
-				} else {
-					ui.Box(c).Grow(1)
-				}
 
-				// Clear Filters & Task Count Summary
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+					for _, tag := range w.allBoardTags {
+						active := slices.Contains(w.tagFilters, tag)
+						pill := ui.ButtonBase(c.Key("filter-tag-" + tag)).Height(28).PaddingX(12).Radius(40).
+							FontSize(14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+						if active {
+							pill.Background(tk.Primary).TextColor(ui.RGB(255, 255, 255)).FontWeight(500)
+						} else {
+							pill.Background(tk.FillTertiary).TextColor(tk.TextSecondary)
+						}
+						pill.Label("筛选标签 " + tag)
+						pill.Children(func() {
+							ui.Text(c, "#"+tag).SingleLine()
+						})
+						if pill.Clicked() {
+							w.ToggleTagFilter(tag)
+						}
+					}
 					if w.HasBoardFilters() {
-						ui.Text(c, fmt.Sprintf("匹配 %d / %d 项", len(w.filteredTasks), len(w.boardTasks))).
-							FontSize(12).TextColor(tk.Primary).SingleLine()
-						if uiButton(c, "清除筛选", buttonProps{
-							Variant: buttonDefault,
-							Size:    sizeSmall,
-						}).Clicked() {
+						if uiButton(c, "清除筛选", buttonProps{Variant: buttonText, Size: sizeSmall}).Clicked() {
 							w.ClearBoardFilters()
 						}
-					} else {
-						ui.Text(c, fmt.Sprintf("共 %d 项任务", len(w.boardTasks))).
-							FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+					}
+				})
+
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+					if uiButton(c, "+ 新建任务", buttonProps{Variant: buttonDefault, Size: sizeSmall}).Clicked() {
+						w.OpenCreateTaskModal(model.Planned)
 					}
 				})
 			})
 		})
 
-		// 3. Three-Column Kanban Area
+		// 2. Three-Column Flat Neutral Kanban Lanes
 		columns := []boardColumnSpec{
-			{Status: model.Planned, Title: "计划", Dot: tk.Blue, Tag: tagBlue},
-			{Status: model.InProgress, Title: "进行中", Dot: tk.Orange, Tag: tagOrange},
-			{Status: model.Done, Title: "已完成", Dot: tk.Green, Tag: tagGreen},
+			{Status: model.Planned, Title: "计划", Dot: tk.TextSecondary, Tag: tagGray},
+			{Status: model.InProgress, Title: "进行中", Dot: tk.Primary, Tag: tagProcessing},
+			{Status: model.Done, Title: "已完成", Dot: tk.TextSecondary, Tag: tagGray},
 		}
 
-		ui.Row(c).Grow(1).Basis(0).MinWidth(0).Padding(16, 20).Gap(16).AlignItems(ui.Stretch).
+		ui.Row(c).Grow(1).Basis(0).MinWidth(0).Padding(0, 48, 36, 48).Gap(24).AlignItems(ui.Stretch).
 			AlignSelf(ui.Stretch).Children(func() {
 			for _, col := range columns {
 				w.renderBoardColumn(c.Key(string(col.Status)), tk, col)
@@ -215,31 +253,24 @@ func (w *Workbench) renderBoardView(c *ui.Context, tk *uiTokens) {
 func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColumnSpec) {
 	tasks := w.TasksInColumn(col.Status)
 
-	colBox := ui.Column(c).Grow(1).Basis(0).MinWidth(180).AlignSelf(ui.Stretch).
-		Radius(tk.BorderRadiusLG).Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+	colBox := ui.Column(c).Grow(1).Basis(0).MinWidth(200).AlignSelf(ui.Stretch).
+		Radius(24).Background(tk.FillTertiary).Padding(16, 12, 16, 12).
 		Label("看板列 " + col.Title)
 
-	// Header/outer column drop fallback from another column; keep border width fixed at 1px to avoid layout reflow during drag.
 	if payload, over := ui.DragOver[DragTaskPayload](colBox); over && payload.FromStatus != col.Status {
-		colBox.Border(1, col.Dot.Alpha(0.65))
+		colBox.Background(tk.Fill)
 	}
 	if payload, dropped := ui.Drop[DragTaskPayload](colBox); dropped && payload.FromStatus != col.Status {
 		w.MoveOrReorderTaskToSlot(payload.TaskID, col.Status, 0)
 	}
 
 	colBox.Children(func() {
-		// Column Header
-		ui.Row(c).Padding(12, 14, 10, 14).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(8, 8).Radius(4).Background(col.Dot)
-				ui.Text(c, col.Title).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
-				uiTag(c, fmt.Sprint(len(tasks)), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   col.Tag,
-					Round:   true,
-				})
+		// Column Header (18px Bold + Count + Plus)
+		ui.Row(c).Padding(0, 8, 8, 8).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+			AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, col.Title).FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+				ui.Text(c, fmt.Sprint(len(tasks))).Font("monospace").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary).SingleLine()
 			})
 
 			if uiActionIcon(c, iconPlus(), actionIconProps{
@@ -249,24 +280,13 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 			}
 		})
 
-		// Column Task Cards List (single drop target per column so gap/card transitions never flicker or reflow)
+		// Column Task Cards List
 		scrollBox := ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch)
 		cardEls := make([]ui.Element, len(tasks))
 		scrollBox.Children(func() {
-			ui.Column(c).Padding(12, 10).Gap(12).AlignSelf(ui.Stretch).Children(func() {
-				if len(tasks) == 0 {
-					emptyHint := "暂无" + col.Title + "任务"
-					if w.HasBoardFilters() {
-						emptyHint = "无匹配的" + col.Title + "任务"
-					}
-					ui.Column(c).Padding(28, 12).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-						ui.Text(c, emptyHint).FontSize(12).TextColor(tk.TextTertiary)
-						ui.Text(c, "可拖拽任务至此列，或在下方快速添加").FontSize(11).TextColor(tk.TextQuaternary)
-					})
-				} else {
-					for idx, task := range tasks {
-						cardEls[idx] = w.renderTaskCard(c.Key(task.ID), tk, task, idx, len(tasks))
-					}
+			ui.Column(c).Padding(8, 0, 8, 0).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+				for idx, task := range tasks {
+					cardEls[idx] = w.renderTaskCard(c.Key(task.ID), tk, task, idx, len(tasks))
 				}
 			})
 		})
@@ -288,10 +308,10 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 						showIndicator = false
 					}
 				} else {
-					colBox.Border(1, col.Dot.Alpha(0.65))
+					colBox.Background(tk.Fill)
 				}
 				if showIndicator {
-					accent := col.Dot
+					accent := tk.Primary
 					slotRadius := tk.BorderRadius
 					scrollBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
 						paintBoardInsertionIndicator(p, accent, slotRadius, r, cardEls, insertSlot)
@@ -301,15 +321,14 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 		}
 
 		// Column Bottom Quick Add Input
-		ui.Row(c).Padding(8, 10).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).
-			BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
+		ui.Row(c).Padding(16, 0, 0, 0).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
 			quickVal := w.quickTaskTitles[col.Status]
 			var submitted bool
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 				inp := uiInput(c.Key("quick-input-"+string(col.Status)), &quickVal, inputProps{
-					Placeholder: "+ 快速添加" + col.Title + "任务...",
+					Placeholder: "+ 添加" + col.Title + "任务",
 					Size:        sizeSmall,
-					Variant:     inputFilled,
+					Variant:     inputElevated,
 				}).Label("快速添加" + col.Title + "任务")
 				submitted = inp.Submitted()
 			})
@@ -335,17 +354,13 @@ func (w *Workbench) renderBoardColumn(c *ui.Context, tk *uiTokens, col boardColu
 func (w *Workbench) renderTaskCard(c *ui.Context, tk *uiTokens, t model.Task, indexInCol, colCount int) ui.Element {
 	selected := w.selectedTaskID == t.ID
 
-	card := ui.Column(c).Padding(12).Gap(8).Radius(tk.BorderRadius).
-		Background(tk.BgContainer).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
+	card := ui.Column(c).Padding(20).Gap(12).Radius(16).
+		Background(tk.BgElevated).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
 		Label("任务卡片 " + t.Title).
 		Drag(DragTaskPayload{TaskID: t.ID, FromStatus: t.Status})
 
 	if selected {
 		card.Border(2, tk.Primary)
-	} else if card.Hovered() {
-		card.Border(1, tk.PrimaryHover)
-	} else {
-		card.Border(1, tk.BorderSecondary)
 	}
 	if card.Dragging() {
 		card.Opacity(0.35)
@@ -400,8 +415,8 @@ func (w *Workbench) renderTaskCard(c *ui.Context, tk *uiTokens, t model.Task, in
 			prioChoice := uiDropdownMenu(c.Key("priority-menu"), prioOpen, dropdownMenuProps{
 				Items: priorityQuickMenuItems(t.Priority),
 			}, func(trig ui.Element) {
-				trig.Height(20).PaddingX(6).Gap(4).Radius(4).AlignItems(ui.Center).
-					Background(pBg).TextColor(pFg).FontSize(tk.FontSizeSM).
+				trig.Height(24).PaddingX(8).Gap(4).Radius(8).AlignItems(ui.Center).
+					Background(pBg).TextColor(pFg).FontSize(13).FontWeight(500).
 					Cursor(ui.CursorPointer).Label("切换优先级 " + t.Title)
 				if trig.Hovered() || *prioOpen {
 					trig.Border(1, pHoverBorder)

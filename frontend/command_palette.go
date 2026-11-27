@@ -1,10 +1,12 @@
 package frontend
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"aion/backend/model"
+	"aion/backend/projects"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -34,8 +36,34 @@ func (w *Workbench) OpenCommandPalette() {
 	if !w.IsBusy() {
 		w.reloadFocusTasks(true)
 		w.reloadProjects(true)
+		w.reloadPaletteArchivedTasks(true)
 		w.reloadJobApplications(true)
 	}
+}
+
+func (w *Workbench) reloadPaletteArchivedTasks(async bool) {
+	service := w.app.Projects
+	w.loadUI("palette-archived", async, func() func() {
+		allTasks, err := service.SearchTasks(context.Background(), projects.SearchTasksFilter{
+			IncludeArchived: true,
+		})
+		return func() {
+			if err != nil {
+				return
+			}
+			archivedSet := make(map[string]bool, len(w.archivedProjects))
+			for _, ap := range w.archivedProjects {
+				archivedSet[ap.ID] = true
+			}
+			archivedTasks := make([]model.Task, 0)
+			for _, t := range allTasks {
+				if archivedSet[t.ProjectID] {
+					archivedTasks = append(archivedTasks, t)
+				}
+			}
+			w.paletteArchivedTasks = archivedTasks
+		}
+	})
 }
 
 // CloseCommandPalette closes the global command palette.
@@ -92,19 +120,19 @@ func (w *Workbench) buildCommandPaletteItems(rawQuery string) []paletteItem {
 		}
 	}
 
-	addCmd("focus", "打开聚焦总览", "查看跨模块待推进任务与进行中投递", "focus today home 聚焦 总览 今日", "⌘1", iconTarget(), func() {
+	addCmd("focus", "打开聚焦总览", "", "focus today home 聚焦 总览 今日", "⌘1", iconTarget(), func() {
 		w.NavigateTo(NavFocus)
 	})
 	if showProjects {
-		addCmd("projects", "切换到项目工作区", "浏览活跃项目与三列看板", "projects board kanban 项目 看板", "⌘2", iconFolderKanban(), func() {
+		addCmd("projects", "切换到项目工作区", "", "projects board kanban 项目 看板", "⌘2", iconFolderKanban(), func() {
 			w.SwitchModule("projects")
 		})
-		addCmd("new-project", "新建项目", "创建一个新的项目看板", "create new project 新建 创建 项目", "", iconFolderPlus(), func() {
+		addCmd("new-project", "新建项目", "", "create new project 新建 创建 项目", "", iconFolderPlus(), func() {
 			w.SwitchModule("projects")
 			w.OpenCreateProjectModal()
 		})
 		if len(w.activeProjects) > 0 {
-			addCmd("new-task", "新建任务", "在当前或首个活跃项目中创建任务", "create new task 新建 创建 任务", "", iconPlus(), func() {
+			addCmd("new-task", "新建任务", "", "create new task 新建 创建 任务", "", iconPlus(), func() {
 				if w.activeProjectID == "" {
 					w.SelectProject(w.activeProjects[0].ID)
 				} else if w.navPage != NavProjectBoard {
@@ -115,19 +143,22 @@ func (w *Workbench) buildCommandPaletteItems(rawQuery string) []paletteItem {
 		}
 	}
 	if showJobs {
-		addCmd("jobs", "切换到求职工作区", "管理投递记录与阶段时间线", "jobs career applications 求职 投递 面试", "⌘3", iconBriefcase(), func() {
+		addCmd("jobs", "切换到求职工作区", "", "jobs career applications 求职 投递 面试", "⌘3", iconBriefcase(), func() {
 			w.SwitchModule("job_applications")
 		})
-		addCmd("new-job", "新增求职投递", "记录一家新的公司与岗位投递", "create new job application 新增 投递 求职", "", iconPlus(), func() {
+		addCmd("new-job", "新增求职投递", "", "create new job application 新增 投递 求职", "", iconPlus(), func() {
 			w.SwitchModule("job_applications")
 			w.OpenJobCreateModal()
 		})
 	}
-	addCmd("trash", "打开回收站", "查看并恢复已软删除的项目、任务或投递", "trash recycle restore 回收站 恢复", "", iconTrash2(), func() {
+	addCmd("trash", "打开回收站", "", "trash recycle restore 回收站 恢复", "", iconTrash2(), func() {
 		w.NavigateTo(NavTrash)
 	})
-	addCmd("settings", "打开全局设置", "主题、模块显隐、备份、MCP 接入与更新", "settings preferences backup mcp 设置 备份", "⌘,", iconSettings(), func() {
+	addCmd("settings", "打开全局设置", "", "settings preferences backup mcp 设置 备份", "⌘,", iconSettings(), func() {
 		w.NavigateTo(NavSettings)
+	})
+	addCmd("feedback", "反馈与建议 (GitHub Issues)", "", "feedback issue bug github 反馈 建议 报错", "", iconMessageSquare(), func() {
+		w.OpenFeedbackPage()
 	})
 
 	// 2. Projects
@@ -164,26 +195,56 @@ func (w *Workbench) buildCommandPaletteItems(rawQuery string) []paletteItem {
 				break
 			}
 		}
+		if q != "" {
+			for _, proj := range w.archivedProjects {
+				p := proj
+				if !match(p.Name, p.Description, "归档 archived") {
+					continue
+				}
+				items = append(items, paletteItem{
+					Key:      "arch-proj:" + p.ID,
+					Group:    "已归档项目",
+					Title:    p.Name,
+					Subtitle: p.Description,
+					Badge:    "已归档",
+					BadgeCol: tagGray,
+					Icon:     ProjectIconSVG(p.Icon),
+					Run: func() {
+						w.SelectProject(p.ID)
+					},
+				})
+				added++
+				if added >= maxProj+4 {
+					break
+				}
+			}
+		}
 	}
 
-	// 3. Tasks across active projects
+	// 3. Tasks across active projects (and archived projects when searching)
 	if showProjects {
 		maxTasks := 4
 		if q != "" {
 			maxTasks = 10
 		}
 		added := 0
-		for _, t := range w.focusTasks {
-			task := t
-			if q == "" && task.Status == model.Done {
-				continue
-			}
+		appendTask := func(task model.Task, archived bool) {
 			projName := w.projectNames[task.ProjectID]
 			tagsStr := strings.Join(task.Tags, " ")
-			if !match(task.Title, task.Description, tagsStr, projName) {
-				continue
+			extra := ""
+			if archived {
+				extra = "已归档 archived"
+			}
+			if !match(task.Title, task.Description, tagsStr, projName, extra) {
+				return
 			}
 			sub := projName
+			if archived {
+				if sub != "" {
+					sub += " · "
+				}
+				sub += "已归档"
+			}
 			if task.DueDate != "" {
 				if sub != "" {
 					sub += " · "
@@ -204,8 +265,22 @@ func (w *Workbench) buildCommandPaletteItems(rawQuery string) []paletteItem {
 				},
 			})
 			added++
+		}
+		for _, t := range w.focusTasks {
+			if q == "" && t.Status == model.Done {
+				continue
+			}
+			appendTask(t, false)
 			if added >= maxTasks {
 				break
+			}
+		}
+		if q != "" && added < maxTasks {
+			for _, t := range w.paletteArchivedTasks {
+				appendTask(t, true)
+				if added >= maxTasks {
+					break
+				}
 			}
 		}
 	}
@@ -306,22 +381,21 @@ func (w *Workbench) renderCommandPaletteModal(c *ui.Context, tk *uiTokens) {
 			from = m.Exit.Scale
 		}
 		scale := from + (1-from)*shown
-		panel.Width(620).MaxWidthPercent(100).MaxHeight(520).Radius(12).Clip().
-			Background(tk.BgElevated).Border(1, tk.BorderSecondary).TextColor(tk.Text).FontSize(tk.FontSize).
+		panel.Width(640).MaxWidthPercent(100).MaxHeight(540).Radius(24).Clip().
+			Background(tk.BgElevated).TextColor(tk.Text).FontSize(tk.FontSize).
 			Scale(scale, scale).Opacity(shown)
 		tk.Elevate(panel, boxShadow)
 
 		panel.Children(func() {
 			// Search Bar Header
-			ui.Row(c).Padding(12, 14).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch).
-				BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
-				ui.Icon(c, iconSearch()).FontSize(17).TextColor(tk.TextSecondary).Shrink(0)
+			ui.Row(c).Padding(16, 20).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+				uiIconBox(c, iconSearch(), tk.TextSecondary)
 				beforeQ := w.cmdPaletteQuery
 				inp := ui.TextInputBase(c.Key("cmd-palette-input"), &w.cmdPaletteQuery).
 					FocusRing(false).
-					Placeholder("搜索项目、任务、求职投递或快捷命令…").
+					Placeholder("搜索项目、任务、投递或命令").
 					Label("全局命令面板搜索").
-					Grow(1).MinWidth(0).FontSize(15).TextColor(tk.Text)
+					Grow(1).MinWidth(0).FontSize(16).TextColor(tk.Text)
 				if w.cmdPaletteNeedFocus && !closing {
 					inp.Focus()
 					w.cmdPaletteNeedFocus = false
@@ -334,18 +408,17 @@ func (w *Workbench) renderCommandPaletteModal(c *ui.Context, tk *uiTokens) {
 				}
 				uiTag(c, "Esc", tagProps{
 					Size:    sizeSmall,
-					Variant: tagOutlined,
+					Variant: tagFilled,
 					Color:   tagGray,
 				})
 			})
 
 			// Results List
 			ui.Scroll(c.Key("cmd-palette-scroll")).Shrink(1).MaxHeight(400).AlignSelf(ui.Stretch).Children(func() {
-				ui.Column(c).Padding(8).Gap(4).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Padding(4, 12, 12, 12).Gap(4).AlignSelf(ui.Stretch).Children(func() {
 					if len(items) == 0 {
-						ui.Column(c).Padding(32, 16).Gap(6).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-							ui.Text(c, "没有匹配的项目、任务、投递或命令").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
-							ui.Text(c, "试试搜索项目名、任务标题、公司名或输入“新建”“设置”。").FontSize(12).TextColor(tk.TextTertiary)
+						ui.Column(c).Padding(40, 16).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+							ui.Text(c, "无匹配结果").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
 						})
 						return
 					}
@@ -355,36 +428,36 @@ func (w *Workbench) renderCommandPaletteModal(c *ui.Context, tk *uiTokens) {
 						idx := i
 						if item.Group != lastGroup {
 							lastGroup = item.Group
-							topPad := float32(6)
+							topPad := float32(12)
 							if idx == 0 {
-								topPad = 2
+								topPad = 4
 							}
-							ui.Row(c.Key("grp-"+item.Group)).Padding(topPad, 10, 2, 10).AlignSelf(ui.Stretch).Children(func() {
-								ui.Text(c, item.Group).FontSize(11).FontWeight(600).TextColor(tk.TextTertiary).SingleLine()
+							ui.Row(c.Key("grp-"+item.Group)).Padding(topPad, 12, 4, 12).AlignSelf(ui.Stretch).Children(func() {
+								ui.Text(c, item.Group).FontSize(12).FontWeight(600).TextColor(tk.TextSecondary).SingleLine()
 							})
 						}
 						selected := idx == w.cmdPaletteIndex
-						btn := ui.ButtonBase(c.Key(item.Key)).Padding(8, 10).Gap(10).Radius(tk.BorderRadius).
+						btn := ui.ButtonBase(c.Key(item.Key)).Padding(12, 12).Gap(12).Radius(12).
 							AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
 							Cursor(ui.CursorPointer).Label("命令面板项 " + item.Title)
 						if selected {
-							btn.Background(tk.PrimaryFillQuaternary)
+							btn.Background(tk.FillQuaternary)
 						}
 						btn.Children(func() {
-							ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+							ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
 								iconCol := tk.TextSecondary
 								if selected {
 									iconCol = tk.Primary
 								}
-								ui.Icon(c, item.Icon).FontSize(15).TextColor(iconCol).Shrink(0)
-								ui.Column(c).Gap(1).Grow(1).MinWidth(0).Children(func() {
-									ui.Text(c, item.Title).FontSize(13).FontWeight(500).TextColor(tk.Text).SingleLine()
+								uiIconBox(c, item.Icon, iconCol)
+								ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
+									ui.Text(c, item.Title).FontSize(14).FontWeight(500).TextColor(tk.Text).SingleLine()
 									if item.Subtitle != "" {
-										ui.Text(c, item.Subtitle).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+										ui.Text(c, item.Subtitle).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 									}
 								})
 							})
-							ui.Row(c).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
+							ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
 								if item.Badge != "" {
 									uiTag(c, item.Badge, tagProps{
 										Size:    sizeSmall,
@@ -395,7 +468,7 @@ func (w *Workbench) renderCommandPaletteModal(c *ui.Context, tk *uiTokens) {
 								if item.Shortcut != "" {
 									uiTag(c, item.Shortcut, tagProps{
 										Size:    sizeSmall,
-										Variant: tagOutlined,
+										Variant: tagFilled,
 										Color:   tagGray,
 									})
 								}
@@ -411,11 +484,11 @@ func (w *Workbench) renderCommandPaletteModal(c *ui.Context, tk *uiTokens) {
 				})
 			})
 
-			// Footer Hints
-			ui.Row(c).Padding(8, 14).Gap(14).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
-				Background(tk.FillQuaternary).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
-				ui.Text(c, "↑↓ 选择  ·  ↵ 执行  ·  Esc 关闭").FontSize(11).TextColor(tk.TextTertiary).SingleLine()
-				ui.Text(c, fmt.Sprintf("%d 项结果", len(items))).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+			// Footer Status
+			ui.Row(c).Padding(12, 20).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).
+				Background(tk.FillQuaternary).Children(func() {
+				ui.Text(c, "↑↓ 选择  ·  ↵ 执行  ·  Esc 关闭").FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+				ui.Text(c, fmt.Sprintf("%d 项", len(items))).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 			})
 		})
 	})

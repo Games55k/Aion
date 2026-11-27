@@ -34,6 +34,14 @@ type AutoStatus struct {
 	LastSuccess time.Time `json:"last_success"`
 	LastError   string    `json:"last_error"`
 }
+
+// ManagedBackup describes one locally tracked automatic or pre-restore safety backup archive.
+type ManagedBackup struct {
+	Path      string    `json:"path"`
+	Kind      string    `json:"kind"` // "auto" or "safety"
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ownedBackup struct {
 	Path      string    `json:"path"`
 	SHA256    string    `json:"sha256"`
@@ -188,6 +196,41 @@ func (s *Service) Status(ctx context.Context) (AutoStatus, error) {
 	// State is published by atomic rename; readers need neither operation nor Store locks.
 	st, err := s.loadState()
 	return st.AutoStatus, err
+}
+
+// ListManagedBackups returns locally tracked automatic and pre-restore safety archives,
+// newest first, without acquiring Store or backup operation locks.
+func (s *Service) ListManagedBackups(ctx context.Context) ([]ManagedBackup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	st, err := s.loadState()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ManagedBackup, 0, len(st.Files)+len(st.Safety))
+	for _, f := range st.Files {
+		if strings.TrimSpace(f.Path) == "" {
+			continue
+		}
+		out = append(out, ManagedBackup{Path: f.Path, Kind: "auto", CreatedAt: f.CreatedAt})
+	}
+	for _, f := range st.Safety {
+		if strings.TrimSpace(f.Path) == "" {
+			continue
+		}
+		out = append(out, ManagedBackup{Path: f.Path, Kind: "safety", CreatedAt: f.CreatedAt})
+	}
+	for i := 1; i < len(out); i++ {
+		cur := out[i]
+		j := i - 1
+		for j >= 0 && (out[j].CreatedAt.Before(cur.CreatedAt) || (out[j].CreatedAt.Equal(cur.CreatedAt) && out[j].Path < cur.Path)) {
+			out[j+1] = out[j]
+			j--
+		}
+		out[j+1] = cur
+	}
+	return out, nil
 }
 
 func archiveHash(ctx context.Context, path string) (string, error) {

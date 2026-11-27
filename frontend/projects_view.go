@@ -12,92 +12,59 @@ import (
 func (w *Workbench) renderProjectsView(c *ui.Context, tk *uiTokens, archived bool) {
 	list := w.activeProjects
 	title := "所有项目"
-	subtitle := fmt.Sprintf("共 %d 个活跃项目", len(w.activeProjects))
 	if archived {
 		list = w.archivedProjects
 		title = "已归档项目"
-		subtitle = fmt.Sprintf("共 %d 个已归档项目", len(w.archivedProjects))
 	}
 
-	ui.Column(c).Fill().Children(func() {
-		// Top Header Bar
-		ui.Row(c).Padding(20, 24, 16, 24).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					if archived {
-						ui.Icon(c, iconArchive()).FontSize(22).TextColor(tk.TextSecondary)
-					} else {
-						ui.Icon(c, iconLayoutGrid()).FontSize(22).TextColor(tk.Primary)
-					}
-					ui.Text(c, title).FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
-				})
-				ui.Text(c, subtitle).FontSize(13).TextColor(tk.TextSecondary).SingleLine()
-			})
+	ui.Scroll(c).Fill().Background(tk.BgLayout).Children(func() {
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Padding(40, 48, 56, 48).Gap(32).WidthPercent(100).MaxWidth(1120).Children(func() {
+				ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, title).FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if !archived {
-					if len(w.archivedProjects) > 0 {
-						if uiButton(c, fmt.Sprintf("已归档 (%d)", len(w.archivedProjects)), buttonProps{
-							Variant: buttonDefault,
-						}).Clicked() {
-							w.NavigateTo(NavArchivedProjects)
-						}
-					}
-					if uiButton(c, "新建项目", buttonProps{
-						Variant: buttonPrimary,
-					}).Clicked() {
-						w.OpenCreateProjectModal()
-					}
-				} else {
-					if uiButton(c, "返回所有项目", buttonProps{
-						Variant: buttonDefault,
-					}).Clicked() {
-						w.NavigateTo(NavAllProjects)
-					}
-				}
-			})
-		})
-
-		// Body Content
-		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Padding(24).Gap(16).AlignSelf(ui.Stretch).Children(func() {
-				if len(list) == 0 {
-					ui.Box(c).Padding(48, 24).Radius(tk.BorderRadiusLG).Background(tk.BgContainer).
-						Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-						if archived {
-							uiEmpty(c, emptyProps{
-								Icon:        iconArchive(),
-								Title:       "暂无已归档项目",
-								Description: "归档后的项目会保存在这里，可随时查看或恢复。",
-								Action: func() {
-									if uiButton(c, "查看所有活跃项目", buttonProps{
-										Variant: buttonDefault,
-									}).Clicked() {
-										w.NavigateTo(NavAllProjects)
-									}
-								},
-							})
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
+						if !archived {
+							if len(w.archivedProjects) > 0 {
+								if uiButton(c, fmt.Sprintf("已归档 (%d)", len(w.archivedProjects)), buttonProps{
+									Variant: buttonDefault,
+								}).Label("已归档项目").Clicked() {
+									w.NavigateTo(NavArchivedProjects)
+								}
+							}
+							if uiButton(c, "新建项目", buttonProps{
+								Variant: buttonPrimary,
+							}).Clicked() {
+								w.OpenCreateProjectModal()
+							}
 						} else {
-							uiEmpty(c, emptyProps{
-								Icon:        iconFolderKanban(),
-								Title:       "还没有任何项目",
-								Description: "创建一个项目即可开始管理您的任务与附件。",
-								Action: func() {
-									if uiButton(c, "创建第一个项目", buttonProps{
-										Variant: buttonPrimary,
-									}).Clicked() {
-										w.OpenCreateProjectModal()
-									}
-								},
-							})
+							if uiButton(c, "返回所有项目", buttonProps{
+								Variant: buttonDefault,
+							}).Clicked() {
+								w.NavigateTo(NavAllProjects)
+							}
+						}
+					})
+				})
+
+				if len(list) == 0 {
+					ui.Column(c).Padding(48, 0).Gap(16).AlignItems(ui.Start).Children(func() {
+						if archived {
+							ui.Text(c, "暂无已归档项目").FontSize(16).TextColor(tk.TextSecondary)
+							if uiButton(c, "查看所有活跃项目", buttonProps{Variant: buttonDefault}).Clicked() {
+								w.NavigateTo(NavAllProjects)
+							}
+						} else {
+							ui.Text(c, "还没有任何项目").FontSize(16).TextColor(tk.TextSecondary)
+							if uiButton(c, "创建第一个项目", buttonProps{Variant: buttonPrimary}).Clicked() {
+								w.OpenCreateProjectModal()
+							}
 						}
 					})
 					return
 				}
 
-				// Project Cards List
-				ui.Column(c).Gap(14).AlignSelf(ui.Stretch).Children(func() {
+				ui.Column(c).Gap(12).AlignSelf(ui.Stretch).Children(func() {
 					for _, proj := range list {
 						w.renderProjectCard(c.Key(proj.ID), tk, proj, archived)
 					}
@@ -109,53 +76,45 @@ func (w *Workbench) renderProjectsView(c *ui.Context, tk *uiTokens, archived boo
 
 func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Project, archived bool) {
 	sum := w.projectSummaries[p.ID]
-	pct := float32(0)
+	pct := 0
 	if sum.Total > 0 {
-		pct = float32(sum.Done) * 100 / float32(sum.Total)
+		pct = sum.Done * 100 / sum.Total
 	}
 
-	card := ui.Column(c).Padding(18, 20).Gap(12).Radius(tk.BorderRadiusLG).
-		Background(tk.BgContainer).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
+	card := ui.Column(c).Padding(20, 24).Gap(16).Radius(20).
+		Background(tk.FillTertiary).AlignSelf(ui.Stretch).Cursor(ui.CursorPointer).
 		Label("项目卡片 " + p.Name)
 	if card.Hovered() {
-		card.Border(1, tk.PrimaryHover)
-	} else {
-		card.Border(1, tk.BorderSecondary)
+		card.Background(tk.FillSecondary)
 	}
 
 	actionClicked := false
 	card.Children(func() {
-		// Top Row: Icon + Name + Description + Actions
-		ui.Row(c).Gap(14).AlignItems(ui.Start).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Row(c).Gap(12).AlignItems(ui.Start).Grow(1).MinWidth(0).Children(func() {
-				ui.Box(c).Size(42, 42).Radius(tk.BorderRadius).Background(tk.FillTertiary).
+		// Top Row: Icon + Name + Optional Description + Actions
+		ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+				ui.Box(c).Size(40, 40).Radius(12).Background(tk.BgElevated).
 					Center().Shrink(0).Children(func() {
-					ui.Icon(c, ProjectIconSVG(p.Icon)).FontSize(22).TextColor(tk.Primary)
+					uiIconBox(c, ProjectIconSVG(p.Icon), tk.Text)
 				})
 
 				ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, p.Name).FontSize(16).FontWeight(600).TextColor(tk.Text).SingleLine()
 						if p.Archived {
-							uiTag(c, "已归档", tagProps{
-								Size:    sizeSmall,
-								Variant: tagFilled,
-								Color:   tagOrange,
-							})
+							ui.Text(c, "已归档").FontSize(14).FontWeight(500).TextColor(tk.Primary).SingleLine()
 						}
 					})
-					desc := strings.TrimSpace(p.Description)
-					if desc == "" {
-						desc = "暂无项目简介"
+					if desc := strings.TrimSpace(p.Description); desc != "" {
+						ui.Text(c, desc).FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 					}
-					ui.Text(c, desc).FontSize(13).TextColor(tk.TextSecondary)
 				})
 			})
 
 			// Card Action Buttons
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if uiButton(c.Key("edit-"+p.ID), "编辑", buttonProps{
-					Variant: buttonDefault,
+					Variant: buttonText,
 					Size:    sizeSmall,
 				}).Label("编辑项目 " + p.Name).Clicked() {
 					actionClicked = true
@@ -164,7 +123,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Proje
 
 				if archived {
 					if uiButton(c.Key("unarchive-"+p.ID), "恢复归档", buttonProps{
-						Variant: buttonDefault,
+						Variant: buttonText,
 						Size:    sizeSmall,
 					}).Label("恢复归档 " + p.Name).Clicked() {
 						actionClicked = true
@@ -172,7 +131,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Proje
 					}
 				} else {
 					if uiButton(c.Key("archive-"+p.ID), "归档", buttonProps{
-						Variant: buttonDefault,
+						Variant: buttonText,
 						Size:    sizeSmall,
 					}).Label("归档项目 " + p.Name).Clicked() {
 						actionClicked = true
@@ -181,7 +140,7 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Proje
 				}
 
 				if uiButton(c.Key("trash-"+p.ID), "移入回收站", buttonProps{
-					Variant: buttonDefault,
+					Variant: buttonText,
 					Size:    sizeSmall,
 					Danger:  true,
 				}).Label("移入回收站 " + p.Name).Clicked() {
@@ -191,42 +150,18 @@ func (w *Workbench) renderProjectCard(c *ui.Context, tk *uiTokens, p model.Proje
 			})
 		})
 
-		// Bottom Row: Task statistics & progress
-		ui.Row(c).Padding(10, 0, 0, 0).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(tk.BorderSecondary).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
-				uiTag(c, fmt.Sprintf("总任务 %d", sum.Total), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-				})
-				uiTag(c, fmt.Sprintf("计划 %d", sum.Planned), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagBlue,
-				})
-				uiTag(c, fmt.Sprintf("进行中 %d", sum.InProgress), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagOrange,
-				})
-				uiTag(c, fmt.Sprintf("已完成 %d", sum.Done), tagProps{
-					Size:    sizeSmall,
-					Variant: tagFilled,
-					Color:   tagGreen,
-				})
-			})
+		// Bottom Row: Minimalist Monochrome Metrics & Progress (zero divider / multi-color badges)
+		ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, fmt.Sprintf("计划 %d · 进行中 %d · 已完成 %d", sum.Planned, sum.InProgress, sum.Done)).
+				Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Shrink(0).Children(func() {
 				if sum.Total > 0 {
-					ui.Box(c).Width(140).Children(func() {
-						uiProgress(c, pct, progressProps{
-							ShowInfo: true,
-							Format:   formatProgressPercent,
-						})
-					})
+					ui.Text(c, fmt.Sprintf("%d%%", pct)).
+						Font("monospace").FontSize(14).FontWeight(600).TextColor(tk.Primary).SingleLine()
 				}
-				timeLabel := "更新于 " + p.UpdatedAt.Local().Format("2006-01-02 15:04")
-				ui.Text(c, timeLabel).FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+				ui.Text(c, p.UpdatedAt.Local().Format("2006-01-02 15:04")).
+					Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 			})
 		})
 	})
@@ -280,12 +215,12 @@ func (w *Workbench) renderProjectModal(c *ui.Context, tk *uiTokens) {
 				ui.Row(c).Gap(6).Wrap().AlignSelf(ui.Stretch).Children(func() {
 					for _, opt := range ProjectIconOptions {
 						chosen := w.projectModalIcon == opt.Key
-						btn := ui.ButtonBase(c.Key("icon-"+opt.Key)).Padding(6, 10).Gap(6).Radius(tk.BorderRadiusSM).
+						btn := ui.ButtonBase(c.Key("icon-"+opt.Key)).Padding(8, 12).Gap(8).Radius(12).
 							AlignItems(ui.Center).Cursor(ui.CursorPointer)
 						if chosen {
-							btn.Background(tk.PrimaryFillTertiary).Border(1, tk.Primary).TextColor(tk.Primary)
+							btn.Background(tk.PrimaryFillTertiary).TextColor(tk.Primary)
 						} else {
-							btn.Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).TextColor(tk.TextSecondary)
+							btn.Background(tk.FillTertiary).TextColor(tk.TextSecondary)
 						}
 						btn.Label("图标 " + opt.Label)
 						btn.Children(func() {

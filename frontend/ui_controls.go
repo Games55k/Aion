@@ -56,9 +56,9 @@ func styleButton(c *ui.Context, b ui.Element, label string, p buttonProps) ui.El
 
 func buttonSize(tk *uiTokens, s uiSize) (buttonMetrics, float32) {
 	if s == sizeSmall {
-		return buttonMetrics{24, 8, 12}, tk.BorderRadiusSM
+		return buttonMetrics{28, 12, 14}, tk.BorderRadiusSM
 	}
-	return buttonMetrics{32, 14, 13}, tk.BorderRadiusSM
+	return buttonMetrics{36, 16, 14}, tk.BorderRadius
 }
 
 type buttonState int
@@ -92,16 +92,12 @@ func buttonColors(tk *uiTokens, v buttonVariant, s buttonState) (bg, border, fg 
 	switch v {
 	case buttonPrimary:
 		c := pick(tk.Primary, tk.PrimaryHover, tk.PrimaryActive)
-		return c, c, tk.BgLayout
+		return c, ui.Transparent, ui.RGB(255, 255, 255)
 	case buttonText:
-		return pick(ui.Transparent, tk.FillSecondary, tk.FillSecondary), ui.Transparent, tk.Text
+		return pick(ui.Transparent, tk.FillTertiary, tk.FillSecondary), ui.Transparent, tk.Text
 	default:
-		bg = pick(tk.BgContainer, layerColor(tk.BgContainer, tk.FillTertiary), layerColor(tk.BgContainer, tk.FillSecondary))
-		border = tk.Border
-		if s != buttonRest {
-			border = mixColor(tk.Border, tk.Text, 0.08)
-		}
-		return bg, border, tk.Text
+		bg = pick(tk.FillTertiary, tk.FillSecondary, tk.Fill)
+		return bg, ui.Transparent, tk.Text
 	}
 }
 
@@ -119,12 +115,12 @@ func dangerButtonColors(tk *uiTokens, v buttonVariant, s buttonState) (bg, borde
 	switch v {
 	case buttonPrimary:
 		c := pick(tk.Error, tk.ErrorHover, tk.ErrorActive)
-		return c, c, tk.BgLayout
+		return c, ui.Transparent, ui.RGB(255, 255, 255)
 	case buttonText:
 		return pick(ui.Transparent, tk.ErrorBgHover, tk.ErrorBgActive), ui.Transparent, fg
 	default:
-		return pick(tk.BgContainer, tk.ErrorBgHover, tk.ErrorBgActive),
-			pick(tk.ErrorBorder, tk.ErrorBorderHover, tk.Error),
+		return pick(tk.FillTertiary, tk.ErrorBgHover, tk.ErrorBgActive),
+			ui.Transparent,
 			fg
 	}
 }
@@ -146,9 +142,9 @@ func uiActionIcon(c *ui.Context, svg *ui.SVG, p actionIconProps) ui.Element {
 func styleActionIcon(c *ui.Context, b ui.Element, svg *ui.SVG, p actionIconProps) ui.Element {
 	tk := tokensOf(c)
 	const (
-		box    float32 = 24
-		radius float32 = 4
-		glyph  float32 = 14
+		box    float32 = 28
+		radius float32 = 8
+		glyph  float32 = 18
 	)
 
 	b.Size(box, box).Radius(radius).
@@ -159,11 +155,11 @@ func styleActionIcon(c *ui.Context, b ui.Element, svg *ui.SVG, p actionIconProps
 	}
 
 	state := stateOfButton(b)
-	bg, border, _ := buttonColors(tk, buttonText, state)
+	bg, _, _ := buttonColors(tk, buttonText, state)
 	if p.Active {
 		bg = tk.FillSecondary
 	}
-	b.Background(bg).Border(1, border).TextColor(actionIconGlyphColor(tk, p.Danger, state))
+	b.Background(bg).TextColor(actionIconGlyphColor(tk, p.Danger, state))
 
 	b.Children(func() { ui.Icon(c, svg).FontSize(glyph) })
 	return b
@@ -225,14 +221,14 @@ func uiSegmented(c *ui.Context, selected *int, options []segmentedOption, p segm
 	}
 
 	parts := ui.SegmentedBase(c, selected, len(options))
-	track := parts.Track.Padding(3).Gap(4).Radius(tk.BorderRadiusLG).
-		Background(tk.BgLayout).Border(1, tk.FillQuaternary)
+	track := parts.Track.Padding(4).Gap(4).Radius(40).
+		Background(tk.FillTertiary)
 
 	slide := ui.ElementTransition{Duration: 240 * time.Millisecond, Ease: easeOut, Match: segmentedMatch{selected}}
 
 	track.Children(func() {
 		for i, option := range options {
-			seg := parts.Segment(i).Height(height).PaddingX(padding).Gap(gap).Radius(tk.BorderRadius).
+			seg := parts.Segment(i).Height(height).PaddingX(padding).Gap(gap).Radius(40).
 				FontSize(fontSize).FontWeight(500).Cursor(ui.CursorPointer)
 			text := tk.TextSecondary
 			if i == *selected || seg.Hovered() {
@@ -245,8 +241,11 @@ func uiSegmented(c *ui.Context, selected *int, options []segmentedOption, p segm
 			seg.TextColor(text).AnimatePose(pose, segmentPress)
 			seg.Children(func() {
 				if i == *selected {
-					ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).
-						Radius(tk.BorderRadius).Background(tk.BgElevated).ZIndex(-1).Transition(slide)
+					ind := ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).
+						Radius(40).Background(tk.BgElevated).ZIndex(-1).Transition(slide)
+					if !tk.Dark {
+						ind.Shadow(0, 2, 8, 0, ui.RGBA(24, 24, 24, 0.08))
+					}
 				}
 				if option.Icon != nil {
 					ui.Icon(c, option.Icon).FontSize(iconSize).Shrink(0)
@@ -261,38 +260,38 @@ func uiSegmented(c *ui.Context, selected *int, options []segmentedOption, p segm
 }
 
 var (
-	checkGlyph         = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`))
+	checkGlyph         = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`))
 	checkboxTransition = ui.ElementTransition{Duration: 150 * time.Millisecond, Ease: ui.CubicBezier(0.215, 0.61, 0.355, 1), Colors: true}
 )
 
 func uiCheckbox(c *ui.Context, checked *bool, label string) ui.Element {
 	tk := tokensOf(c)
-	const size float32 = 16
+	const size float32 = 20
 
 	state := ui.CheckOff
 	if *checked {
 		state = ui.CheckOn
 	}
-	row := ui.CheckboxStateBase(c, &state).Gap(8).Cursor(ui.CursorPointer)
+	row := ui.CheckboxStateBase(c, &state).Gap(12).Cursor(ui.CursorPointer)
 	if row.Changed() {
 		*checked = state == ui.CheckOn
 	}
 
 	filled := state != ui.CheckOff
-	border, bg := tk.BorderSecondary, tk.BgContainer
+	border, bg := tk.Border, ui.Transparent
 	switch {
 	case filled:
 		border, bg = tk.Primary, tk.Primary
 	case row.Hovered():
-		border = tk.Border
+		border = tk.Primary
 	}
 
 	row.Children(func() {
-		box := ui.Box(c).Size(size, size).Radius(4).Border(1, border).Background(bg).
-			TextColor(tk.BgLayout).Center().Transition(checkboxTransition)
+		box := ui.Box(c).Size(size, size).Radius(40).Border(1.5, border).Background(bg).
+			TextColor(ui.RGB(255, 255, 255)).Center().Transition(checkboxTransition)
 		box.Children(func() {
 			if state == ui.CheckOn {
-				ui.Icon(c, checkGlyph).FontSize(size * 0.75)
+				ui.Icon(c, checkGlyph).FontSize(12)
 			}
 		})
 		if label != "" {
@@ -302,38 +301,33 @@ func uiCheckbox(c *ui.Context, checked *bool, label string) ui.Element {
 	return row
 }
 
-var switchTransition = ui.ElementTransition{Duration: 200 * time.Millisecond, Ease: easeOut, Colors: true, Shadows: true}
+var switchTransition = ui.ElementTransition{Duration: 200 * time.Millisecond, Ease: easeOut, Colors: true}
 
 func uiSwitch(c *ui.Context, on *bool) ui.Element {
 	tk := tokensOf(c)
 	const (
-		w               float32 = 36
-		h               float32 = 22
-		thumbSize       float32 = 18
-		checkedX        float32 = 14
-		pressedCheckedX float32 = 10
-		pressedWidth    float32 = 22
+		w               float32 = 44
+		h               float32 = 24
+		thumbSize       float32 = 20
+		checkedX        float32 = 20
+		pressedCheckedX float32 = 16
+		pressedWidth    float32 = 24
 	)
 
-	track := ui.SwitchBase(c, on).Size(w, h).Padding(2).Radius(100).
+	track := ui.SwitchBase(c, on).Size(w, h).Padding(2).Radius(40).
 		Cursor(ui.CursorPointer).Transition(switchTransition)
 
 	hovered, pressed := track.Hovered() && !track.IsDisabled(), track.Pressed()
-	bg := tk.FillSecondary
+	bg := tk.Fill
 	switch {
 	case *on && hovered:
 		bg = tk.PrimaryHover
 	case *on:
 		bg = tk.Primary
 	case hovered:
-		bg = tk.Fill
+		bg = tk.FillSecondary
 	}
 	track.Background(bg)
-	if *on {
-		track.InsetShadow(0, 1.5, 3, 0, ui.RGBA(0, 0, 0, 0.18))
-	} else {
-		track.InsetShadow(0, 1.5, 2, 0, ui.RGBA(0, 0, 0, 0.08))
-	}
 
 	targetX, targetW := float32(0), thumbSize
 	if pressed {
@@ -347,10 +341,7 @@ func uiSwitch(c *ui.Context, on *bool) ui.Element {
 	}
 
 	track.Children(func() {
-		thumb := ui.Box(c).Height(thumbSize).Radius(thumbSize/2).Background(tk.BgContainer).
-			Shadow(0, 0, 0, 0.5, ui.RGBA(0, 0, 0, 0.04)).
-			Shadow(0, 1, 1, 0, ui.RGBA(0, 0, 0, 0.06)).
-			Shadow(0, 3, 8, 0, ui.RGBA(0, 30, 80, 0.16))
+		thumb := ui.Box(c).Height(thumbSize).Radius(40).Background(ui.RGB(255, 255, 255))
 		thumb.Width(thumb.AnimateTo("w", targetW, switchThumbAnim))
 		thumb.Translate(thumb.AnimateTo("x", targetX, switchThumbAnim), 0)
 	})

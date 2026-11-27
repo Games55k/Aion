@@ -52,7 +52,10 @@ func isJobNavPage(p NavPage) bool {
 	return p == NavJobAll || p == NavJobActive || p == NavJobOffer || p == NavJobClosed
 }
 
-const defaultReleasesURL = "https://github.com/Games55k/Aion/releases"
+const (
+	defaultReleasesURL = "https://github.com/Games55k/Aion/releases"
+	defaultIssuesURL   = "https://github.com/Games55k/Aion/issues"
+)
 
 // UpdateStatus describes the lifecycle stage of an in-app software update.
 type UpdateStatus string
@@ -102,6 +105,9 @@ type Host struct {
 	SkipUpdateVersion    func(version string)
 	RelaunchToUpdate     func()
 	SetUpdateCheckPolicy func(policy backend.UpdateCheckPolicy)
+	// LoadFavicon fetches and decodes a website favicon for an http(s) job application URL.
+	// When nil (e.g., in headless unit tests), jobs render their company-initial monogram without network I/O.
+	LoadFavicon func(ctx context.Context, rawURL string) (*ui.Bitmap, error)
 	// Now supplies the clock for save timestamps and default export names. Defaults to time.Now.
 	Now func() time.Time
 	// Dispatch, when set (e.g. win.Update in a desktop window), applies worker results
@@ -147,6 +153,9 @@ type Workbench struct {
 	sideWidth      float32
 	sideExpanded   bool
 	detailExpanded bool
+	topMenuOpen    bool
+	focusFilter    string
+	settingsTab    string
 
 	// Navigation & Module state
 	modules         []backend.ModuleDescriptor
@@ -232,7 +241,7 @@ type Workbench struct {
 	pendingQuickCloseAppID string
 	pendingQuickCloseOpID  string
 
-	// Job Close workflow modal state
+	// Job Close & Reopen workflow modal state
 	jobCloseOpen         bool
 	jobCloseAppID        string
 	jobCloseOutcome      string
@@ -240,19 +249,25 @@ type Workbench struct {
 	jobCloseConfirmOffer bool
 	jobCloseErr          string
 	jobCloseOpID         string
+	jobReopenOpen        bool
+	jobReopenAppID       string
+	jobReopenNote        string
+	jobReopenErr         string
 
 	// Projects & Tasks state
-	activeProjects   []model.Project
-	archivedProjects []model.Project
-	projectSummaries map[string]ProjectSummary
-	projectNames     map[string]string
-	boardTasks       []model.Task // Unfiltered tasks of activeProjectID
-	filteredTasks    []model.Task // Filtered tasks of activeProjectID
-	taskAttachments  map[string][]model.Attachment
+	activeProjects       []model.Project
+	archivedProjects     []model.Project
+	projectSummaries     map[string]ProjectSummary
+	projectNames         map[string]string
+	boardTasks           []model.Task // Unfiltered tasks of activeProjectID
+	filteredTasks        []model.Task // Filtered tasks of activeProjectID
+	paletteArchivedTasks []model.Task // Tasks in archived projects for ⌘K search
+	taskAttachments      map[string][]model.Attachment
 
 	// Board filter state
 	searchQuery    string
 	priorityFilter string // "" or "none", "low", "medium", "high", "urgent"
+	dueDateFilter  string // "" or "overdue", "due_soon", "none"
 	tagFilters     []string
 	allBoardTags   []string
 
@@ -305,6 +320,10 @@ type Workbench struct {
 	bitmapOrder       []string
 	bitmapLoading     bool
 	bitmapLoader      func(string) (*ui.Bitmap, error)
+	faviconCache      map[string]*ui.Bitmap
+	faviconOrder      []string
+	faviconFailed     map[string]bool
+	faviconLoading    map[string]bool
 
 	// Create/Edit Project modal state
 	projectModalOpen    bool
@@ -343,8 +362,10 @@ type Workbench struct {
 	backupEnabled        bool
 	backupIntervalSelect string
 	backupKeepSelect     string
-	backupDirInput       string
-	backupStatus         backup.AutoStatus
+	backupDirInput        string
+	backupStatus          backup.AutoStatus
+	managedBackups        []backup.ManagedBackup
+	backupHistoryExpanded bool
 	lastExportedZipPath  string
 	lastRestoreResult    *backup.RestoreResult
 	lastRestoreError     string
@@ -383,6 +404,9 @@ func New(app *backend.App, host Host) *Workbench {
 		attachmentMissing: make(map[string]bool),
 		bitmapCache:       make(map[string]*ui.Bitmap),
 		bitmapFailed:      make(map[string]bool),
+		faviconCache:      make(map[string]*ui.Bitmap),
+		faviconFailed:     make(map[string]bool),
+		faviconLoading:    make(map[string]bool),
 		saveState:         "saved",
 		jobSaveState:      "saved",
 		jobSortBy:         jobapplications.SortAppliedDesc,
@@ -434,6 +458,26 @@ func (w *Workbench) ReleasesURL() string {
 		return u
 	}
 	return defaultReleasesURL
+}
+
+// IssuesURL returns the GitHub Issues URL for user feedback.
+func (w *Workbench) IssuesURL() string {
+	rel := strings.TrimRight(w.ReleasesURL(), "/")
+	if base, ok := strings.CutSuffix(rel, "/releases"); ok && base != "" {
+		return base + "/issues"
+	}
+	return defaultIssuesURL
+}
+
+// OpenFeedbackPage opens the GitHub Issues page via Host.OpenURL.
+func (w *Workbench) OpenFeedbackPage() {
+	w.mu.Lock()
+	openURL := w.host.OpenURL
+	w.mu.Unlock()
+	if openURL == nil {
+		return
+	}
+	_ = openURL(w.IssuesURL())
 }
 
 // OpenUpdateModal opens the in-app software update modal without acquiring Store locks.
@@ -1055,6 +1099,7 @@ func (w *Workbench) hasOpenModal() bool {
 		w.jobCreateOpen ||
 		w.jobDetailModalOpen() ||
 		w.jobCloseOpen ||
+		w.jobReopenOpen ||
 		w.trashParentErrModalOpen ||
 		w.confirmPermDeleteOpen ||
 		w.confirmClearTrashOpen ||
@@ -1186,27 +1231,45 @@ func (w *Workbench) applyBoardFilters() {
 		Tags:     w.tagFilters,
 		Priority: model.Priority(w.priorityFilter),
 	}
+	today := w.now().Local().Format("2006-01-02")
+	soonCutoff := w.now().Local().AddDate(0, 0, 7).Format("2006-01-02")
 	filtered := make([]model.Task, 0, len(w.boardTasks))
 	for _, t := range w.boardTasks {
-		if filter.Matches(t) {
-			filtered = append(filtered, t)
+		if !filter.Matches(t) {
+			continue
 		}
+		switch w.dueDateFilter {
+		case "overdue":
+			if t.DueDate == "" || t.DueDate >= today || t.Status == model.Done {
+				continue
+			}
+		case "due_soon":
+			if t.DueDate == "" || t.DueDate < today || t.DueDate > soonCutoff || t.Status == model.Done {
+				continue
+			}
+		case "none":
+			if strings.TrimSpace(t.DueDate) != "" {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
 	}
 	w.filteredTasks = filtered
 }
 
-// HasBoardFilters reports whether any search, priority, or tag filter is active on the board.
+// HasBoardFilters reports whether any search, priority, due date, or tag filter is active on the board.
 func (w *Workbench) HasBoardFilters() bool {
-	return strings.TrimSpace(w.searchQuery) != "" || w.priorityFilter != "" || len(w.tagFilters) > 0
+	return strings.TrimSpace(w.searchQuery) != "" || w.priorityFilter != "" || w.dueDateFilter != "" || len(w.tagFilters) > 0
 }
 
-// ClearBoardFilters resets all search, priority, and tag filters on the board.
+// ClearBoardFilters resets all search, priority, due date, and tag filters on the board.
 func (w *Workbench) ClearBoardFilters() {
 	if w.IsRestoring() {
 		return
 	}
 	w.searchQuery = ""
 	w.priorityFilter = ""
+	w.dueDateFilter = ""
 	w.tagFilters = nil
 	w.rebuildBoardDerived()
 }
@@ -2635,6 +2698,7 @@ func (w *Workbench) reloadSettings(async bool) {
 		th, themeErr := settings.Theme(ctx)
 		pol, policyErr := backups.GetPolicy(ctx)
 		st, statusErr := backups.Status(ctx)
+		managed, managedErr := backups.ListManagedBackups(ctx)
 		upPol, upErr := settings.UpdateCheckPolicy(ctx)
 		hidden, hiddenErr := settings.HiddenModules(ctx)
 		return func() {
@@ -2649,6 +2713,9 @@ func (w *Workbench) reloadSettings(async bool) {
 			}
 			if statusErr == nil {
 				w.backupStatus = st
+			}
+			if managedErr == nil {
+				w.managedBackups = managed
 			}
 			if upErr == nil && !w.settingWritePending(updateCheckPreference) && w.updateCheckPolicyDraft() == initialUpdateCheck {
 				w.applyUpdateCheckPolicy(upPol)
@@ -2861,9 +2928,13 @@ func (w *Workbench) RunDueBackupNow() {
 	w.runAsyncTask("正在检查并执行到期自动备份...", func(ctx context.Context) func() {
 		path, err := w.app.Backups.RunDue(ctx)
 		st, stErr := w.app.Backups.Status(ctx)
+		managed, managedErr := w.app.Backups.ListManagedBackups(ctx)
 		return func() {
 			if stErr == nil {
 				w.backupStatus = st
+			}
+			if managedErr == nil {
+				w.managedBackups = managed
 			}
 			if err != nil {
 				return
@@ -3116,11 +3187,11 @@ func (w *Workbench) View(c *ui.Context) {
 		}
 	})
 
-	ui.Row(c).Fill().Background(tk.BgLayout).TextColor(tk.Text).FontSize(tk.FontSize).Children(func() {
-		// Left Collapsible & Resizable Navigation Sidebar
-		w.renderSidebar(c, tk)
+	ui.Column(c).Fill().Background(tk.BgLayout).TextColor(tk.Text).FontSize(tk.FontSize).Children(func() {
+		// Top Floating Apple Minimalist Navigation Bar (replaces legacy left sidebar)
+		w.renderTopbar(c, tk)
 
-		// Center Main Workspace Content
+		// Full-Canvas Main Workspace Content
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).MinHeight(0).AlignSelf(ui.Stretch).Background(tk.BgLayout).Children(func() {
 			switch w.navPage {
 			case NavFocus:
@@ -3150,6 +3221,7 @@ func (w *Workbench) View(c *ui.Context) {
 	w.renderJobCreateModal(c, tk)
 	w.renderJobDetailModal(c, tk)
 	w.renderJobCloseModal(c, tk)
+	w.renderJobReopenModal(c, tk)
 	w.renderTrashModals(c, tk)
 	w.renderSettingsModals(c, tk)
 	w.renderCommandPaletteModal(c, tk)

@@ -29,264 +29,261 @@ var (
 )
 
 func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
-	ui.Column(c).Fill().Children(func() {
-		// Top Header Bar
-		ui.Row(c).MinHeight(66).Padding(16, 24).Gap(10).AlignItems(ui.Center).
-			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			ui.Icon(c, iconSettings()).FontSize(22).TextColor(tk.Primary)
-			ui.Text(c, "全局设置与数据管理").FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
-		})
+	ui.Scroll(c).Fill().Background(tk.BgLayout).Children(func() {
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Padding(28, 48, 56, 48).Gap(32).WidthPercent(100).MaxWidth(960).Children(func() {
+			if w.IsBusy() {
+				ui.Row(c.Key("settings-busy-banner")).Padding(12, 16).Gap(12).Radius(16).
+					Background(tk.PrimaryFillQuaternary).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, w.BusyLabel()).FontSize(14).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
+					if uiButton(c, "取消操作", buttonProps{
+						Variant: buttonDefault,
+						Size:    sizeSmall,
+					}).Clicked() {
+						w.CancelBusyTask()
+					}
+				})
+			}
 
-		// Settings Body
-		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Padding(24).Gap(20).MaxWidth(860).AlignSelf(ui.Stretch).Children(func() {
-				if w.IsBusy() {
-					ui.Row(c.Key("settings-busy-banner")).Padding(12, 16).Gap(12).Radius(tk.BorderRadius).
-						Background(tk.PrimaryFillQuaternary).Border(1, tk.Primary).
-						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Text(c, w.BusyLabel()).FontSize(13).FontWeight(500).TextColor(tk.Text).Grow(1).SingleLine()
-						if uiButton(c, "取消操作", buttonProps{
-							Variant: buttonDefault,
+			// 1. Appearance (zero nested card/subtitle)
+			ui.Row(c.Key("settings-card-theme")).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "外观").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+
+				beforeIdx := w.themeSegmentIdx
+				uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []segmentedOption{
+					{Label: "跟随系统", Icon: iconMonitor()},
+					{Label: "浅色", Icon: iconSun()},
+					{Label: "深色", Icon: iconMoon()},
+				}, segmentedProps{
+					Size: sizeMiddle,
+				}).Label("主题模式切换")
+				if w.themeSegmentIdx != beforeIdx {
+					switch w.themeSegmentIdx {
+					case 1:
+						w.ApplyThemeSetting(ThemeLight)
+					case 2:
+						w.ApplyThemeSetting(ThemeDark)
+					default:
+						w.ApplyThemeSetting(ThemeSystem)
+					}
+				}
+			})
+
+			// 2. Local Data Directory
+			ui.Column(c.Key("settings-card-datadir")).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+				ui.Text(c, "数据目录").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+
+				dataDir := w.app.DataDir()
+				ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, dataDir).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).Grow(1).SingleLine()
+
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+						if uiButton(c, "复制路径", buttonProps{
+							Variant: buttonText,
 							Size:    sizeSmall,
 						}).Clicked() {
-							w.CancelBusyTask()
+							c.Services().WriteClipboard(dataDir)
 						}
+						if uiButton(c, "在 Finder 中打开", buttonProps{
+							Variant: buttonText,
+							Size:    sizeSmall,
+						}).Clicked() {
+							if w.host.OpenPath != nil {
+								_ = w.host.OpenPath(dataDir)
+							} else if w.host.RevealPath != nil {
+								_ = w.host.RevealPath(dataDir)
+							}
+						}
+					})
+				})
+			})
+
+			// 3. Automatic Local Backup
+			ui.Column(c.Key("settings-card-backup-auto")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "自动备份").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
+						beforeEn := w.backupEnabled
+						uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled).
+							Label("启用自动备份开关")
+						if w.backupEnabled != beforeEn {
+							w.SaveBackupPolicy()
+						}
+					})
+				})
+
+				lastSuccessStr := "尚无记录"
+				if !w.backupStatus.LastSuccess.IsZero() {
+					lastSuccessStr = w.backupStatus.LastSuccess.Local().Format("2006-01-02 15:04:05")
+				}
+				ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "最近备份 · "+lastSuccessStr).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
+
+					if uiButton(c, "立即检查到期备份", buttonProps{
+						Variant: buttonText,
+						Size:    sizeSmall,
+					}).Disabled(w.IsBusy()).Clicked() {
+						w.RunDueBackupNow()
+					}
+				})
+
+				errMsg := w.backupStatus.LastError
+				if errMsg == "" {
+					errMsg = w.LastAsyncError()
+				}
+				if errMsg != "" {
+					uiAlert(c.Key("settings-backup-err"), "最近一次自动备份失败", alertProps{
+						Type:        alertError,
+						Description: errMsg,
 					})
 				}
 
-				// 1. Appearance & Theme Card
-				ui.Column(c.Key("settings-card-theme")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
-					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-					ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Column(c).Gap(4).Children(func() {
-							ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-								ui.Icon(c, iconPalette()).FontSize(18).TextColor(tk.Primary)
-								ui.Text(c, "外观与主题").FontSize(16).FontWeight(600).TextColor(tk.Text)
-							})
-							ui.Text(c, "支持跟随 macOS 系统外观，或固定为浅色、深色模式。").
-								FontSize(13).TextColor(tk.TextSecondary)
-						})
+				ui.Row(c.Key("settings-backup-freq-keep")).Gap(20).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
+					ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
+						ui.Text(c, "备份频率").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+						beforeInt := w.backupIntervalSelect
+						uiSelect(c.Key("backup-interval-select"), &w.backupIntervalSelect, selectProps{
+							Options: withCurrentOption(backupIntervalOptions, w.backupIntervalSelect, intervalLabel(parseIntervalOption(w.backupIntervalSelect))),
+						}).Label("自动备份频率选择")
+						if w.backupIntervalSelect != beforeInt {
+							w.SaveBackupPolicy()
+						}
+					})
 
-						beforeIdx := w.themeSegmentIdx
-						uiSegmented(c.Key("theme-segmented"), &w.themeSegmentIdx, []segmentedOption{
-							{Label: "跟随系统", Icon: iconMonitor()},
-							{Label: "浅色", Icon: iconSun()},
-							{Label: "深色", Icon: iconMoon()},
-						}, segmentedProps{
-							Size: sizeMiddle,
-						}).Label("主题模式切换")
-						if w.themeSegmentIdx != beforeIdx {
-							switch w.themeSegmentIdx {
-							case 1:
-								w.ApplyThemeSetting(ThemeLight)
-							case 2:
-								w.ApplyThemeSetting(ThemeDark)
-							default:
-								w.ApplyThemeSetting(ThemeSystem)
-							}
+					ui.Column(c).Gap(8).Grow(1).Basis(0).Children(func() {
+						ui.Text(c, "保留份数").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+						beforeKeep := w.backupKeepSelect
+						uiSelect(c.Key("backup-keep-select"), &w.backupKeepSelect, selectProps{
+							Options: withCurrentOption(backupKeepOptions, w.backupKeepSelect, "保留最近 "+w.backupKeepSelect+" 份"),
+						}).Label("自动备份保留份数选择")
+						if w.backupKeepSelect != beforeKeep {
+							w.SaveBackupPolicy()
 						}
 					})
 				})
 
-				// 2. Local Data Directory Card
-				ui.Column(c.Key("settings-card-datadir")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
-					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-					ui.Column(c).Gap(4).Children(func() {
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Icon(c, iconHardDrive()).FontSize(18).TextColor(tk.Primary)
-							ui.Text(c, "本地数据存储位置").FontSize(16).FontWeight(600).TextColor(tk.Text)
-						})
-						ui.Text(c, "所有项目、任务、求职投递、回收站、附件与设置均保存在以下本地目录：").
-							FontSize(13).TextColor(tk.TextSecondary)
-					})
-
-					dataDir := w.app.DataDir()
-					ui.Row(c).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
-						Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
-						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Text(c, dataDir).Font("monospace").FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
-
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-							if uiButton(c, "复制路径", buttonProps{
-								Variant: buttonDefault,
-								Size:    sizeSmall,
-							}).Clicked() {
-								c.Services().WriteClipboard(dataDir)
-							}
-							if uiButton(c, "在 Finder 中打开", buttonProps{
-								Variant: buttonDefault,
-								Size:    sizeSmall,
-							}).Clicked() {
-								if w.host.OpenPath != nil {
-									_ = w.host.OpenPath(dataDir)
-								} else if w.host.RevealPath != nil {
-									_ = w.host.RevealPath(dataDir)
-								}
-							}
-						})
-					})
-				})
-
-				// 3. Automatic Local Backup Card
-				ui.Column(c.Key("settings-card-backup-auto")).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
-					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-					ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Column(c).Gap(4).Children(func() {
-							ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-								ui.Icon(c, iconClock()).FontSize(18).TextColor(tk.Primary)
-								ui.Text(c, "本地自动备份").FontSize(16).FontWeight(600).TextColor(tk.Text)
-							})
-							ui.Text(c, "按设定周期自动备份本地数据，超出保留份数的旧备份将自动清理。").
-								FontSize(13).TextColor(tk.TextSecondary)
-						})
-
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-							ui.Text(c, "启用自动备份").FontSize(13).TextColor(tk.Text)
-							beforeEn := w.backupEnabled
-							uiSwitch(c.Key("backup-enabled-switch"), &w.backupEnabled).
-								Label("启用自动备份开关")
-							if w.backupEnabled != beforeEn {
+				ui.Column(c.Key("settings-backup-dir")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "备份目录").FontSize(14).FontWeight(500).TextColor(tk.TextSecondary)
+					ui.Row(c).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+						ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+							inp := uiInput(c.Key("backup-dir-input"), &w.backupDirInput, inputProps{
+								Placeholder: filepath.Join(w.app.DataDir(), "backups"),
+							}).Label("自动备份目录输入框")
+							if inp.Submitted() {
 								w.SaveBackupPolicy()
 							}
 						})
-					})
 
-					// Status Banner
-					lastSuccessStr := "尚无自动备份记录"
-					if !w.backupStatus.LastSuccess.IsZero() {
-						lastSuccessStr = w.backupStatus.LastSuccess.Local().Format("2006-01-02 15:04:05")
-					}
-					ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
-						Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
-						AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Icon(c, iconCircleCheck()).FontSize(15).TextColor(tk.Success)
-							ui.Text(c, "最近一次自动备份成功时间: "+lastSuccessStr).FontSize(13).TextColor(tk.Text)
-						})
-
-						if uiButton(c, "立即检查到期备份", buttonProps{
+						if uiButton(c, "选择目录...", buttonProps{
 							Variant: buttonDefault,
-							Size:    sizeSmall,
 						}).Disabled(w.IsBusy()).Clicked() {
-							w.RunDueBackupNow()
+							if pick := w.host.PickDirectory; pick != nil {
+								curDir := w.backupDirInput
+								w.runDialog(func() func() {
+									dir, err := pick("选择自动备份存储目录", curDir)
+									if err != nil || dir == "" {
+										return nil
+									}
+									return func() {
+										w.backupDirInput = dir
+										w.SaveBackupPolicy()
+									}
+								})
+							}
+						}
+
+						if uiButton(c, "保存策略", buttonProps{
+							Variant: buttonDefault,
+						}).Clicked() {
+							w.SaveBackupPolicy()
 						}
 					})
+				})
 
-					// Error Banner if scheduler reported an error
-					errMsg := w.backupStatus.LastError
-					if errMsg == "" {
-						errMsg = w.LastAsyncError()
-					}
-					if errMsg != "" {
-						uiAlert(c.Key("settings-backup-err"), "最近一次自动备份失败", alertProps{
-							Type:        alertError,
-							Description: errMsg,
-						})
-					}
-
-					// Frequency & Keep Count Row
-					ui.Row(c.Key("settings-backup-freq-keep")).Gap(16).AlignItems(ui.Start).AlignSelf(ui.Stretch).Children(func() {
-						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
-							ui.Text(c, "自动备份频率").FontSize(13).FontWeight(500).TextColor(tk.Text)
-							beforeInt := w.backupIntervalSelect
-							uiSelect(c.Key("backup-interval-select"), &w.backupIntervalSelect, selectProps{
-								Options: withCurrentOption(backupIntervalOptions, w.backupIntervalSelect, intervalLabel(parseIntervalOption(w.backupIntervalSelect))),
-							}).Label("自动备份频率选择")
-							if w.backupIntervalSelect != beforeInt {
-								w.SaveBackupPolicy()
+				// Collapsible Managed Backup History (Auto & Pre-Restore Safety Backups)
+				if len(w.managedBackups) > 0 {
+					ui.Column(c.Key("settings-backup-history")).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+						toggleLabel := fmt.Sprintf("历史备份记录 (%d)", len(w.managedBackups))
+						toggleBtn := ui.ButtonBase(c.Key("toggle-backup-history")).Padding(4, 0).Gap(6).
+							AlignItems(ui.Center).Cursor(ui.CursorPointer).TextColor(tk.TextSecondary).
+							Label("切换历史备份记录")
+						if toggleBtn.Hovered() {
+							toggleBtn.TextColor(tk.Text)
+						}
+						toggleBtn.Children(func() {
+							chev := iconChevronRight()
+							if w.backupHistoryExpanded {
+								chev = iconChevronDown()
 							}
+							ui.Icon(c, chev).FontSize(14)
+							ui.Text(c, toggleLabel).FontSize(14).FontWeight(500).SingleLine()
 						})
+						if toggleBtn.Clicked() {
+							w.backupHistoryExpanded = !w.backupHistoryExpanded
+						}
 
-						ui.Column(c).Gap(6).Grow(1).Basis(0).Children(func() {
-							ui.Text(c, "自动备份保留份数").FontSize(13).FontWeight(500).TextColor(tk.Text)
-							beforeKeep := w.backupKeepSelect
-							uiSelect(c.Key("backup-keep-select"), &w.backupKeepSelect, selectProps{
-								Options: withCurrentOption(backupKeepOptions, w.backupKeepSelect, "保留最近 "+w.backupKeepSelect+" 份"),
-							}).Label("自动备份保留份数选择")
-							if w.backupKeepSelect != beforeKeep {
-								w.SaveBackupPolicy()
-							}
-						})
-					})
-
-					// Backup Directory Row
-					ui.Column(c.Key("settings-backup-dir")).Gap(6).AlignSelf(ui.Stretch).Children(func() {
-						ui.Text(c, "自动备份存储目录").FontSize(13).FontWeight(500).TextColor(tk.Text)
-						ui.Row(c).Gap(8).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-							ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-								inp := uiInput(c.Key("backup-dir-input"), &w.backupDirInput, inputProps{
-									Placeholder: "默认目录: " + filepath.Join(w.app.DataDir(), "backups"),
-								}).Label("自动备份目录输入框")
-								if inp.Submitted() {
-									w.SaveBackupPolicy()
-								}
-							})
-
-							if uiButton(c, "选择目录...", buttonProps{
-								Variant: buttonDefault,
-							}).Disabled(w.IsBusy()).Clicked() {
-								if pick := w.host.PickDirectory; pick != nil {
-									curDir := w.backupDirInput
-									w.runDialog(func() func() {
-										dir, err := pick("选择自动备份存储目录", curDir)
-										if err != nil || dir == "" {
-											return nil
-										}
-										return func() {
-											w.backupDirInput = dir
-											w.SaveBackupPolicy()
-										}
+						if w.backupHistoryExpanded {
+							ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
+								for i, item := range w.managedBackups {
+									b := item
+									kindLabel := "自动备份"
+									kindColor := tk.TextSecondary
+									if b.Kind == "safety" {
+										kindLabel = "安全备份"
+										kindColor = tk.Primary
+									}
+									ts := b.CreatedAt.Local().Format("2006-01-02 15:04:05")
+									baseName := filepath.Base(b.Path)
+									ui.Row(c.Key(fmt.Sprintf("backup-hist-%d", i))).Padding(10, 14).Gap(12).Radius(12).
+										Background(tk.FillTertiary).AlignItems(ui.Center).Justify(ui.SpaceBetween).
+										AlignSelf(ui.Stretch).Children(func() {
+										ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+											ui.Text(c, kindLabel).FontSize(13).FontWeight(600).TextColor(kindColor).SingleLine().Shrink(0)
+											ui.Text(c, ts).Font("monospace").FontSize(13).TextColor(tk.TextSecondary).SingleLine().Shrink(0)
+											ui.Text(c, baseName).Font("monospace").FontSize(13).TextColor(tk.Text).Grow(1).SingleLine()
+										})
+										ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+											if uiButton(c.Key(fmt.Sprintf("reveal-bk-%d", i)), "Finder", buttonProps{
+												Variant: buttonText,
+												Size:    sizeSmall,
+											}).Label("在 Finder 中显示备份 " + baseName).Clicked() {
+												if w.host.RevealPath != nil {
+													_ = w.host.RevealPath(b.Path)
+												} else if w.host.OpenPath != nil {
+													_ = w.host.OpenPath(filepath.Dir(b.Path))
+												}
+											}
+											if uiButton(c.Key(fmt.Sprintf("restore-bk-%d", i)), "恢复", buttonProps{
+												Variant: buttonText,
+												Size:    sizeSmall,
+											}).Disabled(w.IsBusy()).Label("恢复备份 " + baseName).Clicked() {
+												if w.IsBusy() {
+													return
+												}
+												if err := w.flushPendingOrRevealDraft(); err != nil {
+													return
+												}
+												w.RequestRestoreBackup(b.Path)
+											}
+										})
 									})
 								}
-							}
-
-							if uiButton(c, "保存策略", buttonProps{
-								Variant: buttonPrimary,
-							}).Clicked() {
-								w.SaveBackupPolicy()
-							}
-						})
+							})
+						}
 					})
-				})
+				}
+			})
 
-				// 4. Manual Backup Export & Full Restore Card
-				ui.Column(c.Key("settings-card-backup-manual")).Padding(20).Gap(16).Radius(tk.BorderRadiusLG).
-					Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-					ui.Column(c).Gap(4).Children(func() {
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Icon(c, iconArchiveRestore()).FontSize(18).TextColor(tk.Primary)
-							ui.Text(c, "手动备份导出与完整恢复").FontSize(16).FontWeight(600).TextColor(tk.Text)
-						})
-						ui.Text(c, "将全部项目、任务、求职投递、附件与设置导出为 .zip 备份包，可用于跨设备迁移或恢复数据。").
-							FontSize(13).TextColor(tk.TextSecondary)
-					})
-
-					if w.lastExportedZipPath != "" {
-						uiAlert(c.Key("settings-export-alert"), "最近一次手动备份已导出", alertProps{
-							Type:        alertSuccess,
-							Description: "备份包路径: " + w.lastExportedZipPath,
-						})
-					}
-
-					if w.lastRestoreError != "" {
-						uiAlert(c.Key("settings-restore-error"), "备份恢复失败", alertProps{
-							Type:        alertError,
-							Description: w.lastRestoreError,
-						})
-					} else if w.lastRestoreResult != nil {
-						uiAlert(c.Key("settings-restore-alert"), "数据已从备份包完整恢复", alertProps{
-							Type:        alertSuccess,
-							Description: fmt.Sprintf("恢复前自动生成的安全备份已保存在: %s", w.lastRestoreResult.SafetyBackupPath),
-						})
-					}
+			// 4. Manual Backup Export & Full Restore
+			ui.Column(c.Key("settings-card-backup-manual")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+					ui.Text(c, "手动备份与恢复").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 
 					ui.Row(c.Key("settings-manual-actions")).Gap(12).AlignItems(ui.Center).Children(func() {
-						if uiButton(c, "导出完整备份 (.zip)", buttonProps{
-							Variant: buttonPrimary,
-						}).Disabled(w.IsBusy()).Clicked() {
-							w.PickAndExportManualBackup()
-						}
-
 						if uiButton(c, "从备份包恢复 (.zip)...", buttonProps{
 							Variant: buttonDefault,
 						}).Disabled(w.IsBusy()).Clicked() {
@@ -308,17 +305,43 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 								})
 							}
 						}
+
+						if uiButton(c, "导出完整备份 (.zip)", buttonProps{
+							Variant: buttonPrimary,
+						}).Disabled(w.IsBusy()).Clicked() {
+							w.PickAndExportManualBackup()
+						}
 					})
 				})
 
-				// 5. Workspace Modules Visibility Card
-				w.renderSettingsModulesCard(c, tk)
+				if w.lastExportedZipPath != "" {
+					uiAlert(c.Key("settings-export-alert"), "已导出备份", alertProps{
+						Type:        alertSuccess,
+						Description: w.lastExportedZipPath,
+					})
+				}
 
-				// 6. Local AI / MCP Integration Card
-				w.renderSettingsMCPCard(c, tk)
+				if w.lastRestoreError != "" {
+					uiAlert(c.Key("settings-restore-error"), "备份恢复失败", alertProps{
+						Type:        alertError,
+						Description: w.lastRestoreError,
+					})
+				} else if w.lastRestoreResult != nil {
+					uiAlert(c.Key("settings-restore-alert"), "数据已完整恢复", alertProps{
+						Type:        alertSuccess,
+						Description: fmt.Sprintf("安全备份：%s", w.lastRestoreResult.SafetyBackupPath),
+					})
+				}
+			})
 
-				// 7. App Version & Updates Card
-				w.renderSettingsUpdatesCard(c, tk)
+			// 5. Workspace Modules Visibility
+			w.renderSettingsModulesCard(c, tk)
+
+			// 6. Local AI / MCP Integration
+			w.renderSettingsMCPCard(c, tk)
+
+			// 7. App Version & Updates
+			w.renderSettingsUpdatesCard(c, tk)
 			})
 		})
 	})
@@ -326,36 +349,28 @@ func (w *Workbench) renderSettingsView(c *ui.Context, tk *uiTokens) {
 
 func (w *Workbench) renderSettingsModulesCard(c *ui.Context, tk *uiTokens) {
 	visibleCount := len(w.VisibleModules())
-	ui.Column(c.Key("settings-card-modules")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
-		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-		ui.Column(c).Gap(4).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconLayers()).FontSize(18).TextColor(tk.Primary)
-				ui.Text(c, "工作区模块").FontSize(16).FontWeight(600).TextColor(tk.Text)
-			})
-			ui.Text(c, "按当前阶段按需显示或隐藏内置模块；隐藏仅收起侧边栏入口，不会删除任何本地数据。").
-				FontSize(13).TextColor(tk.TextSecondary)
-		})
+	ui.Column(c.Key("settings-card-modules")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+		ui.Text(c, "工作区").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
 
 		ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
 			for _, mod := range w.modules {
 				m := mod
 				visible := w.IsModuleVisible(m.ID)
 				lockedLast := visible && visibleCount <= 1
-				ui.Row(c.Key("module-toggle-"+m.ID)).Padding(10, 12).Gap(12).Radius(tk.BorderRadius).
-					Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
-					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-					ui.Row(c).Gap(10).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
-						ui.Icon(c, ModuleIconSVG(m)).FontSize(16).TextColor(tk.Primary)
-						ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-							ui.Text(c, m.Name).FontSize(14).FontWeight(500).TextColor(tk.Text).SingleLine()
-							ui.Text(c, moduleDescription(m.ID)).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-						})
+				row := ui.Row(c.Key("module-toggle-"+m.ID)).Padding(12, 16).Gap(16).Radius(16).
+					AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch)
+				if row.Hovered() {
+					row.Background(tk.FillTertiary)
+				}
+				row.Children(func() {
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Grow(1).MinWidth(0).Children(func() {
+						uiIconBox(c, ModuleIconSVG(m), tk.TextSecondary)
+						ui.Text(c, m.Name).FontSize(16).FontWeight(500).TextColor(tk.Text).SingleLine()
 					})
 
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+					ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
 						if lockedLast {
-							ui.Text(c, "至少保留一个模块").FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+							ui.Text(c, "至少保留一个模块").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 						}
 						checked := visible
 						uiSwitch(c.Key("module-switch-"+m.ID), &checked).
@@ -379,61 +394,40 @@ func (w *Workbench) renderSettingsMCPCard(c *ui.Context, tk *uiTokens) {
 		cmdPreview += " " + shellQuote(a)
 	}
 
-	ui.Column(c.Key("settings-card-mcp")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
-		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconTerminal()).FontSize(18).TextColor(tk.Primary)
-					ui.Text(c, "AI 与 MCP 接入").FontSize(16).FontWeight(600).TextColor(tk.Text)
-					if info.Ready {
-						uiTag(c, "实时联动已就绪", tagProps{
-							Size:    sizeSmall,
-							Variant: tagFilled,
-							Color:   tagGreen,
-						})
-					} else if info.LastError != "" {
-						uiTag(c, "仅离线可用", tagProps{
-							Size:    sizeSmall,
-							Variant: tagFilled,
-							Color:   tagOrange,
-						})
-					}
-				})
-				ui.Text(c, "通过标准 stdio MCP 让 Antigravity、Codex 等本地 AI 助手读写项目、任务与求职投递（仅限软删除进回收站）。").
-					FontSize(13).TextColor(tk.TextSecondary)
-			})
+	ui.Column(c.Key("settings-card-mcp")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Text(c, "本地接入").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+			if info.Ready {
+				ui.Text(c, "aion.sock").Font("monospace").FontSize(14).FontWeight(500).TextColor(tk.Primary).SingleLine()
+			} else if info.LastError != "" {
+				ui.Text(c, "离线模式").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
+			}
 		})
 
-		ui.Row(c).Padding(10, 12).Gap(10).Radius(tk.BorderRadius).
-			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+		ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
 			AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
-			ui.Text(c, cmdPreview).Font("monospace").FontSize(12).TextColor(tk.Text).Grow(1).SingleLine()
+			ui.Text(c, cmdPreview).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).Grow(1).SingleLine()
 		})
 
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if uiButton(c, "复制 Antigravity 配置", buttonProps{
-					Variant: buttonPrimary,
-					Size:    sizeSmall,
-				}).Clicked() {
-					c.Services().WriteClipboard(FormatMCPJSONConfig(info))
-				}
-				if uiButton(c, "复制 Codex 命令", buttonProps{
-					Variant: buttonDefault,
-					Size:    sizeSmall,
-				}).Clicked() {
-					c.Services().WriteClipboard(FormatCodexMCPCommand(info))
-				}
-				if uiButton(c, "复制 CLI 软链命令", buttonProps{
-					Variant: buttonDefault,
-					Size:    sizeSmall,
-				}).Clicked() {
-					c.Services().WriteClipboard(FormatCLISymlinkCommand(info))
-				}
-			})
-			ui.Text(c, "软链后可在终端直接使用 aion summary / task / job").
-				FontSize(12).TextColor(tk.TextTertiary).SingleLine()
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Wrap().Children(func() {
+			if uiButton(c, "复制 Antigravity 配置", buttonProps{
+				Variant: buttonDefault,
+				Size:    sizeSmall,
+			}).Clicked() {
+				c.Services().WriteClipboard(FormatMCPJSONConfig(info))
+			}
+			if uiButton(c, "复制 Codex 命令", buttonProps{
+				Variant: buttonDefault,
+				Size:    sizeSmall,
+			}).Clicked() {
+				c.Services().WriteClipboard(FormatCodexMCPCommand(info))
+			}
+			if uiButton(c, "复制 CLI 软链命令", buttonProps{
+				Variant: buttonDefault,
+				Size:    sizeSmall,
+			}).Clicked() {
+				c.Services().WriteClipboard(FormatCLISymlinkCommand(info))
+			}
 		})
 
 		if info.LastError != "" {
@@ -451,11 +445,11 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 	displayVersion := displayVersionNumber(info.Version)
 	availVersion := displayVersionNumber(info.AvailableVersion)
 	installedVersion := displayVersionNumber(info.InstalledVersion)
-	versionLine := "当前版本: 开发版本（未打包）"
+	versionLine := "开发版本"
 	if displayVersion != "" {
-		versionLine = "当前版本: v" + displayVersion
+		versionLine = "v" + displayVersion
 		if info.IsDev {
-			versionLine += "（开发构建）"
+			versionLine += " (dev)"
 		}
 	}
 	lastCheckStr := "尚未检查"
@@ -463,33 +457,19 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 		lastCheckStr = info.LastCheck.Local().Format("2006-01-02 15:04:05")
 	}
 
-	ui.Column(c.Key("settings-card-updates")).Padding(20).Gap(14).Radius(tk.BorderRadiusLG).
-		Background(tk.BgContainer).Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconRefreshCw()).FontSize(18).TextColor(tk.Primary)
-					ui.Text(c, "应用版本与更新").FontSize(16).FontWeight(600).TextColor(tk.Text)
-					if installedVersion != "" {
-						uiTag(c, "v"+installedVersion+" 待重启", tagProps{
-							Size:    sizeSmall,
-							Variant: tagFilled,
-							Color:   tagGreen,
-						})
-					} else if availVersion != "" {
-						uiTag(c, "发现新版本 v"+availVersion, tagProps{
-							Size:    sizeSmall,
-							Variant: tagFilled,
-							Color:   tagGreen,
-						})
-					}
-				})
-				ui.Text(c, "开启后仅在后台静默检查更新并在侧边栏提示，不会自动下载或安装。").
-					FontSize(13).TextColor(tk.TextSecondary)
+	ui.Column(c.Key("settings-card-updates")).Gap(16).AlignSelf(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "更新").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+				if installedVersion != "" {
+					ui.Text(c, "v"+installedVersion+" 待重启").Font("monospace").FontSize(14).FontWeight(500).TextColor(tk.Primary).SingleLine()
+				} else if availVersion != "" {
+					ui.Text(c, "发现新版本 v"+availVersion).Font("monospace").FontSize(14).FontWeight(500).TextColor(tk.Primary).SingleLine()
+				}
 			})
 
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				ui.Text(c, "自动检查更新").FontSize(13).TextColor(tk.Text)
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Shrink(0).Children(func() {
+				ui.Text(c, "自动检查").FontSize(14).TextColor(tk.TextSecondary)
 				beforeAuto := w.updateCheckEnabled
 				uiSwitch(c.Key("update-auto-check-switch"), &w.updateCheckEnabled).
 					Label("自动检查更新开关")
@@ -499,17 +479,24 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 			})
 		})
 
-		ui.Row(c).Padding(10, 14).Gap(12).Radius(tk.BorderRadius).
-			Background(tk.FillQuaternary).Border(1, tk.BorderSecondary).
+		ui.Row(c).Padding(12, 16).Gap(12).Radius(16).Background(tk.FillTertiary).
 			AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Text(c, versionLine).FontSize(13).FontWeight(500).TextColor(tk.Text).SingleLine()
-				ui.Text(c, "最近一次检查更新: "+lastCheckStr).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-			})
+			ui.Text(c, versionLine+" · "+lastCheckStr).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
+				fbBtn := uiButton(c.Key("settings-feedback-btn"), "", buttonProps{
+					Variant: buttonText,
+					Size:    sizeSmall,
+				}).Disabled(!canOpenURL).Label("在设置中提交问题反馈")
+				fbBtn.Children(func() {
+					ui.Icon(c, iconMessageSquare()).FontSize(14)
+					ui.Text(c, "问题反馈").SingleLine()
+				})
+				if fbBtn.Clicked() {
+					w.OpenFeedbackPage()
+				}
 				if uiButton(c, "前往 Releases 下载", buttonProps{
-					Variant: buttonDefault,
+					Variant: buttonText,
 					Size:    sizeSmall,
 				}).Disabled(!canOpenURL).Clicked() {
 					w.OpenReleasesPage()
@@ -542,51 +529,32 @@ func (w *Workbench) renderSettingsUpdatesCard(c *ui.Context, tk *uiTokens) {
 			})
 		})
 
-		ui.Column(c.Key("settings-update-interval")).Gap(6).Width(260).AlignSelf(ui.Start).Children(func() {
-			ui.Text(c, "自动检查频率").FontSize(13).FontWeight(500).TextColor(tk.Text)
-			beforeInt := w.updateCheckIntervalSelect
-			uiSelect(c.Key("update-check-interval-select"), &w.updateCheckIntervalSelect, selectProps{
-				Options: withCurrentOption(updateCheckIntervalOptions, w.updateCheckIntervalSelect, intervalLabel(parseIntervalOption(w.updateCheckIntervalSelect))),
-			}).Label("自动检查频率选择").Disabled(!w.updateCheckEnabled)
-			if w.updateCheckIntervalSelect != beforeInt {
-				w.SaveUpdateCheckPolicy()
-			}
+		ui.Row(c.Key("settings-update-interval")).Gap(16).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "检查频率").FontSize(14).TextColor(tk.TextSecondary)
+			ui.Box(c).Width(200).Children(func() {
+				beforeInt := w.updateCheckIntervalSelect
+				uiSelect(c.Key("update-check-interval-select"), &w.updateCheckIntervalSelect, selectProps{
+					Options: withCurrentOption(updateCheckIntervalOptions, w.updateCheckIntervalSelect, intervalLabel(parseIntervalOption(w.updateCheckIntervalSelect))),
+				}).Label("自动检查频率选择").Disabled(!w.updateCheckEnabled)
+				if w.updateCheckIntervalSelect != beforeInt {
+					w.SaveUpdateCheckPolicy()
+				}
+			})
 		})
 
 		switch {
 		case info.IsDev || displayVersion == "":
-			uiAlert(c.Key("settings-updates-dev"), "当前为开发构建，不支持应用内自动更新", alertProps{
-				Type:        alertInfo,
-				Description: "请使用正式打包的 .dmg 安装包运行 Aion，或点击“前往 Releases 下载”手动获取最新安装包。",
-			})
+			uiAlert(c.Key("settings-updates-dev"), "当前为开发构建，不支持应用内自动更新", alertProps{Type: alertInfo})
 		case !info.CanSelfUpdate:
-			uiAlert(c.Key("settings-updates-readonly"), "当前安装位置不可写，无法应用内自动更新", alertProps{
-				Type:        alertWarning,
-				Description: "请将 Aion.app 移动到当前用户有写入权限的“应用程序”目录后重试，或点击“前往 Releases 下载”手动下载。",
-			})
+			uiAlert(c.Key("settings-updates-readonly"), "当前安装位置不可写，无法应用内自动更新", alertProps{Type: alertWarning})
 		case info.Status == UpdateReady || installedVersion != "":
 			ver := installedVersion
 			if ver == "" {
 				ver = availVersion
 			}
-			uiAlert(c.Key("settings-updates-ready"), "新版本 v"+ver+" 已安装，重启即可生效", alertProps{
-				Type:        alertSuccess,
-				Description: "点击“立即重启更新”或侧边栏更新图标重启应用。",
-			})
+			uiAlert(c.Key("settings-updates-ready"), "v"+ver+" 已安装，重启生效", alertProps{Type: alertSuccess})
 		case info.Status == UpdateError && availVersion != "":
-			desc := info.LastError
-			if desc == "" {
-				desc = "点击“重试更新”或侧边栏更新图标重试安装。"
-			}
-			uiAlert(c.Key("settings-updates-error"), "更新 v"+availVersion+" 失败", alertProps{
-				Type:        alertError,
-				Description: desc,
-			})
-		case availVersion != "":
-			uiAlert(c.Key("settings-updates-available"), "发现新版本 v"+availVersion, alertProps{
-				Type:        alertSuccess,
-				Description: "点击“查看更新”或侧边栏更新图标查看更新说明并决定是否安装。",
-			})
+			uiAlert(c.Key("settings-updates-error"), "更新 v"+availVersion+" 失败", alertProps{Type: alertError, Description: info.LastError})
 		}
 	})
 }

@@ -60,41 +60,62 @@ func briefSingleLineSummary(app model.JobApplication) string {
 }
 
 func (w *Workbench) renderJobApplicationsView(c *ui.Context, tk *uiTokens) {
-	ui.Column(c).Fill().MinWidth(0).MinHeight(0).Children(func() {
-		// Top Page Header (drag window area + primary CTA)
-		ui.Column(c).Padding(24, 28, 16, 28).Gap(14).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Background(tk.BgContainer).DragWindow().Children(func() {
-			ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Wrap().Children(func() {
-				ui.Column(c).Gap(4).MinWidth(0).Children(func() {
-					ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, jobViewTitle(w.navPage)).FontSize(22).FontWeight(700).TextColor(tk.Text).SingleLine()
-						uiTag(c, fmt.Sprintf("当前匹配 %d 条", len(w.filteredJobApps)), tagProps{
-							Variant: tagOutlined,
-							Size:    sizeSmall,
-							Round:   true,
+	ui.Column(c).Fill().MinWidth(0).MinHeight(0).Background(tk.BgLayout).Children(func() {
+		// Top Minimal View Tabs + Key Metric + Filter Bar (Apple Minimalist — zero subtitles/borders)
+		ui.Column(c).Padding(24, 48, 20, 48).Gap(20).AlignSelf(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Wrap().Children(func() {
+				// View Tabs (preserving exact labels: 全部投递 / 进行中 / 已获 Offer / 已结束)
+				ui.Row(c.Key("job-view-tabs")).Gap(24).AlignItems(ui.Center).Children(func() {
+					views := []struct {
+						page  NavPage
+						label string
+						count int
+					}{
+						{NavJobAll, "全部投递", w.jobStats.Total},
+						{NavJobActive, "进行中", w.jobStats.Active},
+						{NavJobOffer, "已获 Offer", w.jobStats.Offered},
+						{NavJobClosed, "已结束", w.jobStats.Closed},
+					}
+					for _, v := range views {
+						active := w.navPage == v.page
+						btn := ui.ButtonBase(c.Key("job-tab-"+string(v.page))).Padding(4, 0).Gap(6).
+							AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(v.label)
+						if active {
+							btn.TextColor(tk.Text).FontWeight(700)
+						} else if btn.Hovered() {
+							btn.TextColor(tk.Text).FontWeight(500)
+						} else {
+							btn.TextColor(tk.TextSecondary).FontWeight(500)
+						}
+						btn.Children(func() {
+							ui.Text(c, v.label).FontSize(14).SingleLine()
+							ui.Text(c, fmt.Sprint(v.count)).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 						})
-					})
-					ui.Text(c, jobViewSubtitle(w.navPage)).FontSize(13).TextColor(tk.TextSecondary).SingleLine()
+						if btn.Clicked() {
+							w.NavigateTo(v.page)
+						}
+					}
 				})
-				createBtn := uiButton(c, "新增投递", buttonProps{Variant: buttonPrimary})
-				createBtn.Label("新增投递")
-				if createBtn.Clicked() {
-					w.OpenJobCreateModal()
-				}
-			})
 
-			// Top Aggregate Stats Strip (counts all non-deleted records independently of active filters)
-			ui.Row(c).Gap(10).Wrap().AlignSelf(ui.Stretch).Children(func() {
-				renderJobStatPill(c, tk, "总投递", w.jobStats.Total)
-				renderJobStatPill(c, tk, "进行中", w.jobStats.Active)
-				renderJobStatPill(c, tk, "已获 Offer", w.jobStats.Offered)
+				ui.Row(c).Gap(16).AlignItems(ui.Center).Shrink(0).Children(func() {
+					if w.jobStats.Total > 0 {
+						pct := float64(w.jobStats.Offered) * 100 / float64(w.jobStats.Total)
+						ui.Text(c, fmt.Sprintf("%.1f%% Offer", pct)).Font("monospace").FontSize(14).FontWeight(600).TextColor(tk.Primary).SingleLine()
+					}
+					createBtn := uiButton(c, "新增投递", buttonProps{Variant: buttonPrimary})
+					createBtn.Label("新增投递")
+					if createBtn.Clicked() {
+						w.OpenJobCreateModal()
+					}
+				})
 			})
 
 			// Filter & Sort Bar
 			w.renderJobFilterBar(c, tk)
 		})
 
-		// Table Area / Empty State
-		ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Padding(16, 28, 16, 28).Gap(12).AlignSelf(ui.Stretch).Children(func() {
+		// Open Borderless Table Area / Empty State
+		ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Padding(0, 48, 24, 48).Gap(16).AlignSelf(ui.Stretch).Children(func() {
 			if len(w.filteredJobApps) == 0 {
 				w.renderJobEmptyState(c)
 				return
@@ -102,13 +123,6 @@ func (w *Workbench) renderJobApplicationsView(c *ui.Context, tk *uiTokens) {
 			w.renderJobTable(c, tk)
 			w.renderJobPaginationBar(c, tk)
 		})
-	})
-}
-
-func renderJobStatPill(c *ui.Context, tk *uiTokens, label string, count int) {
-	ui.Row(c).Padding(8, 14).Gap(10).Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgElevated).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, label).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
-		ui.Text(c, fmt.Sprint(count)).FontSize(16).FontWeight(700).TextColor(tk.Text).SingleLine()
 	})
 }
 
@@ -256,12 +270,12 @@ func (w *Workbench) renderJobEmptyState(c *ui.Context) {
 }
 
 const (
-	jobColCompanyWidth  float32 = 190
-	jobColPositionWidth float32 = 260
-	jobColStageWidth    float32 = 148
-	jobColStatusWidth   float32 = 116
-	jobColDateWidth     float32 = 110
-	jobColLinkWidth     float32 = 110
+	jobColCompanyWidth  float32 = 260
+	jobColPositionWidth float32 = 360
+	jobColStageWidth    float32 = 152
+	jobColStatusWidth   float32 = 124
+	jobColDateWidth     float32 = 124
+	jobColLinkWidth     float32 = 112
 )
 
 func jobStatusMenuItems(app model.JobApplication) []menuItem {
@@ -282,19 +296,19 @@ func jobStatusMenuItems(app model.JobApplication) []menuItem {
 func (w *Workbench) renderJobTable(c *ui.Context, tk *uiTokens) {
 	rows, _, _ := w.pagedJobApps()
 
-	// Priority columns (公司, 岗位, 阶段, 状态/结果) come first so narrow windows keep core progress immediately visible while secondary columns scroll horizontally.
+	// Open borderless table (zero outer border cage, flat hover rows)
 	tableContainer := ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).AlignSelf(ui.Stretch).
-		Radius(tk.BorderRadius).Border(1, tk.BorderSecondary).Background(tk.BgContainer).Clip()
+		Background(tk.BgLayout).Clip()
 
 	tableContainer.Children(func() {
 		uiScrollArea(c, scrollAreaProps{
 			Direction: scrollBoth,
 			State:     &w.jobTableScroll,
 		}, func() {
-			ui.Column(c).MinWidth(900).FillWidth().Children(func() {
-				// Table Header Row
-				ui.Row(c).Padding(10, 14).Gap(10).AlignItems(ui.Center).AlignSelf(ui.Stretch).
-					Background(tk.FillQuaternary).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
+			ui.Column(c).MinWidth(1240).FillWidth().Gap(4).Children(func() {
+				// Table Header Row (flat neutral bar, left-aligned typography)
+				ui.Row(c).Padding(12, 16).Gap(16).Radius(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).
+					Background(tk.FillTertiary).Children(func() {
 					tableHeaderCell(c, tk, "公司", jobColCompanyWidth)
 					tableHeaderCell(c, tk, "岗位", jobColPositionWidth)
 					tableHeaderCell(c, tk, "当前阶段", jobColStageWidth)
@@ -313,28 +327,31 @@ func (w *Workbench) renderJobTable(c *ui.Context, tk *uiTokens) {
 }
 
 func tableHeaderCell(c *ui.Context, tk *uiTokens, title string, width float32) {
-	ui.Row(c).Width(width).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(12).FontWeight(600).TextColor(tk.TextSecondary).SingleLine()
+	ui.Row(c).Width(width).Shrink(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, title).FontSize(14).FontWeight(500).TextColor(tk.TextSecondary).SingleLine()
 	})
 }
 
 func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.JobApplication, idx int) {
-	row := ui.Row(c.Key("job-row-"+app.ID)).Padding(10, 14).Gap(10).MinHeight(56).AlignSelf(ui.Stretch).
-		AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary)
-	if idx%2 == 1 {
-		row.Background(tk.FillQuaternary.Alpha(0.35))
+	row := ui.Row(c.Key("job-row-"+app.ID)).Padding(12, 16).Gap(16).MinHeight(60).Radius(16).AlignSelf(ui.Stretch).
+		AlignItems(ui.Center)
+	if row.Hovered() {
+		row.Background(tk.FillTertiary)
 	}
 	row.Children(func() {
-		// 1. Company (clickable to open detail modal)
+		// 1. Company (favicon / company-initial avatar + name + channel; clickable to open detail modal)
 		compBtn := ui.ButtonBase(c.Key("open-comp-" + app.ID)).Width(jobColCompanyWidth).Shrink(0).
-			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+			Justify(ui.Start).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("查看详情 " + app.CompanyName + " " + app.PositionName)
 		compBtn.Children(func() {
-			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
-				ui.Text(c, app.CompanyName).FontSize(13).FontWeight(600).TextColor(tk.Text).SingleLine()
-				if app.Channel != "" {
-					ui.Text(c, app.Channel).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
-				}
+			ui.Row(c).MinWidth(0).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
+				w.renderJobAvatar(c, tk, app, 32)
+				ui.Column(c).MinWidth(0).Grow(1).AlignItems(ui.Start).Gap(4).Children(func() {
+					ui.Text(c, app.CompanyName).FontSize(14).FontWeight(600).TextColor(tk.Text).SingleLine()
+					if app.Channel != "" {
+						ui.Text(c, app.Channel).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+					}
+				})
 			})
 		})
 		if compBtn.Clicked() {
@@ -343,13 +360,13 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 
 		// 2. Position + brief 1-line summary (closure reason / notes never expand row height)
 		posBtn := ui.ButtonBase(c.Key("open-pos-" + app.ID)).Width(jobColPositionWidth).Shrink(0).
-			Justify(ui.Center).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+			Justify(ui.Start).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 			Label("打开投递详情 " + app.PositionName)
 		posBtn.Children(func() {
-			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
-				ui.Text(c, app.PositionName).FontSize(13).TextColor(tk.Text).SingleLine()
+			ui.Column(c).MinWidth(0).FillWidth().AlignItems(ui.Start).Gap(4).Children(func() {
+				ui.Text(c, app.PositionName).FontSize(14).FontWeight(500).TextColor(tk.Text).SingleLine()
 				if summary := briefSingleLineSummary(app); summary != "" {
-					ui.Text(c, summary).FontSize(11).TextColor(tk.TextTertiary).SingleLine()
+					ui.Text(c, summary).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
 				}
 			})
 		})
@@ -388,7 +405,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 				case "__open_close_modal__":
 					w.OpenJobCloseModal(app.ID)
 				case "__reopen__":
-					w.ReopenJobApplication(app.ID)
+					w.OpenJobReopenModal(app.ID)
 				default:
 					w.ChangeJobStage(app.ID, model.JobStage(selectedStage))
 				}
@@ -396,7 +413,7 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 		})
 
 		// 4. Lifecycle / Outcome Tag with Quick Close / Reopen Menu
-		ui.Row(c).Width(jobColStatusWidth).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Width(jobColStatusWidth).Shrink(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
 			statusOpen := ui.Local(row, "statusMenuOpen", func() bool { return false })
 			chosen := uiDropdownMenu(c.Key("status-menu-"+app.ID), statusOpen, dropdownMenuProps{
 				Items: jobStatusMenuItems(app),
@@ -432,15 +449,15 @@ func (w *Workbench) renderJobTableRow(c *ui.Context, tk *uiTokens, app model.Job
 			case "close_modal":
 				w.OpenJobCloseModal(app.ID)
 			case "reopen":
-				w.ReopenJobApplication(app.ID)
+				w.OpenJobReopenModal(app.ID)
 			case "detail":
 				w.SelectJobApplication(app.ID)
 			}
 		})
 
 		// 5. Applied Date
-		ui.Row(c).Width(jobColDateWidth).Shrink(0).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, app.AppliedDate).FontSize(12).TextColor(tk.TextSecondary).SingleLine()
+		ui.Row(c).Width(jobColDateWidth).Shrink(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, app.AppliedDate).Font("monospace").FontSize(13).TextColor(tk.TextSecondary).SingleLine()
 		})
 
 		// 6. Application URL Copy / Open & Detail Trigger

@@ -55,103 +55,74 @@ func (w *Workbench) renderTrashView(c *ui.Context, tk *uiTokens) {
 	}
 	filtered := w.filterTrashItems()
 
-	ui.Column(c).Fill().Children(func() {
-		// Top Header Bar
-		ui.Row(c).Padding(20, 24, 16, 24).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).
-			AlignSelf(ui.Stretch).Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).DragWindow().Children(func() {
-			ui.Column(c).Gap(4).Grow(1).MinWidth(0).Children(func() {
-				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconTrash2()).FontSize(22).TextColor(tk.Error)
-					ui.Text(c, "回收站").FontSize(20).FontWeight(700).TextColor(tk.Text).SingleLine()
-					uiTag(c, fmt.Sprintf("%d 项", len(w.trashItems)), tagProps{
-						Size:    sizeSmall,
-						Variant: tagFilled,
-					})
+	ui.Scroll(c).Fill().Background(tk.BgLayout).Children(func() {
+		ui.Column(c).Padding(40, 64, 56, 64).Gap(28).MaxWidth(960).AlignSelf(ui.Stretch).Children(func() {
+			// Minimal Header
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Justify(ui.SpaceBetween).AlignSelf(ui.Stretch).Children(func() {
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "回收站").FontSize(18).FontWeight(700).TextColor(tk.Text).SingleLine()
+					ui.Text(c, fmt.Sprintf("共 %d 项", len(w.trashItems))).Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 				})
-				ui.Text(c, "已删除的项目、任务与投递记录可在此恢复或彻底清除。").
-					FontSize(13).TextColor(tk.TextSecondary).SingleLine()
-			})
 
-			if len(w.trashItems) > 0 {
-				if uiButton(c, "清空回收站", buttonProps{
-					Variant: buttonPrimary,
-					Danger:  true,
-				}).Disabled(w.IsBusy()).Clicked() {
-					w.confirmClearTrashOpen = true
+				if len(w.trashItems) > 0 {
+					if uiButton(c, "清空回收站", buttonProps{
+						Variant: buttonDefault,
+						Danger:  true,
+					}).Disabled(w.IsBusy()).Clicked() {
+						w.confirmClearTrashOpen = true
+					}
 				}
-			}
-		})
-
-		// Filter Bar
-		ui.Row(c).Padding(10, 24).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).
-			Background(tk.BgContainer).BorderWidth(0, 0, 1, 0).BorderColor(tk.BorderSecondary).Children(func() {
-			beforeSearch := w.trashSearch
-			beforeKind := w.trashKindFilter
-
-			ui.Box(c).Width(280).Children(func() {
-				uiSearchBar(c, &w.trashSearch, searchBarProps{
-					Placeholder: "搜索已删除的项目、任务或投递...",
-					Size:        sizeSmall,
-				}).Label("搜索回收站")
 			})
 
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "类型:").FontSize(12).TextColor(tk.TextSecondary)
-				ui.Box(c).Width(130).Children(func() {
+			// Minimal Filter Row
+			ui.Row(c).Gap(12).AlignItems(ui.Center).AlignSelf(ui.Stretch).Children(func() {
+				beforeSearch := w.trashSearch
+				beforeKind := w.trashKindFilter
+
+				ui.Box(c).Width(240).Children(func() {
+					uiSearchBar(c, &w.trashSearch, searchBarProps{
+						Placeholder: "搜索",
+						Size:        sizeSmall,
+					}).Label("搜索回收站")
+				})
+
+				ui.Box(c).Width(140).Children(func() {
 					uiSelect(c.Key("trash-kind-filter"), &w.trashKindFilter, selectProps{
 						Size:    sizeSmall,
 						Options: trashKindOptions,
 					}).Label("回收站类型筛选")
 				})
-			})
 
-			if w.trashSearch != beforeSearch || w.trashKindFilter != beforeKind {
-				filtered = w.filterTrashItems()
-			}
+				if w.trashSearch != beforeSearch || w.trashKindFilter != beforeKind {
+					filtered = w.filterTrashItems()
+				}
 
-			ui.Box(c).Grow(1)
-
-			hasTrashFilter := strings.TrimSpace(w.trashSearch) != "" || w.trashKindFilter != ""
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-				if hasTrashFilter {
+				if strings.TrimSpace(w.trashSearch) != "" || w.trashKindFilter != "" {
 					ui.Text(c, fmt.Sprintf("匹配 %d / %d 项", len(filtered), len(w.trashItems))).
-						FontSize(12).TextColor(tk.Primary).SingleLine()
+						Font("monospace").FontSize(14).TextColor(tk.TextSecondary).SingleLine()
 					if uiButton(c, "清除筛选", buttonProps{
-						Variant: buttonDefault,
+						Variant: buttonText,
 						Size:    sizeSmall,
 					}).Clicked() {
 						w.trashSearch = ""
 						w.trashKindFilter = ""
 						filtered = w.trashItems
 					}
-				} else {
-					ui.Text(c, fmt.Sprintf("共 %d 项", len(w.trashItems))).
-						FontSize(12).TextColor(tk.TextTertiary).SingleLine()
 				}
 			})
-		})
 
-		// Body Content
-		ui.Scroll(c).Grow(1).Basis(0).AlignSelf(ui.Stretch).Children(func() {
-			ui.Column(c).Padding(24).Gap(12).AlignSelf(ui.Stretch).Children(func() {
-				if len(filtered) == 0 {
-					ui.Box(c).Padding(48, 24).Radius(tk.BorderRadiusLG).Background(tk.BgContainer).
-						Border(1, tk.BorderSecondary).AlignSelf(ui.Stretch).Children(func() {
-						emptyTitle := "回收站为空"
-						emptyDesc := "当前没有任何已删除的项目、任务或投递记录。"
-						if len(w.trashItems) > 0 {
-							emptyTitle = "没有匹配的回收站条目"
-							emptyDesc = "请尝试调整搜索词或切换类型筛选条件。"
-						}
-						uiEmpty(c, emptyProps{
-							Icon:        iconTrash2(),
-							Title:       emptyTitle,
-							Description: emptyDesc,
-						})
-					})
-					return
+			if len(filtered) == 0 {
+				emptyTitle := "回收站为空"
+				if len(w.trashItems) > 0 {
+					emptyTitle = "没有匹配的条目"
 				}
+				ui.Column(c).Padding(48, 0).AlignItems(ui.Start).Children(func() {
+					ui.Text(c, emptyTitle).FontSize(16).TextColor(tk.TextSecondary)
+				})
+				return
+			}
 
+			ui.Column(c).Gap(8).AlignSelf(ui.Stretch).Children(func() {
 				for _, item := range filtered {
 					it := item
 					_, parentInTrash := deletedProjects[it.ProjectID]
