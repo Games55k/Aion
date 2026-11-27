@@ -10,6 +10,7 @@ Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS / Windows 
 |---|---|
 | `go run .` | 在本地启动 Aion 原生桌面端 |
 | `go run . -data-dir /tmp/aion-dev` | 使用独立测试数据目录启动（不影响正式数据） |
+| `go run ./cmd/promo` | 基于 MyGo Render 插件在 GPU 上渲染 1080p 60fps 项目介绍视频（`aion-promo.mp4`，支持 `-preview` 窗口预览与 `-stills` 关键帧导出） |
 | `go run . mcp [-data-dir <路径>]` | 启动本地 stdio MCP Server（桌面端在线时经本地 Socket 实时联动，离线时按次直连） |
 | `go run . summary [-json]` | 通过本地 CLI 查看工作区总览（还支持 `project` / `task` / `job` / `trash` 子命令，可用 `go run . help` 查看） |
 | `go tool mygo dev` | 开发模式运行 |
@@ -88,6 +89,7 @@ Aion/
 ├── ipc/                                    # 本地 Unix Socket IPC 服务端、按次降级路由、局部更新处理与安全路径校验
 ├── mcp/                                    # 标准 stdio JSON-RPC 2.0 MCP Server 与仅含安全读写/软删的工具集定义
 ├── cli/                                    # 复用本地 IPC 路由的轻量 CLI（summary / project / task / job / trash）
+├── cmd/promo/                              # 基于 MyGo Render 插件的 1080p 60fps 项目介绍视频生成器（含实时截屏、8 幕动效与立体声合成配乐）
 ├── skills/aion-workbench/SKILL.md          # 面向 Antigravity / Codex 的 Aion 工作流 Skill（可链接到对应 skills 目录）
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
