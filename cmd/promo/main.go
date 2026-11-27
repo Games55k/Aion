@@ -30,7 +30,7 @@ const (
 	videoHeight = 1080
 	videoFPS    = 60
 	videoScale  = 2 // 960×540 logical DIPs (Retina 2x)
-	totalFrames = 36 * videoFPS
+	totalFrames = 60 * videoFPS
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("capture demo assets: %v", err)
 	}
-	fmt.Printf("Captured %d Retina UI screens in %v\n", 8, time.Since(start).Round(time.Millisecond))
+	fmt.Printf("Captured 8 Retina UI screens in %v\n", time.Since(start).Round(time.Millisecond))
 
 	sounds := buildSoundBank()
 	comp := buildComposition(assets, sounds)
@@ -75,7 +75,7 @@ func main() {
 		Bitrate:      *bitrate,
 		AudioBitrate: 256_000,
 		Progress: func(p render.Progress) {
-			if p.Done%30 == 0 || p.Done == p.Frames {
+			if p.Done%60 == 0 || p.Done == p.Frames {
 				fpsRate := float64(p.Done) / max(p.Elapsed.Seconds(), 0.001)
 				fmt.Printf("\r[%s] %d/%d frames (%.1f%%) · %.0f fps", p.Renderer, p.Done, p.Frames, 100*float64(p.Done)/float64(p.Frames), fpsRate)
 			}
@@ -116,17 +116,17 @@ func exportActStills(comp render.Composition, dir string, opts render.Options) e
 		name  string
 		frame int
 	}{
-		{"01_brand_opening", 130},
-		{"02_today_focus", 360},
-		{"03a_kanban_board", 580},
-		{"03b_task_detail_drawer", 740},
-		{"04a_jobs_tracker", 910},
-		{"04b_job_timeline_modal", 1060},
-		{"05a_light_dark_sweep", 1210},
-		{"05b_command_palette", 1360},
-		{"06_mcp_cli_sync", 1600},
-		{"07_bento_architecture", 1840},
-		{"08_finale_outro", 2040},
+		{"01_brand_opening", 160},
+		{"02_today_focus", 520},
+		{"03a_kanban_board", 900},
+		{"03b_task_detail_drawer", 1220},
+		{"04a_jobs_tracker", 1560},
+		{"04b_job_timeline_modal", 1860},
+		{"05a_light_dark_sweep", 2145},
+		{"05b_command_palette", 2440},
+		{"06_mcp_cli_sync", 2900},
+		{"07_apple_pillars", 3220},
+		{"08_finale_outro", 3460},
 	}
 	for _, kf := range keyframes {
 		img, err := render.Still(comp, kf.frame, opts)
@@ -163,7 +163,7 @@ func previewWindow(comp render.Composition) {
 			Width:  1120,
 			Height: 680,
 			Content: ui.View(func(c *ui.Context) {
-				ui.Column(c).Fill().Padding(16).Gap(12).Background(ui.Hex("#0D0F0E")).Children(func() {
+				ui.Column(c).Fill().Padding(16).Gap(12).Background(ui.Hex("#000000")).Children(func() {
 					ui.Video(c, player).Grow(1).FillWidth().Radius(12)
 					ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 						label := "暂停"
@@ -182,7 +182,7 @@ func previewWindow(comp render.Composition) {
 							player.Seek(time.Duration(at * float64(time.Second)))
 						}
 						ui.Text(c, fmt.Sprintf("%.1fs / %.0fs", at, player.Duration().Seconds())).
-							TextColor(ui.Hex("#9CA3AF")).Width(96)
+							TextColor(ui.Hex("#86868B")).Width(96)
 					})
 				})
 			}),

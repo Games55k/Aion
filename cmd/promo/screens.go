@@ -336,7 +336,7 @@ func captureDemoAssets() (*demoAssets, error) {
 
 	// 7. Settings View (Backup + Local MCP Config, Dark)
 	wb.NavigateTo(frontend.NavSettings)
-	if out.SettingsDark, err = renderScreen(980, 910, true, 2); err != nil {
+	if out.SettingsDark, err = renderScreen(960, 946, true, 2); err != nil {
 		return nil, fmt.Errorf("render settings dark: %w", err)
 	}
 
