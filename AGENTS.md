@@ -37,6 +37,14 @@ Keep documentation in sync with code changes. Keep `README.md` concise (overview
 
 Release uploads require a successful lookup confirming an absent tag release or an existing draft. A failed lookup must stop the workflow.
 
+## Review
+
+Follow `REVIEW.md` as the review contract (risk tiers, Aion failure modes, anti-noise rules, and output format).
+
+- For Medium- and High-risk changes committed directly to `main` (or opened as a PR), run a fresh-context diff review against `REVIEW.md` before committing/pushing, plus a focused security pass for High-risk paths (`backend/store/`, `backend/backup/`, `backend/attachments/`, `updater_controller.go`, `mygo.json`, `ipc/`, `mcp/`, `.github/workflows/`).
+- Limit automated review loops to 3 rounds; after round 1, review only the new incremental diff and stop to re-evaluate the approach if blocking issues still do not converge.
+- When a real bug escapes review, add a deterministic regression test and, if it represents a recurring failure mode, add a concise rule to `REVIEW.md`.
+
 ## Commits
 
 Automatically commit your changes after completing each modification once documentation is synced and required tests and checks pass.

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-push safety gate for direct-to-main workflow:
+# runs tests before code changes reach origin.
+if git rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
+  changed_files="$(git -c core.quotePath=false diff --name-only '@{upstream}..HEAD')"
+  if ! grep -Eq '(\.go$|^go\.mod$|^go\.sum$|^mygo\.json$)' <<<"$changed_files"; then
+    exit 0
+  fi
+fi
+
+go test ./...

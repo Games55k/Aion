@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-macos:
+    name: macOS Format, Vet & Race Tests
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::Unformatted Go files detected. Run 'gofmt -w .' locally:"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Run static checks
+        run: |
+          go vet ./...
+          go tool mygo vet .
+
+      - name: Run full test suite
+        run: go test ./...
+
+      - name: Run race detector on backend, IPC, MCP, CLI, and updater packages
+        run: go test -race . ./backend/... ./cli/... ./ipc/... ./mcp/...
+
+  check-windows:
+    name: Windows Build, Vet & Core Tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run Windows build, static checks, and core tests
+        run: |
+          go build ./...
+          go vet ./...
+          go tool mygo vet .
+          go test ./backend/model ./backend/projects ./backend/jobapplications ./cli ./mcp

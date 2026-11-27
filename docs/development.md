@@ -20,6 +20,16 @@ Aion 使用 [MyGo](https://github.com/egoist/mygo) 直接构建 macOS / Windows 
 | `go test -race ./...` | 运行竞态检测测试 |
 | `go vet ./...` | Go 静态分析检查 |
 | `go tool mygo vet .` | MyGo 布局与状态规则静态检查 |
+| `git config core.hooksPath .githooks` | 启用仓库自带的本地 Git Hooks（提交前检查 `gofmt`/`go vet`/`mygo vet`，推送前运行 `go test ./...`） |
+
+### 本地代码审查与 CI 防线
+
+日常直接向 `main` 提交（或提交 PR）时，可按以下多层检查把关：
+
+1. **本地 Git Hooks（`.githooks/`）**：执行一次 `git config core.hooksPath .githooks` 启用；`.githooks/pre-commit` 在暂存 `.go` 文件时自动检查 `gofmt`、`go vet ./...` 与 `go tool mygo vet .`（纯文档改动直接跳过），`.githooks/pre-push` 在推送含代码变更的提交前运行 `go test ./...`。
+2. **变更前 AI 审查契约（`REVIEW.md`）**：明确了 Aion 的高/中/低风险路径分级、真实故障红线、反噪音原则与最多 3 轮的收敛上限；改动中高风险目录时，在提交前使用独立上下文对照 `REVIEW.md` 审查 `git diff`（高风险目录补充安全审查）。
+3. **持续集成（`.github/workflows/ci.yml`）**：每次推送到 `main` 或发起 PR 时，自动在 `macos-latest` 运行 `gofmt` 校验、`go vet`、`mygo vet`、全量 `go test ./...` 与核心并发包（`.`、`./backend/...`、`./cli/...`、`./ipc/...`、`./mcp/...`）的 `go test -race`，并在 `windows-latest` 验证全量构建、静态检查与核心测试。
+4. **PR 模板与代码所有者**：`.github/PULL_REQUEST_TEMPLATE.md` 要求说明风险级别、验证项与回滚方式，`.github/CODEOWNERS` 标记高风险目录责任人。
 
 ### 测试时钟与时间戳约定
 
@@ -93,8 +103,13 @@ Aion/
 ├── skills/aion-workbench/SKILL.md          # 面向 Antigravity / Codex 的 Aion 工作流 Skill（可链接到对应 skills 目录）
 ├── mygo.json                               # MyGo 应用配置、打包元数据与更新源配置
 ├── CHANGELOG.md                            # 版本更新说明（发版说明与客户端更新窗口共用）
+├── REVIEW.md                               # 面向 AI/人工的审查契约（风险分级、Aion 故障红线、反噪音与收敛规则）
+├── .githooks/                              # 可选本地 Git Hooks（pre-commit 格式化与静态检查、pre-push 测试门禁）
 ├── docs/                                   # 详细文档（交互行为、数据与备份、开发发布）
 ├── .github/
+│   ├── CODEOWNERS                          # 高风险目录与策略文件责任人配置
+│   ├── PULL_REQUEST_TEMPLATE.md            # PR 模板（变更摘要、风险分级、测试清单与回滚说明）
+│   ├── workflows/ci.yml                    # push main 与 PR 触发的 macOS/Windows 持续集成工作流
 │   ├── workflows/release.yml               # 标签触发的 macOS Universal（.dmg）与 Windows amd64（.exe 安装包）构建及草稿 Release 工作流
 │   └── ISSUE_TEMPLATE/                     # GitHub Issue 表单模板与空白 Issue 禁用配置
 ├── frontend/                               # 原生界面层：工作台状态、顶部悬浮胶囊导航、项目看板、求职投递、回收站、设置与附件预览

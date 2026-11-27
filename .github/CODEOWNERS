@@ -1,0 +1,14 @@
+# Default owner
+* @Games55k
+
+# High-risk paths: data integrity, backups, attachments, updater, IPC/MCP, release & review policy
+/backend/store/ @Games55k
+/backend/backup/ @Games55k
+/backend/attachments/ @Games55k
+/updater_controller.go @Games55k
+/mygo.json @Games55k
+/ipc/ @Games55k
+/mcp/ @Games55k
+/.github/workflows/ @Games55k
+/REVIEW.md @Games55k
+/AGENTS.md @Games55k
